@@ -1,6 +1,15 @@
 const { validationResult } = require('express-validator');
 const path = require('path');
 const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
+});
+
 const Material = require('../models/Material');
 const Category = require('../models/Category');
 const { getFileInfo, deleteFile, getFileMetadata } = require('../utils/fileUpload');
@@ -110,6 +119,24 @@ const getMaterial = async (req, res, next) => {
 // @desc    Upload new material
 // @route   POST /api/materials
 // @access  Private
+// Example for mobile (React Native) FormData upload:
+// const data = new FormData();
+// // Option A: upload a file (PDF, docx, etc.)
+// data.append('file', {
+//   uri: fileUri,
+//   name: 'mydoc.pdf',
+//   type: 'application/pdf'
+// });
+// // Option B: for a remote video - send the remote URL instead of uploading a file:
+// data.append('videoUrl', 'https://videos.example.com/path/to/video.mp4');
+// data.append('title', 'Intro to Product Strategy');
+// data.append('category', '60f7c5e1abcd1234abcd1234');
+// data.append('materialType', 'video'); // use "video" and supply videoUrl
+// fetch('https://your-api.example.com/api/materials', {
+//   method: 'POST',
+//   headers: { 'Authorization': 'Bearer <JWT_TOKEN>' },
+//   body: data
+// });
 const uploadMaterial = async (req, res, next) => {
   try {
     // Check validation errors
@@ -124,13 +151,6 @@ const uploadMaterial = async (req, res, next) => {
         success: false,
         message: 'Validation errors',
         errors: errors.array()
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded'
       });
     }
 
@@ -149,35 +169,85 @@ const uploadMaterial = async (req, res, next) => {
       duration,
       visibility = 'public',
       allowedRoles,
-      priority = 0
+      priority = 0,
+      videoUrl // new optional field for remote videos
     } = req.body;
+
+    // If materialType is video and no file AND no videoUrl provided => error
+    if (materialType === 'video' && !req.file && !videoUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Video materials require either an uploaded file or a videoUrl'
+      });
+    }
+
+    // If both uploaded file and videoUrl are present, prefer videoUrl and remove temp file
+    if (materialType === 'video' && videoUrl && req.file) {
+      // remove uploaded temp file
+      deleteFile(req.file.path);
+      req.file = undefined;
+    }
+
+    // If still no file and materialType is not video -> require file
+    if (!req.file && materialType !== 'video') {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
 
     // Validate category exists
     const categoryDoc = await Category.findById(category);
     if (!categoryDoc || !categoryDoc.isActive) {
-      deleteFile(req.file.path);
+      if (req.file) deleteFile(req.file.path);
       return res.status(400).json({
         success: false,
         message: 'Category not found'
       });
     }
 
-    // Get file information
-    const fileInfo = getFileInfo(req.file);
-    
-    // Get additional file metadata
-    const metadata = await getFileMetadata(req.file.path, fileInfo.fileType);
+    let fileInfo = {};
+    let uploadResult = null;
+
+    if (req.file) {
+      // Get file information (local/multer metadata)
+      fileInfo = getFileInfo(req.file);
+      
+      // Optionally get additional metadata (e.g. PDF pages)
+      const metadata = await getFileMetadata(req.file.path, fileInfo.fileType);
+
+      // Upload file to Cloudinary (resource_type 'auto')
+      try {
+        uploadResult = await cloudinary.uploader.upload(req.file.path, {
+          resource_type: 'auto',
+          folder: 'materials',
+          use_filename: true,
+          unique_filename: false,
+          overwrite: false
+        });
+      } catch (uploadErr) {
+        // Remove local temp file before returning
+        if (req.file) deleteFile(req.file.path);
+        console.error('Cloudinary upload error:', uploadErr);
+        return res.status(500).json({
+          success: false,
+          message: 'File upload to Cloudinary failed'
+        });
+      }
+
+      // Delete local temp file after successful upload
+      if (req.file) deleteFile(req.file.path);
+    }
 
     // Parse arrays from strings
     const parsedTags = tags ? (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags) : [];
     const parsedKeywords = keywords ? (typeof keywords === 'string' ? keywords.split(',').map(k => k.trim()) : keywords) : [];
     const parsedAllowedRoles = allowedRoles ? (typeof allowedRoles === 'string' ? allowedRoles.split(',').map(r => r.trim()) : allowedRoles) : [];
 
-    // Create material
-    const material = await Material.create({
+    // Build create payload
+    const createPayload = {
       title,
       description,
-      ...fileInfo,
       category,
       relatedPortfolio,
       relatedManagerRole,
@@ -192,7 +262,35 @@ const uploadMaterial = async (req, res, next) => {
       allowedRoles: parsedAllowedRoles,
       priority: parseInt(priority) || 0,
       createdBy: req.user.id
-    });
+    };
+
+    if (materialType === 'video' && videoUrl) {
+      // Use remote video URL instead of uploaded file
+      createPayload.fileUrl = videoUrl;
+      createPayload.fileName = null;
+      createPayload.originalFileName = null;
+      createPayload.mimeType = 'video/*';
+      createPayload.fileSize = undefined;
+      createPayload.cloudinaryId = null;
+      createPayload.cloudinaryResourceType = 'video';
+      // include any fileInfo fallback if available
+      Object.assign(createPayload, fileInfo);
+    } else if (uploadResult) {
+      // File uploaded to Cloudinary
+      Object.assign(createPayload, {
+        fileUrl: uploadResult.secure_url,
+        fileName: uploadResult.public_id,
+        originalFileName: req.file ? req.file.originalname : uploadResult.original_filename,
+        mimeType: req.file ? req.file.mimetype : undefined,
+        fileSize: uploadResult.bytes || (req.file ? req.file.size : undefined),
+        cloudinaryId: uploadResult.public_id,
+        cloudinaryResourceType: uploadResult.resource_type,
+        ...fileInfo
+      });
+    }
+
+    // Create material - save info
+    const material = await Material.create(createPayload);
 
     // Update category material count
     await categoryDoc.updateMaterialCount();
@@ -207,7 +305,7 @@ const uploadMaterial = async (req, res, next) => {
       data: populatedMaterial
     });
   } catch (error) {
-    // Delete uploaded file if error occurs
+    // Delete uploaded temp file if error occurs
     if (req.file) {
       deleteFile(req.file.path);
     }
@@ -395,9 +493,12 @@ const downloadMaterial = async (req, res, next) => {
   try {
     const { filename } = req.params;
     
-    // Find material by filename for access control
+    // Find material by filename (either public_id or original filename)
     const material = await Material.findOne({ 
-      fileName: filename,
+      $or: [
+        { fileName: filename },
+        { originalFileName: filename }
+      ],
       isActive: true,
       status: 'active'
     });
@@ -412,6 +513,14 @@ const downloadMaterial = async (req, res, next) => {
     // Check access permissions
     // TODO: Add role-based access control here
 
+    // If the file is stored on Cloudinary, redirect to the secure URL
+    if (material.fileUrl) {
+      // Track download
+      await material.trackAccess('download');
+      return res.redirect(material.fileUrl);
+    }
+
+    // Fallback to local storage path (legacy)
     const filePath = path.join(__dirname, '../uploads/materials', filename);
     
     if (!fs.existsSync(filePath)) {

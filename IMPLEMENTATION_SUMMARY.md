@@ -210,7 +210,6 @@ curl -X POST \
   -d '{
     "name": "Custom Training",
     "description": "Custom training materials for staff",
-    "icon": "graduation-cap",
     "color": "#ff6b6b"
   }' \
   http://localhost:5000/api/categories

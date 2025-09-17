@@ -20,29 +20,23 @@ const MaterialSchema = new mongoose.Schema({
   
   // File Information
   fileName: {
-    type: String,
-    required: [true, 'File name is required']
+    type: String
   },
   originalFileName: {
-    type: String,
-    required: [true, 'Original file name is required']
+    type: String
   },
   fileSize: {
-    type: Number,
-    required: [true, 'File size is required']
+    type: Number
   },
   fileType: {
     type: String,
-    required: [true, 'File type is required'],
     enum: ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'mp3', 'mp4', 'wav', 'avi', 'mov', 'jpg', 'jpeg', 'png', 'gif', 'txt', 'zip', 'rar']
   },
   mimeType: {
-    type: String,
-    required: [true, 'MIME type is required']
+    type: String
   },
   filePath: {
-    type: String,
-    required: [true, 'File path is required']
+    type: String
   },
   fileUrl: {
     type: String // Public URL if using cloud storage
@@ -72,7 +66,7 @@ const MaterialSchema = new mongoose.Schema({
   // Material Type
   materialType: {
     type: String,
-    enum: ['guide', 'case_study', 'how_to', 'template', 'checklist', 'presentation', 'video_tutorial', 'audio_note', 'document', 'image', 'other'],
+    enum: ['guide', 'case_study', 'how_to', 'template', 'checklist', 'presentation', 'video_tutorial', 'video', 'audio_note', 'document', 'image', 'other'],
     required: [true, 'Please specify material type']
   },
   
