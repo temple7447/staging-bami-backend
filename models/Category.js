@@ -25,7 +25,15 @@ const CategorySchema = new mongoose.Schema({
   },
   level: {
     type: Number,
-    default: 0 // 0 for root categories, 1 for sub-categories, etc.
+    default: 0, // 0 for root categories, 1 for sub-categories, 2 for sub-sub-categories (max)
+    min: 0,
+    max: 2, // Maximum 3 levels: 0, 1, 2
+    validate: {
+      validator: function(v) {
+        return v >= 0 && v <= 2;
+      },
+      message: 'Category hierarchy cannot exceed 3 levels (parent → child → grandchild)'
+    }
   },
   icon: {
     type: String,
@@ -66,6 +74,24 @@ const CategorySchema = new mongoose.Schema({
 CategorySchema.pre('save', function(next) {
   if (this.isModified('name')) {
     this.slug = this.name.toLowerCase().replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  }
+  next();
+});
+
+// Validate hierarchy depth before saving
+CategorySchema.pre('save', async function(next) {
+  if (this.parentCategory && this.isModified('parentCategory')) {
+    const parent = await this.constructor.findById(this.parentCategory);
+    if (parent) {
+      if (parent.level >= 2) {
+        const error = new Error('Cannot create category: Maximum hierarchy depth of 3 levels exceeded (parent → child → grandchild)');
+        error.name = 'ValidationError';
+        return next(error);
+      }
+      this.level = parent.level + 1;
+    }
+  } else if (!this.parentCategory) {
+    this.level = 0;
   }
   next();
 });

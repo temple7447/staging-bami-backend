@@ -209,6 +209,215 @@ const validateReview = [
     .withMessage('Comment cannot be more than 500 characters')
 ];
 
+// Folder validation rules
+const validateFolderCreation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&-_().]+$/)
+    .withMessage('Folder name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, and parentheses'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .optional()
+    .isMongoId()
+    .withMessage('Parent folder must be a valid MongoDB ID'),
+  
+  body('icon')
+    .optional()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid folder icon'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+  
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+  
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+  
+  body('allowedRoles.*')
+    .optional()
+    .isIn(['operations', 'marketing', 'sales', 'delivery', 'finance', 'fundraising', 'legal', 'automation', 'hr', 'leadership'])
+    .withMessage('Invalid role in allowed roles'),
+  
+  body('allowMaterials')
+    .optional()
+    .isBoolean()
+    .withMessage('Allow materials must be a boolean'),
+  
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('Is protected must be a boolean')
+];
+
+const validateFolderUpdate = [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&-_().]+$/)
+    .withMessage('Folder name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, and parentheses'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .optional()
+    .custom((value) => {
+      if (value === null || value === '') return true;
+      return /^[0-9a-fA-F]{24}$/.test(value);
+    })
+    .withMessage('Parent folder must be a valid MongoDB ID or null'),
+  
+  body('icon')
+    .optional()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid folder icon'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+  
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+  
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+  
+  body('allowedRoles.*')
+    .optional()
+    .isIn(['operations', 'marketing', 'sales', 'delivery', 'finance', 'fundraising', 'legal', 'automation', 'hr', 'leadership'])
+    .withMessage('Invalid role in allowed roles'),
+  
+  body('allowMaterials')
+    .optional()
+    .isBoolean()
+    .withMessage('Allow materials must be a boolean'),
+  
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('Is protected must be a boolean')
+];
+
+// Update material validation to support folders
+const validateMaterialUploadWithFolder = [
+  check('title')
+    .notEmpty().withMessage('Title is required')
+    .isLength({ max: 200 }).withMessage('Title cannot be more than 200 characters'),
+  
+  // Support both folder and category (folder takes precedence)
+  check('folder')
+    .optional()
+    .isMongoId().withMessage('Invalid folder id'),
+  
+  check('category')
+    .optional()
+    .isMongoId().withMessage('Invalid category id'),
+  
+  // Require either folder or category
+  check('folder').custom((value, { req }) => {
+    if (!value && !req.body.category) {
+      throw new Error('Either folder or category is required');
+    }
+    return true;
+  }),
+  
+  check('materialType')
+    .notEmpty().withMessage('Material type is required')
+    .isIn(materialTypeAllowed).withMessage(`Material type must be one of: ${materialTypeAllowed.join(', ')}`),
+  
+  body('videoUrl')
+    .optional()
+    .isURL().withMessage('videoUrl must be a valid URL'),
+  
+  // Custom rule for video materials
+  check('materialType').custom((value, { req }) => {
+    if (value === 'video') {
+      if (!req.file && !req.body.videoUrl) {
+        throw new Error('Video materials require either an uploaded file (form field "file") or a "videoUrl"');
+      }
+    }
+    return true;
+  })
+];
+
+const validateMaterialUpdateWithFolder = [
+  check('title')
+    .optional()
+    .isLength({ max: 200 }).withMessage('Title cannot be more than 200 characters'),
+  
+  check('folder')
+    .optional()
+    .isMongoId().withMessage('Invalid folder id'),
+  
+  check('category')
+    .optional()
+    .isMongoId().withMessage('Invalid category id'),
+  
+  check('materialType')
+    .optional()
+    .isIn(materialTypeAllowed).withMessage(`Material type must be one of: ${materialTypeAllowed.join(', ')}`),
+  
+  body('videoUrl')
+    .optional()
+    .isURL().withMessage('videoUrl must be a valid URL'),
+  
+  check('materialType').optional().custom((value, { req }) => {
+    if (value === 'video') {
+      if (!req.file && !req.body.videoUrl) {
+        throw new Error('When changing materialType to "video", provide a "videoUrl" or upload a file');
+      }
+    }
+    return true;
+  })
+];
+
+// Folder move validation
+const validateFolderMove = [
+  body('targetParentId')
+    .optional()
+    .custom((value) => {
+      if (value === null || value === '') return true;
+      return /^[0-9a-fA-F]{24}$/.test(value);
+    })
+    .withMessage('Target parent ID must be a valid MongoDB ID or null')
+];
+
 // MongoDB ObjectId validation
 const validateObjectId = [
   param('id')
@@ -222,6 +431,11 @@ module.exports = {
   validateCategoryUpdate,
   validateMaterialUpload,
   validateMaterialUpdate,
+  validateMaterialUploadWithFolder,
+  validateMaterialUpdateWithFolder,
+  validateFolderCreation,
+  validateFolderUpdate,
+  validateFolderMove,
   validateNote,
   validateHighlight,
   validateReview,

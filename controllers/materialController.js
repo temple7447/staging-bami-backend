@@ -12,6 +12,7 @@ cloudinary.config({
 
 const Material = require('../models/Material');
 const Category = require('../models/Category');
+const Folder = require('../models/Folder');
 const { getFileInfo, deleteFile, getFileMetadata } = require('../utils/fileUpload');
 
 // @desc    Get all materials with search and filtering
@@ -21,7 +22,8 @@ const getMaterials = async (req, res, next) => {
   try {
     const {
       search,
-      category,
+      folder, // New folder parameter
+      category, // Backward compatibility
       materialType,
       relatedPortfolio,
       relatedManagerRole,
@@ -37,7 +39,8 @@ const getMaterials = async (req, res, next) => {
 
     const query = {
       search,
-      category,
+      folder, // Priority over category
+      category: folder ? undefined : category, // Use category only if no folder specified
       materialType,
       relatedPortfolio,
       relatedManagerRole,
@@ -73,7 +76,8 @@ const getMaterials = async (req, res, next) => {
 const getMaterial = async (req, res, next) => {
   try {
     const material = await Material.findById(req.params.id)
-      .populate('category', 'name slug icon color')
+      .populate('folder', 'name slug fullPath level icon color')
+      .populate('category', 'name slug icon color') // Backward compatibility
       .populate('createdBy', 'name email')
       .populate('updatedBy', 'name email')
       .populate('notes.user', 'name email')
@@ -157,7 +161,8 @@ const uploadMaterial = async (req, res, next) => {
     const {
       title,
       description,
-      category,
+      folder, // New folder field (priority)
+      category, // Backward compatibility
       relatedPortfolio,
       relatedManagerRole,
       materialType,
@@ -196,13 +201,50 @@ const uploadMaterial = async (req, res, next) => {
       });
     }
 
-    // Validate category exists
-    const categoryDoc = await Category.findById(category);
-    if (!categoryDoc || !categoryDoc.isActive) {
+    // Validate folder or category exists
+    let folderDoc, categoryDoc;
+    
+    if (folder) {
+      folderDoc = await Folder.findById(folder);
+      if (!folderDoc || !folderDoc.isActive) {
+        if (req.file) deleteFile(req.file.path);
+        return res.status(400).json({
+          success: false,
+          message: 'Folder not found'
+        });
+      }
+      
+      // Materials can only be placed in grandchild folders (level 2)
+      if (folderDoc.level !== 2) {
+        if (req.file) deleteFile(req.file.path);
+        return res.status(400).json({
+          success: false,
+          message: 'Materials can only be placed in the deepest level folders (grandchild folders)'
+        });
+      }
+      
+      if (!folderDoc.allowMaterials) {
+        if (req.file) deleteFile(req.file.path);
+        return res.status(400).json({
+          success: false,
+          message: 'This folder does not allow materials'
+        });
+      }
+    } else if (category) {
+      // Backward compatibility for category
+      categoryDoc = await Category.findById(category);
+      if (!categoryDoc || !categoryDoc.isActive) {
+        if (req.file) deleteFile(req.file.path);
+        return res.status(400).json({
+          success: false,
+          message: 'Category not found'
+        });
+      }
+    } else {
       if (req.file) deleteFile(req.file.path);
       return res.status(400).json({
         success: false,
-        message: 'Category not found'
+        message: 'Either folder or category is required'
       });
     }
 
@@ -248,7 +290,6 @@ const uploadMaterial = async (req, res, next) => {
     const createPayload = {
       title,
       description,
-      category,
       relatedPortfolio,
       relatedManagerRole,
       materialType,
@@ -263,6 +304,13 @@ const uploadMaterial = async (req, res, next) => {
       priority: parseInt(priority) || 0,
       createdBy: req.user.id
     };
+    
+    // Add folder or category (folder takes precedence)
+    if (folder) {
+      createPayload.folder = folder;
+    } else if (category) {
+      createPayload.category = category;
+    }
 
     if (materialType === 'video' && videoUrl) {
       // Use remote video URL instead of uploaded file
@@ -292,11 +340,16 @@ const uploadMaterial = async (req, res, next) => {
     // Create material - save info
     const material = await Material.create(createPayload);
 
-    // Update category material count
-    await categoryDoc.updateMaterialCount();
+    // Update folder or category material count
+    if (folderDoc) {
+      await folderDoc.updateStats();
+    } else if (categoryDoc) {
+      await categoryDoc.updateMaterialCount();
+    }
 
     const populatedMaterial = await Material.findById(material._id)
-      .populate('category', 'name slug icon color')
+      .populate('folder', 'name slug fullPath level icon color')
+      .populate('category', 'name slug icon color') // Backward compatibility
       .populate('createdBy', 'name email');
 
     res.status(201).json({
@@ -345,6 +398,7 @@ const updateMaterial = async (req, res, next) => {
     const {
       title,
       description,
+      folder,
       category,
       relatedPortfolio,
       relatedManagerRole,
@@ -361,8 +415,26 @@ const updateMaterial = async (req, res, next) => {
       status
     } = req.body;
 
-    // Validate category if provided
-    if (category && category !== material.category.toString()) {
+    // Validate folder if provided
+    if (folder && folder !== (material.folder ? material.folder.toString() : null)) {
+      const folderDoc = await Folder.findById(folder);
+      if (!folderDoc || !folderDoc.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: 'Folder not found'
+        });
+      }
+      
+      if (folderDoc.level !== 2 || !folderDoc.allowMaterials) {
+        return res.status(400).json({
+          success: false,
+          message: 'Materials can only be moved to grandchild folders that allow materials'
+        });
+      }
+    }
+    
+    // Validate category if provided (backward compatibility)
+    if (category && category !== (material.category ? material.category.toString() : null)) {
       const categoryDoc = await Category.findById(category);
       if (!categoryDoc || !categoryDoc.isActive) {
         return res.status(400).json({
@@ -384,6 +456,7 @@ const updateMaterial = async (req, res, next) => {
 
     if (title) updateData.title = title;
     if (description !== undefined) updateData.description = description;
+    if (folder) updateData.folder = folder;
     if (category) updateData.category = category;
     if (relatedPortfolio) updateData.relatedPortfolio = relatedPortfolio;
     if (relatedManagerRole) updateData.relatedManagerRole = relatedManagerRole;
@@ -404,12 +477,26 @@ const updateMaterial = async (req, res, next) => {
       updateData,
       { new: true, runValidators: true }
     )
-    .populate('category', 'name slug icon color')
+    .populate('folder', 'name slug fullPath level icon color')
+    .populate('category', 'name slug icon color') // Backward compatibility
     .populate('createdBy', 'name email')
     .populate('updatedBy', 'name email');
 
-    // Update category material count if category changed
-    if (category && category !== material.category.toString()) {
+    // Update folder/category material counts if changed
+    if (folder) {
+      // Update old folder stats if material had a folder
+      const oldMaterial = await Material.findById(req.params.id);
+      if (oldMaterial.folder && oldMaterial.folder.toString() !== folder) {
+        const oldFolder = await Folder.findById(oldMaterial.folder);
+        if (oldFolder) await oldFolder.updateStats();
+      }
+      // Update new folder stats
+      const newFolder = await Folder.findById(folder);
+      if (newFolder) await newFolder.updateStats();
+    }
+    
+    // Backward compatibility: Update category material count if category changed
+    if (category && material.category && category !== material.category.toString()) {
       const oldCategory = await Category.findById(material.category);
       const newCategory = await Category.findById(category);
       if (oldCategory) await oldCategory.updateMaterialCount();
@@ -459,10 +546,17 @@ const deleteMaterial = async (req, res, next) => {
       updatedBy: req.user.id
     });
 
-    // Update category material count
-    const category = await Category.findById(material.category);
-    if (category) {
-      await category.updateMaterialCount();
+    // Update folder or category material count
+    if (material.folder) {
+      const folder = await Folder.findById(material.folder);
+      if (folder) {
+        await folder.updateStats();
+      }
+    } else if (material.category) {
+      const category = await Category.findById(material.category);
+      if (category) {
+        await category.updateMaterialCount();
+      }
     }
 
     res.status(200).json({
@@ -501,7 +595,9 @@ const downloadMaterial = async (req, res, next) => {
       ],
       isActive: true,
       status: 'active'
-    });
+    })
+    .populate('folder', 'name fullPath')
+    .populate('category', 'name'); // Backward compatibility
 
     if (!material) {
       return res.status(404).json({

@@ -111,7 +111,8 @@ app.get('/', (req, res) => {
     documentation: '/api-docs',
     endpoints: {
       auth: '/api/auth',
-      categories: '/api/categories',
+      folders: '/api/folders',
+      categories: '/api/categories', // Backward compatibility
       materials: '/api/materials',
       health: '/health'
     }
@@ -120,7 +121,8 @@ app.get('/', (req, res) => {
 
 // Mount routers
 app.use('/api/auth', require('./routes/auth'));
-app.use('/api/categories', require('./routes/categories'));
+app.use('/api/folders', require('./routes/folders'));
+app.use('/api/categories', require('./routes/categories')); // Backward compatibility
 app.use('/api/materials', require('./routes/materials'));
 
 // Handle undefined routes

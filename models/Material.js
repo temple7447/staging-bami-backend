@@ -42,11 +42,28 @@ const MaterialSchema = new mongoose.Schema({
     type: String // Public URL if using cloud storage
   },
   
-  // Categorization
+  // Folder Organization (New hierarchical system)
+  folder: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Folder',
+    required: [true, 'Please select a folder'],
+    validate: {
+      validator: async function(folderId) {
+        if (!folderId) return false;
+        const Folder = mongoose.model('Folder');
+        const folder = await Folder.findById(folderId);
+        // Materials can only be placed in grandchild folders (level 2)
+        return folder && folder.level === 2 && folder.allowMaterials;
+      },
+      message: 'Materials can only be placed in the deepest level folders (grandchild folders)'
+    }
+  },
+  
+  // Keep category for backward compatibility (will be deprecated)
   category: {
     type: mongoose.Schema.ObjectId,
     ref: 'Category',
-    required: [true, 'Please select a category']
+    required: false // No longer required since we have folder
   },
   
   // Portfolio Association
@@ -279,7 +296,8 @@ MaterialSchema.index({
 });
 
 // Index for filtering
-MaterialSchema.index({ category: 1, materialType: 1, relatedPortfolio: 1, relatedManagerRole: 1 });
+MaterialSchema.index({ folder: 1, materialType: 1, relatedPortfolio: 1, relatedManagerRole: 1 });
+MaterialSchema.index({ category: 1, materialType: 1, relatedPortfolio: 1, relatedManagerRole: 1 }); // Backward compatibility
 MaterialSchema.index({ status: 1, isActive: 1 });
 MaterialSchema.index({ createdAt: -1 });
 MaterialSchema.index({ viewCount: -1, downloadCount: -1 });
@@ -308,7 +326,8 @@ MaterialSchema.virtual('fileCategory').get(function() {
 MaterialSchema.statics.searchMaterials = async function(query = {}) {
   const {
     search,
-    category,
+    folder,
+    category, // Backward compatibility
     materialType,
     relatedPortfolio,
     relatedManagerRole,
@@ -324,8 +343,9 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
   
   const filter = { isActive: true, status: 'active' };
   
-  // Add filters
-  if (category) filter.category = category;
+  // Add filters - prioritize folder over category
+  if (folder) filter.folder = folder;
+  else if (category) filter.category = category; // Backward compatibility
   if (materialType) filter.materialType = materialType;
   if (relatedPortfolio) filter.relatedPortfolio = relatedPortfolio;
   if (relatedManagerRole) filter.relatedManagerRole = relatedManagerRole;
@@ -351,7 +371,17 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
     aggregationPipeline.push({ $match: filter });
   }
   
-  // Populate category
+  // Populate folder and category
+  aggregationPipeline.push({
+    $lookup: {
+      from: 'folders',
+      localField: 'folder',
+      foreignField: '_id',
+      as: 'folderInfo'
+    }
+  });
+  
+  // Backward compatibility - populate category
   aggregationPipeline.push({
     $lookup: {
       from: 'categories',
@@ -390,18 +420,27 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
 
 // Method to get related materials
 MaterialSchema.methods.getRelatedMaterials = async function(limit = 5) {
+  const relatedConditions = [
+    { relatedManagerRole: this.relatedManagerRole },
+    { tags: { $in: this.tags } },
+    { materialType: this.materialType }
+  ];
+  
+  // Add folder or category condition based on what this material has
+  if (this.folder) {
+    relatedConditions.push({ folder: this.folder });
+  } else if (this.category) {
+    relatedConditions.push({ category: this.category });
+  }
+  
   const relatedMaterials = await this.constructor.find({
     _id: { $ne: this._id },
     isActive: true,
     status: 'active',
-    $or: [
-      { category: this.category },
-      { relatedManagerRole: this.relatedManagerRole },
-      { tags: { $in: this.tags } },
-      { materialType: this.materialType }
-    ]
+    $or: relatedConditions
   })
-  .populate('category', 'name slug')
+  .populate('folder', 'name slug fullPath level')
+  .populate('category', 'name slug') // Backward compatibility
   .sort({ viewCount: -1, createdAt: -1 })
   .limit(limit);
   
