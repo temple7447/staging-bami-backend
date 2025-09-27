@@ -430,28 +430,15 @@ const validateReview = [
 
 // Note: Using the specific folder validation functions above
 
-// Update material validation to support folders
+// Update material validation to support folders only
 const validateMaterialUploadWithFolder = [
   check('title')
     .notEmpty().withMessage('Title is required')
     .isLength({ max: 200 }).withMessage('Title cannot be more than 200 characters'),
   
-  // Support both folder and category (folder takes precedence)
   check('folder')
-    .optional()
+    .notEmpty().withMessage('Folder is required')
     .isMongoId().withMessage('Invalid folder id'),
-  
-  check('category')
-    .optional()
-    .isMongoId().withMessage('Invalid category id'),
-  
-  // Require either folder or category
-  check('folder').custom((value, { req }) => {
-    if (!value && !req.body.category) {
-      throw new Error('Either folder or category is required');
-    }
-    return true;
-  }),
   
   check('materialType')
     .notEmpty().withMessage('Material type is required')
@@ -480,10 +467,6 @@ const validateMaterialUpdateWithFolder = [
   check('folder')
     .optional()
     .isMongoId().withMessage('Invalid folder id'),
-  
-  check('category')
-    .optional()
-    .isMongoId().withMessage('Invalid category id'),
   
   check('materialType')
     .optional()

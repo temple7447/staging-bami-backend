@@ -36,7 +36,7 @@ const router = express.Router();
 //   file (file)                 -> binary document (PDF, docx, mp4, etc.) OR
 //   videoUrl (string)           -> remote video URL (when materialType === "video", you may send videoUrl instead of a file)
 //   title (string)              -> "Intro to Product Strategy"
-//   category (string)           -> MongoDB category _id, e.g. "60f7c5e1abcd1234abcd1234"
+//   folder (string)             -> MongoDB folder _id, e.g. "60f7c5e1abcd1234abcd1234" (must be level 2 grandchild folder)
 //   materialType (string)       -> e.g. "document" | "video" | "audio" | "link"
 //
 // Example curl for remote video (no file upload):
@@ -44,14 +44,14 @@ const router = express.Router();
 //   -H "Authorization: Bearer <JWT_TOKEN>" \
 //   -F "videoUrl=https://videos.example.com/path/to/video.mp4" \
 //   -F "title=Intro to Product Strategy" \
-//   -F "category=60f7c5e1abcd1234abcd1234" \
+//   -F "folder=60f7c5e1abcd1234abcd1234" \
 //   -F "materialType=video"
 //
 // React Native example (remote video):
 // const data = new FormData();
 // data.append('videoUrl', 'https://videos.example.com/path/to/video.mp4');
 // data.append('title', 'Intro to Product Strategy');
-// data.append('category', '60f7c5e1abcd1234abcd1234');
+// data.append('folder', '60f7c5e1abcd1234abcd1234');
 // data.append('materialType', 'video');
 // fetch('https://your-api.example.com/api/materials', {
 //   method: 'POST',

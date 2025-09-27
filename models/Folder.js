@@ -100,7 +100,19 @@ const FolderSchema = new mongoose.Schema({
   },
   allowMaterials: {
     type: Boolean,
-    default: true // If false, folder is for organization only (no direct materials)
+    default: function() {
+      // Only level 2 (grandchild) folders can contain materials
+      return this.level === 2;
+    },
+    validate: {
+      validator: function(v) {
+        // Level 2 folders MUST allow materials, level 0 and 1 CANNOT
+        if (this.level === 2) return v === true;
+        if (this.level === 0 || this.level === 1) return v === false;
+        return true;
+      },
+      message: 'Only grandchild folders (level 2) can contain materials. Parent and child folders are for organization only.'
+    }
   },
   
   // Audit trail
@@ -147,13 +159,14 @@ FolderSchema.pre('save', async function(next) {
   next();
 });
 
-// Validate hierarchy depth before saving
+// Validate hierarchy depth and enforce folder rules before saving
 FolderSchema.pre('save', async function(next) {
+  // Check if trying to create a folder under a grandchild folder (level 2)
   if (this.parentFolder && this.isModified('parentFolder')) {
     const parent = await this.constructor.findById(this.parentFolder);
     if (parent) {
       if (parent.level >= 2) {
-        const error = new Error('Cannot create folder: Maximum hierarchy depth of 3 levels exceeded (parent → child → grandchild)');
+        const error = new Error('Cannot create folder: Grandchild folders (level 2) cannot contain subfolders. They can only store materials.');
         error.name = 'ValidationError';
         return next(error);
       }
@@ -167,6 +180,16 @@ FolderSchema.pre('save', async function(next) {
       }
     }
   }
+  
+  // Automatically set allowMaterials based on level
+  if (this.isModified('level') || this.isNew) {
+    if (this.level === 2) {
+      this.allowMaterials = true;  // Grandchild folders MUST allow materials
+    } else {
+      this.allowMaterials = false; // Parent and child folders CANNOT allow materials
+    }
+  }
+  
   next();
 });
 

@@ -130,7 +130,7 @@ const getMaterial = async (req, res, next) => {
 // // Option B: for a remote video - send the remote URL instead of uploading a file:
 // data.append('videoUrl', 'https://videos.example.com/path/to/video.mp4');
 // data.append('title', 'Intro to Product Strategy');
-// data.append('category', '60f7c5e1abcd1234abcd1234');
+// data.append('folder', '60f7c5e1abcd1234abcd1234');
 // data.append('materialType', 'video'); // use "video" and supply videoUrl
 // fetch('https://your-api.example.com/api/materials', {
 //   method: 'POST',
@@ -196,7 +196,7 @@ const uploadMaterial = async (req, res, next) => {
       });
     }
 
-    // Validate folder or category exists
+    // Validate folder exists
     let folderDoc;
     
     if (!folder) {
@@ -445,7 +445,7 @@ const updateMaterial = async (req, res, next) => {
     .populate('createdBy', 'name email')
     .populate('updatedBy', 'name email');
 
-    // Update folder/category material counts if changed
+    // Update folder material counts if changed
     if (folder) {
       // Update old folder stats if material had a folder
       const oldMaterial = await Material.findById(req.params.id);

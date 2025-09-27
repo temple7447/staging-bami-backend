@@ -245,9 +245,13 @@ const createFolder = async (req, res, next) => {
       level = parent.level + 1;
     }
 
-    // For grandchild folders (level 2), ensure allowMaterials is true by default
-    if (level === 2 && allowMaterials === undefined) {
+    // Enforce folder level rules
+    if (level === 2) {
+      // Grandchild folders MUST allow materials and CANNOT have subfolders
       allowMaterials = true;
+    } else {
+      // Parent and child folders CANNOT allow materials (for organization only)
+      allowMaterials = false;
     }
 
     const folder = await Folder.create({
@@ -970,7 +974,7 @@ const createGrandchildFolder = async (req, res, next) => {
       order = 0,
       visibility = 'public',
       allowedRoles = [],
-      allowMaterials = true, // Grandchild folders can have materials by default
+      allowMaterials = true, // Grandchild folders MUST allow materials (overridden)
       isProtected = false
     } = req.body;
 
@@ -1021,7 +1025,7 @@ const createGrandchildFolder = async (req, res, next) => {
       order,
       visibility,
       allowedRoles: Array.isArray(allowedRoles) ? allowedRoles : [],
-      allowMaterials, // Grandchild folders can have materials
+      allowMaterials: true, // FORCED: Grandchild folders MUST allow materials
       isProtected,
       createdBy: req.user.id
     });

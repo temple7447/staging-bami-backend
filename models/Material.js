@@ -362,7 +362,7 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
     aggregationPipeline.push({ $match: filter });
   }
   
-  // Populate folder and category
+  // Populate folder
   aggregationPipeline.push({
     $lookup: {
       from: 'folders',
