@@ -737,10 +737,340 @@ const getFoldersForMaterials = async (req, res, next) => {
   }
 };
 
+// @desc    Create parent folder (Level 0)
+// @route   POST /api/folders/parent
+// @access  Private
+const createParentFolder = async (req, res, next) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation errors',
+        errors: errors.array()
+      });
+    }
+
+    const { 
+      name, 
+      description, 
+      icon = 'folder', 
+      color = '#6C757D',
+      order = 0,
+      visibility = 'public',
+      allowedRoles = [],
+      isProtected = false
+    } = req.body;
+
+    // Check if parent folder name already exists at root level
+    const existingFolder = await Folder.findOne({ 
+      name: new RegExp(`^${name}$`, 'i'),
+      parentFolder: null, // Root level
+      isActive: true 
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder with this name already exists'
+      });
+    }
+
+    const folder = await Folder.create({
+      name,
+      description,
+      parentFolder: null, // Always null for parent folders
+      level: 0, // Always 0 for parent folders
+      icon,
+      color,
+      order,
+      visibility,
+      allowedRoles: Array.isArray(allowedRoles) ? allowedRoles : [],
+      allowMaterials: false, // Parent folders cannot have materials
+      isProtected,
+      createdBy: req.user.id
+    });
+
+    const populatedFolder = await Folder.findById(folder._id)
+      .populate('createdBy', 'name email');
+
+    res.status(201).json({
+      success: true,
+      message: 'Parent folder created successfully',
+      data: {
+        ...populatedFolder.toObject(),
+        folderType: 'parent',
+        canHaveSubfolders: true,
+        canHaveMaterials: false
+      }
+    });
+  } catch (error) {
+    console.error('Create parent folder error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder with this name already exists'
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error occurred while creating parent folder'
+    });
+  }
+};
+
+// @desc    Create child folder (Level 1)
+// @route   POST /api/folders/child
+// @access  Private
+const createChildFolder = async (req, res, next) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation errors',
+        errors: errors.array()
+      });
+    }
+
+    const { 
+      name, 
+      description, 
+      parentFolder, // Required for child folders
+      icon = 'folder', 
+      color = '#6C757D',
+      order = 0,
+      visibility = 'public',
+      allowedRoles = [],
+      isProtected = false
+    } = req.body;
+
+    if (!parentFolder) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder is required for child folders'
+      });
+    }
+
+    // Validate parent folder exists and is a parent folder (level 0)
+    const parent = await Folder.findById(parentFolder);
+    if (!parent || !parent.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder not found'
+      });
+    }
+
+    if (parent.level !== 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Child folders can only be created under parent folders (level 0)'
+      });
+    }
+
+    // Check if child folder name already exists within the same parent
+    const existingFolder = await Folder.findOne({ 
+      name: new RegExp(`^${name}$`, 'i'),
+      parentFolder: parentFolder,
+      isActive: true 
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({
+        success: false,
+        message: 'Child folder with this name already exists in this parent folder'
+      });
+    }
+
+    const folder = await Folder.create({
+      name,
+      description,
+      parentFolder,
+      level: 1, // Always 1 for child folders
+      icon,
+      color,
+      order,
+      visibility,
+      allowedRoles: Array.isArray(allowedRoles) ? allowedRoles : [],
+      allowMaterials: false, // Child folders cannot have materials
+      isProtected,
+      createdBy: req.user.id
+    });
+
+    const populatedFolder = await Folder.findById(folder._id)
+      .populate('createdBy', 'name email')
+      .populate('parentFolder', 'name slug fullPath level');
+
+    res.status(201).json({
+      success: true,
+      message: 'Child folder created successfully',
+      data: {
+        ...populatedFolder.toObject(),
+        folderType: 'child',
+        canHaveSubfolders: true,
+        canHaveMaterials: false
+      }
+    });
+  } catch (error) {
+    console.error('Create child folder error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Child folder with this name already exists in this parent folder'
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error occurred while creating child folder'
+    });
+  }
+};
+
+// @desc    Create grandchild folder (Level 2) - Can contain materials
+// @route   POST /api/folders/grandchild
+// @access  Private
+const createGrandchildFolder = async (req, res, next) => {
+  try {
+    // Check validation errors
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation errors',
+        errors: errors.array()
+      });
+    }
+
+    const { 
+      name, 
+      description, 
+      parentFolder, // Required - must be a child folder
+      icon = 'folder', 
+      color = '#6C757D',
+      order = 0,
+      visibility = 'public',
+      allowedRoles = [],
+      allowMaterials = true, // Grandchild folders can have materials by default
+      isProtected = false
+    } = req.body;
+
+    if (!parentFolder) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder is required for grandchild folders'
+      });
+    }
+
+    // Validate parent folder exists and is a child folder (level 1)
+    const parent = await Folder.findById(parentFolder);
+    if (!parent || !parent.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parent folder not found'
+      });
+    }
+
+    if (parent.level !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Grandchild folders can only be created under child folders (level 1)'
+      });
+    }
+
+    // Check if grandchild folder name already exists within the same parent
+    const existingFolder = await Folder.findOne({ 
+      name: new RegExp(`^${name}$`, 'i'),
+      parentFolder: parentFolder,
+      isActive: true 
+    });
+
+    if (existingFolder) {
+      return res.status(400).json({
+        success: false,
+        message: 'Grandchild folder with this name already exists in this child folder'
+      });
+    }
+
+    const folder = await Folder.create({
+      name,
+      description,
+      parentFolder,
+      level: 2, // Always 2 for grandchild folders
+      icon,
+      color,
+      order,
+      visibility,
+      allowedRoles: Array.isArray(allowedRoles) ? allowedRoles : [],
+      allowMaterials, // Grandchild folders can have materials
+      isProtected,
+      createdBy: req.user.id
+    });
+
+    const populatedFolder = await Folder.findById(folder._id)
+      .populate('createdBy', 'name email')
+      .populate('parentFolder', 'name slug fullPath level');
+
+    res.status(201).json({
+      success: true,
+      message: 'Grandchild folder created successfully (can now contain materials)',
+      data: {
+        ...populatedFolder.toObject(),
+        folderType: 'grandchild',
+        canHaveSubfolders: false,
+        canHaveMaterials: true
+      }
+    });
+  } catch (error) {
+    console.error('Create grandchild folder error:', error);
+    
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Grandchild folder with this name already exists in this child folder'
+      });
+    }
+
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error occurred while creating grandchild folder'
+    });
+  }
+};
+
 module.exports = {
   getFolders,
   getFolder,
   createFolder,
+  createParentFolder,
+  createChildFolder,
+  createGrandchildFolder,
   updateFolder,
   deleteFolder,
   moveFolder,

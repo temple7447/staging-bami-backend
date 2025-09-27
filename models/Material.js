@@ -59,12 +59,6 @@ const MaterialSchema = new mongoose.Schema({
     }
   },
   
-  // Keep category for backward compatibility (will be deprecated)
-  category: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'Category',
-    required: false // No longer required since we have folder
-  },
   
   // Portfolio Association
   relatedPortfolio: {
@@ -297,7 +291,6 @@ MaterialSchema.index({
 
 // Index for filtering
 MaterialSchema.index({ folder: 1, materialType: 1, relatedPortfolio: 1, relatedManagerRole: 1 });
-MaterialSchema.index({ category: 1, materialType: 1, relatedPortfolio: 1, relatedManagerRole: 1 }); // Backward compatibility
 MaterialSchema.index({ status: 1, isActive: 1 });
 MaterialSchema.index({ createdAt: -1 });
 MaterialSchema.index({ viewCount: -1, downloadCount: -1 });
@@ -327,7 +320,6 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
   const {
     search,
     folder,
-    category, // Backward compatibility
     materialType,
     relatedPortfolio,
     relatedManagerRole,
@@ -343,9 +335,8 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
   
   const filter = { isActive: true, status: 'active' };
   
-  // Add filters - prioritize folder over category
+  // Add filters
   if (folder) filter.folder = folder;
-  else if (category) filter.category = category; // Backward compatibility
   if (materialType) filter.materialType = materialType;
   if (relatedPortfolio) filter.relatedPortfolio = relatedPortfolio;
   if (relatedManagerRole) filter.relatedManagerRole = relatedManagerRole;
@@ -381,15 +372,6 @@ MaterialSchema.statics.searchMaterials = async function(query = {}) {
     }
   });
   
-  // Backward compatibility - populate category
-  aggregationPipeline.push({
-    $lookup: {
-      from: 'categories',
-      localField: 'category',
-      foreignField: '_id',
-      as: 'categoryInfo'
-    }
-  });
   
   // Sort
   const sortOptions = {};
@@ -426,11 +408,9 @@ MaterialSchema.methods.getRelatedMaterials = async function(limit = 5) {
     { materialType: this.materialType }
   ];
   
-  // Add folder or category condition based on what this material has
+  // Add folder condition
   if (this.folder) {
     relatedConditions.push({ folder: this.folder });
-  } else if (this.category) {
-    relatedConditions.push({ category: this.category });
   }
   
   const relatedMaterials = await this.constructor.find({
@@ -440,7 +420,6 @@ MaterialSchema.methods.getRelatedMaterials = async function(limit = 5) {
     $or: relatedConditions
   })
   .populate('folder', 'name slug fullPath level')
-  .populate('category', 'name slug') // Backward compatibility
   .sort({ viewCount: -1, createdAt: -1 })
   .limit(limit);
   

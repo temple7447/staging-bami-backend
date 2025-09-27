@@ -11,7 +11,6 @@ cloudinary.config({
 });
 
 const Material = require('../models/Material');
-const Category = require('../models/Category');
 const Folder = require('../models/Folder');
 const { getFileInfo, deleteFile, getFileMetadata } = require('../utils/fileUpload');
 
@@ -22,8 +21,7 @@ const getMaterials = async (req, res, next) => {
   try {
     const {
       search,
-      folder, // New folder parameter
-      category, // Backward compatibility
+      folder,
       materialType,
       relatedPortfolio,
       relatedManagerRole,
@@ -39,8 +37,7 @@ const getMaterials = async (req, res, next) => {
 
     const query = {
       search,
-      folder, // Priority over category
-      category: folder ? undefined : category, // Use category only if no folder specified
+      folder,
       materialType,
       relatedPortfolio,
       relatedManagerRole,
@@ -77,7 +74,6 @@ const getMaterial = async (req, res, next) => {
   try {
     const material = await Material.findById(req.params.id)
       .populate('folder', 'name slug fullPath level icon color')
-      .populate('category', 'name slug icon color') // Backward compatibility
       .populate('createdBy', 'name email')
       .populate('updatedBy', 'name email')
       .populate('notes.user', 'name email')
@@ -161,8 +157,7 @@ const uploadMaterial = async (req, res, next) => {
     const {
       title,
       description,
-      folder, // New folder field (priority)
-      category, // Backward compatibility
+      folder,
       relatedPortfolio,
       relatedManagerRole,
       materialType,
@@ -202,49 +197,39 @@ const uploadMaterial = async (req, res, next) => {
     }
 
     // Validate folder or category exists
-    let folderDoc, categoryDoc;
+    let folderDoc;
     
-    if (folder) {
-      folderDoc = await Folder.findById(folder);
-      if (!folderDoc || !folderDoc.isActive) {
-        if (req.file) deleteFile(req.file.path);
-        return res.status(400).json({
-          success: false,
-          message: 'Folder not found'
-        });
-      }
-      
-      // Materials can only be placed in grandchild folders (level 2)
-      if (folderDoc.level !== 2) {
-        if (req.file) deleteFile(req.file.path);
-        return res.status(400).json({
-          success: false,
-          message: 'Materials can only be placed in the deepest level folders (grandchild folders)'
-        });
-      }
-      
-      if (!folderDoc.allowMaterials) {
-        if (req.file) deleteFile(req.file.path);
-        return res.status(400).json({
-          success: false,
-          message: 'This folder does not allow materials'
-        });
-      }
-    } else if (category) {
-      // Backward compatibility for category
-      categoryDoc = await Category.findById(category);
-      if (!categoryDoc || !categoryDoc.isActive) {
-        if (req.file) deleteFile(req.file.path);
-        return res.status(400).json({
-          success: false,
-          message: 'Category not found'
-        });
-      }
-    } else {
+    if (!folder) {
       if (req.file) deleteFile(req.file.path);
       return res.status(400).json({
         success: false,
-        message: 'Either folder or category is required'
+        message: 'Folder is required'
+      });
+    }
+
+    folderDoc = await Folder.findById(folder);
+    if (!folderDoc || !folderDoc.isActive) {
+      if (req.file) deleteFile(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'Folder not found'
+      });
+    }
+    
+    // Materials can only be placed in grandchild folders (level 2)
+    if (folderDoc.level !== 2) {
+      if (req.file) deleteFile(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'Materials can only be placed in the deepest level folders (grandchild folders)'
+      });
+    }
+    
+    if (!folderDoc.allowMaterials) {
+      if (req.file) deleteFile(req.file.path);
+      return res.status(400).json({
+        success: false,
+        message: 'This folder does not allow materials'
       });
     }
 
@@ -305,12 +290,8 @@ const uploadMaterial = async (req, res, next) => {
       createdBy: req.user.id
     };
     
-    // Add folder or category (folder takes precedence)
-    if (folder) {
-      createPayload.folder = folder;
-    } else if (category) {
-      createPayload.category = category;
-    }
+    // Add folder
+    createPayload.folder = folder;
 
     if (materialType === 'video' && videoUrl) {
       // Use remote video URL instead of uploaded file
@@ -340,16 +321,11 @@ const uploadMaterial = async (req, res, next) => {
     // Create material - save info
     const material = await Material.create(createPayload);
 
-    // Update folder or category material count
-    if (folderDoc) {
-      await folderDoc.updateStats();
-    } else if (categoryDoc) {
-      await categoryDoc.updateMaterialCount();
-    }
+    // Update folder material count
+    await folderDoc.updateStats();
 
     const populatedMaterial = await Material.findById(material._id)
       .populate('folder', 'name slug fullPath level icon color')
-      .populate('category', 'name slug icon color') // Backward compatibility
       .populate('createdBy', 'name email');
 
     res.status(201).json({
@@ -399,7 +375,6 @@ const updateMaterial = async (req, res, next) => {
       title,
       description,
       folder,
-      category,
       relatedPortfolio,
       relatedManagerRole,
       materialType,
@@ -433,16 +408,6 @@ const updateMaterial = async (req, res, next) => {
       }
     }
     
-    // Validate category if provided (backward compatibility)
-    if (category && category !== (material.category ? material.category.toString() : null)) {
-      const categoryDoc = await Category.findById(category);
-      if (!categoryDoc || !categoryDoc.isActive) {
-        return res.status(400).json({
-          success: false,
-          message: 'Category not found'
-        });
-      }
-    }
 
     // Parse arrays from strings
     const parsedTags = tags ? (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags) : material.tags;
@@ -457,7 +422,6 @@ const updateMaterial = async (req, res, next) => {
     if (title) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     if (folder) updateData.folder = folder;
-    if (category) updateData.category = category;
     if (relatedPortfolio) updateData.relatedPortfolio = relatedPortfolio;
     if (relatedManagerRole) updateData.relatedManagerRole = relatedManagerRole;
     if (materialType) updateData.materialType = materialType;
@@ -478,7 +442,6 @@ const updateMaterial = async (req, res, next) => {
       { new: true, runValidators: true }
     )
     .populate('folder', 'name slug fullPath level icon color')
-    .populate('category', 'name slug icon color') // Backward compatibility
     .populate('createdBy', 'name email')
     .populate('updatedBy', 'name email');
 
@@ -495,13 +458,6 @@ const updateMaterial = async (req, res, next) => {
       if (newFolder) await newFolder.updateStats();
     }
     
-    // Backward compatibility: Update category material count if category changed
-    if (category && material.category && category !== material.category.toString()) {
-      const oldCategory = await Category.findById(material.category);
-      const newCategory = await Category.findById(category);
-      if (oldCategory) await oldCategory.updateMaterialCount();
-      if (newCategory) await newCategory.updateMaterialCount();
-    }
 
     res.status(200).json({
       success: true,
@@ -546,16 +502,11 @@ const deleteMaterial = async (req, res, next) => {
       updatedBy: req.user.id
     });
 
-    // Update folder or category material count
+    // Update folder material count
     if (material.folder) {
       const folder = await Folder.findById(material.folder);
       if (folder) {
         await folder.updateStats();
-      }
-    } else if (material.category) {
-      const category = await Category.findById(material.category);
-      if (category) {
-        await category.updateMaterialCount();
       }
     }
 
@@ -597,7 +548,6 @@ const downloadMaterial = async (req, res, next) => {
       status: 'active'
     })
     .populate('folder', 'name fullPath')
-    .populate('category', 'name'); // Backward compatibility
 
     if (!material) {
       return res.status(404).json({

@@ -14,82 +14,6 @@ const handleValidationErrors = (req, res, next) => {
   next();
 };
 
-// Category validation rules
-const validateCategoryCreation = [
-  body('name')
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Category name must be between 2 and 100 characters')
-    .matches(/^[a-zA-Z0-9\s&-]+$/)
-    .withMessage('Category name can only contain letters, numbers, spaces, hyphens, and ampersands'),
-  
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage('Description cannot be more than 500 characters'),
-  
-  body('parentCategory')
-    .optional()
-    .isMongoId()
-    .withMessage('Parent category must be a valid MongoDB ID'),
-  
-  body('icon')
-    .optional()
-    .trim()
-    .isLength({ min: 1, max: 50 })
-    .withMessage('Icon name must be between 1 and 50 characters'),
-  
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color code'),
-  
-  body('order')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Order must be a positive integer')
-];
-
-const validateCategoryUpdate = [
-  body('name')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Category name must be between 2 and 100 characters')
-    .matches(/^[a-zA-Z0-9\s&-]+$/)
-    .withMessage('Category name can only contain letters, numbers, spaces, hyphens, and ampersands'),
-  
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage('Description cannot be more than 500 characters'),
-  
-  body('parentCategory')
-    .optional()
-    .custom((value) => {
-      if (value === null || value === '') return true;
-      return /^[0-9a-fA-F]{24}$/.test(value);
-    })
-    .withMessage('Parent category must be a valid MongoDB ID or null'),
-  
-  body('icon')
-    .optional()
-    .trim()
-    .isLength({ min: 1, max: 50 })
-    .withMessage('Icon name must be between 1 and 50 characters'),
-  
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color code'),
-  
-  body('order')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Order must be a positive integer')
-];
 
 // Allowed material types (add 'video' here)
 const materialTypeAllowed = [
@@ -112,9 +36,9 @@ const validateMaterialUpload = [
   check('title')
     .notEmpty().withMessage('Title is required')
     .isLength({ max: 200 }).withMessage('Title cannot be more than 200 characters'),
-  check('category')
-    .notEmpty().withMessage('Category is required')
-    .isMongoId().withMessage('Invalid category id'),
+  check('folder')
+    .notEmpty().withMessage('Folder is required')
+    .isMongoId().withMessage('Invalid folder id'),
   check('materialType')
     .notEmpty().withMessage('Material type is required')
     .isIn(materialTypeAllowed).withMessage(`Material type must be one of: ${materialTypeAllowed.join(', ')}`),
@@ -138,9 +62,9 @@ const validateMaterialUpdate = [
   check('title')
     .optional()
     .isLength({ max: 200 }).withMessage('Title cannot be more than 200 characters'),
-  check('category')
+  check('folder')
     .optional()
-    .isMongoId().withMessage('Invalid category id'),
+    .isMongoId().withMessage('Invalid folder id'),
   check('materialType')
     .optional()
     .isIn(materialTypeAllowed).withMessage(`Material type must be one of: ${materialTypeAllowed.join(', ')}`),
@@ -196,6 +120,301 @@ const validateHighlight = [
     .withMessage('Position end must be a non-negative integer')
 ];
 
+// Parent folder validation (Level 0)
+const validateParentFolderCreation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Parent folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&().,!?-]+$/)
+    .withMessage('Parent folder name can only contain letters, numbers, spaces, and basic punctuation'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('icon')
+    .optional()
+    .trim()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid icon type for folder'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+    
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+    
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+    
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('isProtected must be a boolean'),
+    
+  // Parent folders should never have a parentFolder
+  body('parentFolder')
+    .not().exists()
+    .withMessage('Parent folders cannot have a parent folder')
+];
+
+// Child folder validation (Level 1)
+const validateChildFolderCreation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Child folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&().,!?-]+$/)
+    .withMessage('Child folder name can only contain letters, numbers, spaces, and basic punctuation'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .notEmpty()
+    .withMessage('Parent folder is required for child folders')
+    .isMongoId()
+    .withMessage('Parent folder must be a valid MongoDB ID'),
+  
+  body('icon')
+    .optional()
+    .trim()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid icon type for folder'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+    
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+    
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+    
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('isProtected must be a boolean')
+];
+
+// Grandchild folder validation (Level 2)
+const validateGrandchildFolderCreation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Grandchild folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&().,!?-]+$/)
+    .withMessage('Grandchild folder name can only contain letters, numbers, spaces, and basic punctuation'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .notEmpty()
+    .withMessage('Parent folder is required for grandchild folders')
+    .isMongoId()
+    .withMessage('Parent folder must be a valid MongoDB ID'),
+  
+  body('icon')
+    .optional()
+    .trim()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid icon type for folder'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+    
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+    
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+    
+  body('allowMaterials')
+    .optional()
+    .isBoolean()
+    .withMessage('allowMaterials must be a boolean'),
+    
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('isProtected must be a boolean')
+];
+
+// Generic folder validation (for the original endpoint)
+const validateFolderCreation = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&().,!?-]+$/)
+    .withMessage('Folder name can only contain letters, numbers, spaces, and basic punctuation'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .optional()
+    .custom((value) => {
+      if (value === null || value === '' || value === undefined) return true;
+      return /^[0-9a-fA-F]{24}$/.test(value);
+    })
+    .withMessage('Parent folder must be a valid MongoDB ID or null'),
+  
+  body('icon')
+    .optional()
+    .trim()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid icon type for folder'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+    
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+    
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+    
+  body('allowMaterials')
+    .optional()
+    .isBoolean()
+    .withMessage('allowMaterials must be a boolean'),
+    
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('isProtected must be a boolean')
+];
+
+// Folder update validation
+const validateFolderUpdate = [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Folder name must be between 2 and 100 characters')
+    .matches(/^[a-zA-Z0-9\s&().,!?-]+$/)
+    .withMessage('Folder name can only contain letters, numbers, spaces, and basic punctuation'),
+  
+  body('description')
+    .optional()
+    .trim()
+    .isLength({ max: 500 })
+    .withMessage('Description cannot be more than 500 characters'),
+  
+  body('parentFolder')
+    .optional()
+    .custom((value) => {
+      if (value === null || value === '' || value === undefined) return true;
+      return /^[0-9a-fA-F]{24}$/.test(value);
+    })
+    .withMessage('Parent folder must be a valid MongoDB ID or null'),
+  
+  body('icon')
+    .optional()
+    .trim()
+    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
+    .withMessage('Invalid icon type for folder'),
+  
+  body('color')
+    .optional()
+    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
+    .withMessage('Color must be a valid hex color code'),
+  
+  body('order')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Order must be a positive integer'),
+    
+  body('visibility')
+    .optional()
+    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
+    .withMessage('Invalid visibility option'),
+    
+  body('allowedRoles')
+    .optional()
+    .isArray()
+    .withMessage('Allowed roles must be an array'),
+    
+  body('allowMaterials')
+    .optional()
+    .isBoolean()
+    .withMessage('allowMaterials must be a boolean'),
+    
+  body('isProtected')
+    .optional()
+    .isBoolean()
+    .withMessage('isProtected must be a boolean')
+];
+
+// Folder move validation
+const validateFolderMove = [
+  body('targetParentId')
+    .optional()
+    .custom((value) => {
+      if (value === null || value === '' || value === undefined) return true;
+      return /^[0-9a-fA-F]{24}$/.test(value);
+    })
+    .withMessage('Target parent ID must be a valid MongoDB ID or null')
+];
+
 // Review validation
 const validateReview = [
   body('rating')
@@ -209,130 +428,7 @@ const validateReview = [
     .withMessage('Comment cannot be more than 500 characters')
 ];
 
-// Folder validation rules
-const validateFolderCreation = [
-  body('name')
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Folder name must be between 2 and 100 characters')
-    .matches(/^[a-zA-Z0-9\s&-_().]+$/)
-    .withMessage('Folder name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, and parentheses'),
-  
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage('Description cannot be more than 500 characters'),
-  
-  body('parentFolder')
-    .optional()
-    .isMongoId()
-    .withMessage('Parent folder must be a valid MongoDB ID'),
-  
-  body('icon')
-    .optional()
-    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
-    .withMessage('Invalid folder icon'),
-  
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color code'),
-  
-  body('order')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Order must be a positive integer'),
-  
-  body('visibility')
-    .optional()
-    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
-    .withMessage('Invalid visibility option'),
-  
-  body('allowedRoles')
-    .optional()
-    .isArray()
-    .withMessage('Allowed roles must be an array'),
-  
-  body('allowedRoles.*')
-    .optional()
-    .isIn(['operations', 'marketing', 'sales', 'delivery', 'finance', 'fundraising', 'legal', 'automation', 'hr', 'leadership'])
-    .withMessage('Invalid role in allowed roles'),
-  
-  body('allowMaterials')
-    .optional()
-    .isBoolean()
-    .withMessage('Allow materials must be a boolean'),
-  
-  body('isProtected')
-    .optional()
-    .isBoolean()
-    .withMessage('Is protected must be a boolean')
-];
-
-const validateFolderUpdate = [
-  body('name')
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Folder name must be between 2 and 100 characters')
-    .matches(/^[a-zA-Z0-9\s&-_().]+$/)
-    .withMessage('Folder name can only contain letters, numbers, spaces, hyphens, underscores, ampersands, and parentheses'),
-  
-  body('description')
-    .optional()
-    .trim()
-    .isLength({ max: 500 })
-    .withMessage('Description cannot be more than 500 characters'),
-  
-  body('parentFolder')
-    .optional()
-    .custom((value) => {
-      if (value === null || value === '') return true;
-      return /^[0-9a-fA-F]{24}$/.test(value);
-    })
-    .withMessage('Parent folder must be a valid MongoDB ID or null'),
-  
-  body('icon')
-    .optional()
-    .isIn(['folder', 'folder-open', 'briefcase', 'archive', 'database', 'file-text', 'layers', 'grid', 'box', 'package'])
-    .withMessage('Invalid folder icon'),
-  
-  body('color')
-    .optional()
-    .matches(/^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/)
-    .withMessage('Color must be a valid hex color code'),
-  
-  body('order')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Order must be a positive integer'),
-  
-  body('visibility')
-    .optional()
-    .isIn(['public', 'managers_only', 'owner_only', 'role_specific'])
-    .withMessage('Invalid visibility option'),
-  
-  body('allowedRoles')
-    .optional()
-    .isArray()
-    .withMessage('Allowed roles must be an array'),
-  
-  body('allowedRoles.*')
-    .optional()
-    .isIn(['operations', 'marketing', 'sales', 'delivery', 'finance', 'fundraising', 'legal', 'automation', 'hr', 'leadership'])
-    .withMessage('Invalid role in allowed roles'),
-  
-  body('allowMaterials')
-    .optional()
-    .isBoolean()
-    .withMessage('Allow materials must be a boolean'),
-  
-  body('isProtected')
-    .optional()
-    .isBoolean()
-    .withMessage('Is protected must be a boolean')
-];
+// Note: Using the specific folder validation functions above
 
 // Update material validation to support folders
 const validateMaterialUploadWithFolder = [
@@ -407,16 +503,7 @@ const validateMaterialUpdateWithFolder = [
   })
 ];
 
-// Folder move validation
-const validateFolderMove = [
-  body('targetParentId')
-    .optional()
-    .custom((value) => {
-      if (value === null || value === '') return true;
-      return /^[0-9a-fA-F]{24}$/.test(value);
-    })
-    .withMessage('Target parent ID must be a valid MongoDB ID or null')
-];
+// Note: Using validateFolderMove defined above
 
 // MongoDB ObjectId validation
 const validateObjectId = [
@@ -427,8 +514,6 @@ const validateObjectId = [
 
 module.exports = {
   handleValidationErrors,
-  validateCategoryCreation,
-  validateCategoryUpdate,
   validateMaterialUpload,
   validateMaterialUpdate,
   validateMaterialUploadWithFolder,
@@ -436,6 +521,9 @@ module.exports = {
   validateFolderCreation,
   validateFolderUpdate,
   validateFolderMove,
+  validateParentFolderCreation,
+  validateChildFolderCreation,
+  validateGrandchildFolderCreation,
   validateNote,
   validateHighlight,
   validateReview,

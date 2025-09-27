@@ -3,6 +3,9 @@ const {
   getFolders,
   getFolder,
   createFolder,
+  createParentFolder,
+  createChildFolder,
+  createGrandchildFolder,
   updateFolder,
   deleteFolder,
   moveFolder,
@@ -15,6 +18,9 @@ const {
   validateFolderCreation,
   validateFolderUpdate,
   validateFolderMove,
+  validateParentFolderCreation,
+  validateChildFolderCreation,
+  validateGrandchildFolderCreation,
   validateObjectId,
   handleValidationErrors
 } = require('../middleware/validation');
@@ -110,6 +116,88 @@ router.post(
   validateFolderCreation,
   handleValidationErrors,
   createFolder
+);
+
+/**
+ * @desc    Create parent folder (Level 0)
+ * @route   POST /api/folders/parent
+ * @access  Private
+ * @body    {
+ *            "name": "Parent Folder Name",
+ *            "description": "Optional description",
+ *            "icon": "folder", // optional
+ *            "color": "#6C757D", // optional
+ *            "order": 0, // optional
+ *            "visibility": "public", // optional
+ *            "allowedRoles": [], // optional
+ *            "isProtected": false // optional
+ *          }
+ * 
+ * Note: Parent folders are created at root level (no parentFolder field)
+ * They cannot contain materials directly, only child folders
+ */
+router.post(
+  '/parent',
+  protect,
+  validateParentFolderCreation,
+  handleValidationErrors,
+  createParentFolder
+);
+
+/**
+ * @desc    Create child folder (Level 1)
+ * @route   POST /api/folders/child
+ * @access  Private
+ * @body    {
+ *            "name": "Child Folder Name",
+ *            "description": "Optional description",
+ *            "parentFolder": "parent_folder_id", // REQUIRED - must be level 0 folder
+ *            "icon": "folder", // optional
+ *            "color": "#6C757D", // optional
+ *            "order": 0, // optional
+ *            "visibility": "public", // optional
+ *            "allowedRoles": [], // optional
+ *            "isProtected": false // optional
+ *          }
+ * 
+ * Note: Child folders must be created under parent folders (level 0)
+ * They cannot contain materials directly, only grandchild folders
+ */
+router.post(
+  '/child',
+  protect,
+  validateChildFolderCreation,
+  handleValidationErrors,
+  createChildFolder
+);
+
+/**
+ * @desc    Create grandchild folder (Level 2) - Can contain materials
+ * @route   POST /api/folders/grandchild
+ * @access  Private
+ * @body    {
+ *            "name": "Grandchild Folder Name",
+ *            "description": "Optional description",
+ *            "parentFolder": "child_folder_id", // REQUIRED - must be level 1 folder
+ *            "icon": "folder", // optional
+ *            "color": "#6C757D", // optional
+ *            "order": 0, // optional
+ *            "visibility": "public", // optional
+ *            "allowedRoles": [], // optional
+ *            "allowMaterials": true, // optional, default true
+ *            "isProtected": false // optional
+ *          }
+ * 
+ * Note: Grandchild folders must be created under child folders (level 1)
+ * They CAN contain materials - this is the final level in the hierarchy
+ * Cannot have subfolders (maximum depth reached)
+ */
+router.post(
+  '/grandchild',
+  protect,
+  validateGrandchildFolderCreation,
+  handleValidationErrors,
+  createGrandchildFolder
 );
 
 /**
