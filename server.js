@@ -63,7 +63,9 @@ const corsOptions = {
       'http://localhost:3000',
       'http://localhost:3001',
       "http://localhost:8080",
+      "http://localhost:8081",
       'https://bami-hustle.vercel.app',
+      'https://bumi-hustle.vercel.app',
       // Add your frontend URLs here
     ];
     
