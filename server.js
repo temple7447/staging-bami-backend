@@ -104,6 +104,7 @@ app.get('/', (req, res) => {
     documentation: '/api-docs',
     endpoints: {
       auth: '/api/auth',
+      estates: '/api/estates',
       health: '/health'
     }
   });
@@ -111,6 +112,7 @@ app.get('/', (req, res) => {
 
 // Mount routers
 app.use('/api/auth', require('./routes/auth'));
+app.use('/api/estates', require('./routes/estates'));
 
 // Handle undefined routes
 app.all('*', (req, res) => {
@@ -178,6 +180,13 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/auth/register             - Register user');
   console.log('   POST   /api/auth/login                - Login user');
   console.log('   GET    /api/auth/me                   - Get current user');
+  console.log('');
+  console.log('🏢 ESTATE API ENDPOINTS:');
+  console.log('   GET    /api/estates                   - List estates');
+  console.log('   GET    /api/estates/:id               - Get estate by id');
+  console.log('   POST   /api/estates                   - Create estate');
+  console.log('   PUT    /api/estates/:id               - Update estate');
+  console.log('   DELETE /api/estates/:id               - Delete estate');
   console.log('');
   console.log('═'.repeat(60) + '\n');
 });

@@ -1,4 +1,4 @@
-const { param, validationResult } = require('express-validator');
+const { body, check, param, validationResult } = require('express-validator');
 
 // Handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -18,7 +18,31 @@ const validateObjectId = [
   param('id').isMongoId().withMessage('Invalid ID format')
 ];
 
+// Estate validators
+const validateEstateCreate = [
+  check('name')
+    .trim()
+    .notEmpty().withMessage('Estate name is required')
+    .isLength({ max: 150 }).withMessage('Estate name cannot be more than 150 characters'),
+  body('description')
+    .optional()
+    .isLength({ max: 1000 }).withMessage('Description cannot be more than 1000 characters')
+];
+
+const validateEstateUpdate = [
+  check('name')
+    .optional()
+    .trim()
+    .notEmpty().withMessage('Estate name cannot be empty')
+    .isLength({ max: 150 }).withMessage('Estate name cannot be more than 150 characters'),
+  body('description')
+    .optional()
+    .isLength({ max: 1000 }).withMessage('Description cannot be more than 1000 characters')
+];
+
 module.exports = {
   handleValidationErrors,
-  validateObjectId
+  validateObjectId,
+  validateEstateCreate,
+  validateEstateUpdate
 };
