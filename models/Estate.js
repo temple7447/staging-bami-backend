@@ -16,6 +16,11 @@ const EstateSchema = new mongoose.Schema({
     type: String,
     maxlength: [1000, 'Description cannot be more than 1000 characters'],
   },
+  totalUnits: {
+    type: Number,
+    required: [true, 'Please provide total units for this estate'],
+    min: [0, 'Total units cannot be negative']
+  },
   isActive: {
     type: Boolean,
     default: true

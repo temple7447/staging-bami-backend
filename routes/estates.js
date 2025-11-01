@@ -12,12 +12,16 @@ const {
   getEstate,
   updateEstate,
   deleteEstate,
+  getEstateOverview,
 } = require('../controllers/estateController');
 
 const router = express.Router();
 
 // List estates
 router.get('/', protect, getEstates);
+
+// Estate overview
+router.get('/:id/overview', protect, validateObjectId, handleValidationErrors, getEstateOverview);
 
 // Get single estate
 router.get('/:id', protect, validateObjectId, handleValidationErrors, getEstate);

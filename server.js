@@ -78,6 +78,33 @@ app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Request logging - log all frontend requests with safe body masking
+app.use((req, res, next) => {
+  const started = Date.now();
+  const ct = req.headers['content-type'] || '';
+  const authPresent = req.headers['authorization'] ? 'present' : 'none';
+  let bodyLog = '';
+  if (ct.includes('multipart/form-data')) {
+    bodyLog = '[FILE UPLOAD]';
+  } else if (req.body && Object.keys(req.body).length > 0) {
+    const clone = { ...req.body };
+    ['password', 'pass', 'token', 'authorization', 'apiKey', 'secret'].forEach(k => {
+      if (clone[k] !== undefined) clone[k] = '[REDACTED]';
+    });
+    const raw = JSON.stringify(clone);
+    bodyLog = raw.length > 1000 ? raw.slice(0, 1000) + '…' : raw;
+  }
+  console.log(`[REQ] ${new Date().toISOString()} ${req.method} ${req.originalUrl} auth:${authPresent} ct:${ct || 'n/a'} query=${JSON.stringify(req.query)} body=${bodyLog}`);
+
+  res.on('finish', () => {
+    const dur = Date.now() - started;
+    const len = res.get('Content-Length') || '0';
+    console.log(`[RES] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${len}b ${dur}ms`);
+  });
+
+  next();
+});
+
 // Logging
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
@@ -113,6 +140,8 @@ app.get('/', (req, res) => {
 // Mount routers
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
+app.use('/api/tenants', require('./routes/tenants'));
+app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
 
 // Handle undefined routes
 app.all('*', (req, res) => {
@@ -187,6 +216,13 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/estates                   - Create estate');
   console.log('   PUT    /api/estates/:id               - Update estate');
   console.log('   DELETE /api/estates/:id               - Delete estate');
+  console.log('');
+  console.log('👥 TENANT API ENDPOINTS:');
+  console.log('   GET    /api/tenants                   - List tenants');
+  console.log('   GET    /api/tenants/:id               - Get tenant by id');
+  console.log('   POST   /api/estates/:estateId/tenants - Add tenant to an estate');
+  console.log('   PUT    /api/tenants/:id               - Update tenant');
+  console.log('   DELETE /api/tenants/:id               - Delete tenant');
   console.log('');
   console.log('═'.repeat(60) + '\n');
 });
