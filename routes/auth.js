@@ -9,6 +9,9 @@ const {
   updatePassword,
   forgotPassword,
   resetPassword,
+  forgotPasswordOtp,
+  resetPasswordWithOtp,
+  verifyPasswordOtp,
   createAdmin,
   getAdmins,
   updateAdminStatus,
@@ -92,6 +95,11 @@ router.post('/register-super-admin', validateRegister, handleValidationErrors, r
 router.post('/login', validateLogin, handleValidationErrors, login);
 router.post('/forgotpassword', forgotPassword);
 router.put('/resetpassword/:resettoken', resetPassword);
+
+// OTP-based password reset
+router.post('/forgotpassword-otp', forgotPasswordOtp);
+router.post('/resetpassword-otp', resetPasswordWithOtp);
+router.post('/verify-otp', verifyPasswordOtp);
 
 // Protected routes (require authentication)
 router.get('/logout', logout);

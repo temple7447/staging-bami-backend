@@ -6,6 +6,18 @@ const crypto = require('crypto');
 const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
 
+// Generate a random alphanumeric password of given length (at least one letter and one digit)
+function generateTempPassword(len = 6) {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const all = letters + digits;
+  const pick = set => set[Math.floor(Math.random() * set.length)];
+  let pwd = pick(letters) + pick(digits);
+  for (let i = 2; i < len; i++) pwd += pick(all);
+  // Shuffle to avoid fixed first 2 positions
+  return pwd.split('').sort(() => Math.random() - 0.5).join('');
+}
+
 // Create tenant under an estate
 const createTenant = async (req, res) => {
   try {
@@ -65,7 +77,7 @@ const createTenant = async (req, res) => {
       if (existingUser) {
         userId = existingUser._id;
       } else {
-        generatedPassword = crypto.randomBytes(8).toString('hex');
+        generatedPassword = generateTempPassword(6);
         const newUser = await User.create({
           name: fullName || 'Tenant',
           email: emailAddr,

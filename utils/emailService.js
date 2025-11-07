@@ -76,7 +76,7 @@ exports.sendWelcomeEmail = async (user, temporaryPassword = null) => {
   });
 };
 
-// Password reset email
+// Password reset email (link-based)
 exports.sendPasswordResetEmail = async (user, resetToken) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
@@ -94,6 +94,25 @@ exports.sendPasswordResetEmail = async (user, resetToken) => {
   return await this.sendEmail({
     email: user.email,
     subject: 'Password Reset Request',
+    html: message,
+  });
+};
+
+// OTP password reset email (6-digit)
+exports.sendPasswordResetOtpEmail = async (user, code) => {
+  const message = `
+    <h2>Password Reset Code</h2>
+    <p>Hello ${user.name},</p>
+    <p>Your password reset code is:</p>
+    <p style="font-size: 24px; letter-spacing: 4px;"><strong>${code}</strong></p>
+    <p>This code expires in 10 minutes.</p>
+    <p>If you did not request this, please ignore this email.</p>
+    <p>Best regards,<br>BamiHustle Team</p>
+  `;
+
+  return await exports.sendEmail({
+    email: user.email,
+    subject: 'Your Password Reset Code',
     html: message,
   });
 };
