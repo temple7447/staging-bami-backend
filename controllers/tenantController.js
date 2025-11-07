@@ -422,6 +422,71 @@ const deleteTenant = async (req, res) => {
   }
 };
 
+// Upload/replace tenant profile image (admin for any tenant, or the tenant themselves)
+const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
+
+async function uploadTenantAvatar(req, res) {
+  try {
+    ensureCloudinaryConfigured();
+
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant || !tenant.isActive) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    // Authorization: admin/super_admin OR owner of tenant record
+    const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
+    const isOwner = tenant.user?.toString() === req.user.id;
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ success: false, message: 'Not allowed to update this tenant profile image' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No image file uploaded' });
+    }
+
+    // Destroy previous image if exists
+    if (tenant.profileImagePublicId) {
+      try { await cloudinary.uploader.destroy(tenant.profileImagePublicId, { resource_type: 'image' }); } catch (_) {}
+    }
+
+    const folder = (process.env.CLOUDINARY_FOLDER || 'uploads') + '/avatars';
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({ folder, resource_type: 'image' }, (err, resu) => {
+        if (err) return reject(err);
+        resolve(resu);
+      });
+      stream.end(req.file.buffer);
+    });
+
+    tenant.profileImageUrl = result.secure_url;
+    tenant.profileImagePublicId = result.public_id;
+    tenant.updatedBy = req.user.id;
+    await tenant.save();
+
+    return res.status(200).json({ success: true, message: 'Profile image updated', data: { url: tenant.profileImageUrl, public_id: tenant.profileImagePublicId } });
+  } catch (err) {
+    console.error('Upload avatar error:', err);
+    const status = err.http_code || 500;
+    return res.status(status).json({ success: false, message: err.message || 'Failed to upload profile image' });
+  }
+}
+
+async function uploadMyAvatar(req, res) {
+  try {
+    // Find tenant record linked to this user
+    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
+    }
+    req.params.id = tenant._id.toString();
+    return uploadTenantAvatar(req, res);
+  } catch (err) {
+    console.error('Upload my avatar error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
 module.exports = {
   createTenant,
   getTenants,
@@ -432,4 +497,6 @@ module.exports = {
   listHistory,
   addTransaction,
   listTransactions,
+  uploadTenantAvatar,
+  uploadMyAvatar,
 };

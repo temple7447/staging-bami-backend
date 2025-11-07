@@ -2,6 +2,15 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 
 const { protect } = require('../middleware/auth');
+const multer = require('multer');
+const imageStorage = multer.memoryStorage();
+const imageOnly = (req, file, cb) => {
+  const allowed = ['image/jpeg','image/png','image/gif','image/webp','image/svg+xml'];
+  if (allowed.includes(file.mimetype)) return cb(null, true);
+  cb(new Error('Only image files are allowed'));
+};
+const imageUpload = multer({ storage: imageStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageOnly });
+
 const {
   validateObjectId,
   handleValidationErrors,
@@ -15,6 +24,8 @@ const {
   getTenant,
   updateTenant,
   deleteTenant,
+  uploadTenantAvatar,
+  uploadMyAvatar,
 } = require('../controllers/tenantController');
 
 // Nested: /api/estates/:estateId/tenants (list/create for a given estate)
@@ -36,5 +47,17 @@ router.post('/:id/history', protect, validateObjectId, require('../middleware/va
 // Transaction endpoints
 router.get('/:id/transactions', protect, validateObjectId, handleValidationErrors, require('../controllers/tenantController').listTransactions);
 router.post('/:id/transactions', protect, validateObjectId, require('../middleware/validation').validateTransactionCreate, handleValidationErrors, require('../controllers/tenantController').addTransaction);
+
+// Avatar upload (admin for any tenant, or the tenant themselves)
+router.post('/:id/avatar', protect, validateObjectId, handleValidationErrors, imageUpload.single('file'), uploadTenantAvatar);
+router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
+
+// Multer error handler (JSON)
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err.message?.includes('Only')) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next(err);
+});
 
 module.exports = router;
