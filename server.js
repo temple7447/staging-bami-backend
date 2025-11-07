@@ -8,6 +8,8 @@ const compression = require('compression');
 
 const connectDatabase = require('./config/database');
 const errorHandler = require('./middleware/error');
+const { ensureCloudinaryConfigured } = require('./config/cloudinary');
+const { getMailtrapStatus } = require('./utils/emailService');
 
 // Load env vars
 dotenv.config();
@@ -142,6 +144,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
 app.use('/api/tenants', require('./routes/tenants'));
 app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
+app.use('/api/upload', require('./routes/upload'));
 
 // Handle undefined routes
 app.all('*', (req, res) => {
@@ -204,6 +207,14 @@ const server = app.listen(PORT, () => {
   console.log(`📍 Port: ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
+
+  // Print integrations readiness
+  const emailStatus = getMailtrapStatus();
+  let cloudinaryMsg = 'READY';
+  try { ensureCloudinaryConfigured(); } catch (e) { cloudinaryMsg = `MISSING ${e.message.replace('Missing Cloudinary env vars: ', '')}`; }
+  console.log('');
+  console.log(`✉️  Mailtrap: ${emailStatus.ok ? 'READY' : 'MISSING ' + emailStatus.missing.join(', ')}`);
+  console.log(`☁️  Cloudinary: ${cloudinaryMsg}`);
   console.log('');
   console.log('🔐 AUTH API ENDPOINTS:');
   console.log('   POST   /api/auth/register             - Register user');
@@ -223,6 +234,10 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/estates/:estateId/tenants - Add tenant to an estate');
   console.log('   PUT    /api/tenants/:id               - Update tenant');
   console.log('   DELETE /api/tenants/:id               - Delete tenant');
+  console.log('');
+  console.log('🗂️  UPLOAD API ENDPOINTS:');
+  console.log('   POST   /api/upload/image              - Upload a single image (field: file)');
+  console.log('   POST   /api/upload/video              - Upload a single video (field: file)');
   console.log('');
   console.log('═'.repeat(60) + '\n');
 });

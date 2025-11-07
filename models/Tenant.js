@@ -61,6 +61,8 @@ const TenantSchema = new mongoose.Schema({
   nextDueDate: {
     type: Date
   },
+  // Optional link to a login user account for this tenant
+  user: { type: mongoose.Schema.ObjectId, ref: 'User' },
   history: [HistorySchema],
   isActive: {
     type: Boolean,

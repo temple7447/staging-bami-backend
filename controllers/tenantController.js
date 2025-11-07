@@ -1,6 +1,9 @@
 const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
 const Transaction = require('../models/Transaction');
+const User = require('../models/User');
+const crypto = require('crypto');
+const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
 
 // Create tenant under an estate
@@ -17,22 +20,89 @@ const createTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
 
-    const { unitLabel, tenantName, tenantEmail, tenantPhone, rentAmount, tenantType, electricMeterNumber, nextDueDate, status } = req.body;
-
-    const tenant = await Tenant.create({
-      estate: estateId,
+    const {
       unitLabel,
       tenantName,
+      firstName,
+      surname,
+      otherNames,
       tenantEmail,
+      email,
       tenantPhone,
+      whatsapp,
       rentAmount,
       tenantType,
       electricMeterNumber,
       nextDueDate,
+      status
+    } = req.body;
+
+    // Build full name and contact fields from UI-friendly inputs
+    const fullName = (tenantName && tenantName.trim()) ||
+      [firstName, otherNames, surname].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+
+    const phone = tenantPhone || whatsapp || '';
+    const emailAddr = tenantEmail || email || '';
+
+    // Parse nextDueDate: accept ISO, timestamp, or dd/mm/yyyy
+    let parsedNextDueDate = undefined;
+    if (nextDueDate) {
+      if (typeof nextDueDate === 'string' && /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(nextDueDate)) {
+        const [, d, m, y] = nextDueDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+        const year = parseInt(y.length === 2 ? '20' + y : y, 10);
+        parsedNextDueDate = new Date(year, parseInt(m, 10) - 1, parseInt(d, 10));
+      } else {
+        const dt = new Date(nextDueDate);
+        if (!isNaN(dt.getTime())) parsedNextDueDate = dt;
+      }
+    }
+
+    // Optionally create or link a user account for tenant
+    let userId = undefined;
+    let generatedPassword = null;
+    if (emailAddr) {
+      let existingUser = await User.findOne({ email: emailAddr });
+      if (existingUser) {
+        userId = existingUser._id;
+      } else {
+        generatedPassword = crypto.randomBytes(8).toString('hex');
+        const newUser = await User.create({
+          name: fullName || 'Tenant',
+          email: emailAddr,
+          password: generatedPassword,
+          role: 'user',
+          createdBy: req.user?.id,
+          emailVerified: true
+        });
+        userId = newUser._id;
+      }
+    }
+
+    const tenant = await Tenant.create({
+      estate: estateId,
+      unitLabel,
+      tenantName: fullName,
+      tenantEmail: emailAddr || undefined,
+      tenantPhone: phone || undefined,
+      rentAmount,
+      tenantType,
+      electricMeterNumber,
+      nextDueDate: parsedNextDueDate,
       status,
+      user: userId,
       history: [{ event: 'created', note: 'Tenant record created', meta: { unitLabel, rentAmount }, createdBy: req.user?.id }],
       createdBy: req.user?.id,
     });
+
+    // If we created a brand new user and have an email, send credentials
+    if (emailAddr && generatedPassword) {
+      try {
+        const userDoc = await User.findById(userId);
+        await sendTenantWelcomeEmail(userDoc, generatedPassword, tenant.toObject(), { name: estate.name });
+      } catch (e) {
+        console.log('Failed to send tenant welcome email:', e?.message || e);
+      }
+    }
 
     res.status(201).json({ success: true, message: 'Tenant created successfully', data: tenant });
   } catch (err) {
@@ -144,16 +214,50 @@ const updateTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { unitLabel, tenantName, tenantEmail, tenantPhone, rentAmount, tenantType, electricMeterNumber, nextDueDate } = req.body;
+    const {
+      unitLabel,
+      tenantName,
+      firstName,
+      surname,
+      otherNames,
+      tenantEmail,
+      email,
+      tenantPhone,
+      whatsapp,
+      rentAmount,
+      tenantType,
+      electricMeterNumber,
+      nextDueDate
+    } = req.body;
 
     if (unitLabel !== undefined) tenant.unitLabel = unitLabel;
-    if (tenantName !== undefined) tenant.tenantName = tenantName;
-    if (tenantEmail !== undefined) tenant.tenantEmail = tenantEmail;
-    if (tenantPhone !== undefined) tenant.tenantPhone = tenantPhone;
+
+    // Update name if provided either as full or parts
+    if (tenantName !== undefined || firstName !== undefined || surname !== undefined || otherNames !== undefined) {
+      const fullName = (tenantName && tenantName.trim()) ||
+        [firstName ?? '', otherNames ?? '', surname ?? ''].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (fullName) tenant.tenantName = fullName;
+    }
+
+    if (tenantEmail !== undefined || email !== undefined) tenant.tenantEmail = (tenantEmail || email) || undefined;
+    if (tenantPhone !== undefined || whatsapp !== undefined) tenant.tenantPhone = (tenantPhone || whatsapp) || undefined;
     if (rentAmount !== undefined) tenant.rentAmount = parseInt(rentAmount);
     if (tenantType !== undefined) tenant.tenantType = tenantType;
     if (electricMeterNumber !== undefined) tenant.electricMeterNumber = electricMeterNumber;
-    if (nextDueDate !== undefined) tenant.nextDueDate = nextDueDate;
+
+    if (nextDueDate !== undefined) {
+      let parsed;
+      if (typeof nextDueDate === 'string' && /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(nextDueDate)) {
+        const [, d, m, y] = nextDueDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+        const year = parseInt(y.length === 2 ? '20' + y : y, 10);
+        parsed = new Date(year, parseInt(m, 10) - 1, parseInt(d, 10));
+      } else {
+        const dt = new Date(nextDueDate);
+        if (!isNaN(dt.getTime())) parsed = dt;
+      }
+      tenant.nextDueDate = parsed;
+    }
+
     if (req.user?.id) tenant.updatedBy = req.user.id;
 
     await tenant.save();
