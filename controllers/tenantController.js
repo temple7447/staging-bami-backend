@@ -487,6 +487,36 @@ async function uploadMyAvatar(req, res) {
   }
 }
 
+// Get the logged-in user's tenant record (supports expand like getTenant)
+async function getMyTenant(req, res) {
+  try {
+    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
+    }
+    req.params.id = tenant._id.toString();
+    return getTenant(req, res);
+  } catch (err) {
+    console.error('Get my tenant error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
+// List history for the logged-in tenant
+async function listMyHistory(req, res) {
+  try {
+    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
+    }
+    req.params.id = tenant._id.toString();
+    return listHistory(req, res);
+  } catch (err) {
+    console.error('List my history error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+}
+
 module.exports = {
   createTenant,
   getTenants,
@@ -499,4 +529,6 @@ module.exports = {
   listTransactions,
   uploadTenantAvatar,
   uploadMyAvatar,
+  getMyTenant,
+  listMyHistory,
 };

@@ -26,6 +26,8 @@ const {
   deleteTenant,
   uploadTenantAvatar,
   uploadMyAvatar,
+  getMyTenant,
+  listMyHistory,
 } = require('../controllers/tenantController');
 
 // Nested: /api/estates/:estateId/tenants (list/create for a given estate)
@@ -39,6 +41,10 @@ router.post('/', protect, validateTenantCreate, handleValidationErrors, createTe
 router.get('/:id', protect, validateObjectId, handleValidationErrors, getTenant);
 router.put('/:id', protect, validateObjectId, validateTenantUpdate, handleValidationErrors, updateTenant);
 router.delete('/:id', protect, validateObjectId, handleValidationErrors, deleteTenant);
+
+// Logged-in tenant shortcuts
+router.get('/me', protect, getMyTenant);
+router.get('/me/history', protect, listMyHistory);
 
 // History endpoints
 router.get('/:id/history', protect, validateObjectId, handleValidationErrors, require('../controllers/tenantController').listHistory);
