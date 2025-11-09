@@ -1,43 +1,47 @@
-const nodemailer = require('nodemailer');
+const { MailtrapClient } = require('mailtrap');
 
-// Create reusable transporter object using Gmail SMTP
-const createTransporter = () => {
-  return nodemailer.createTransporter({
-    service: process.env.EMAIL_SERVICE,
-    port: process.env.EMAIL_PORT,
-    secure: false, // true for 465, false for other ports
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD
-    },
-    tls: {
-      rejectUnauthorized: false
-    }
-  });
+const ensureMailtrapConfigured = () => {
+  const missing = [];
+  if (!process.env.MAILTRAP_TOKEN) missing.push('MAILTRAP_TOKEN');
+  if (!process.env.MAILTRAP_SENDER_EMAIL) missing.push('MAILTRAP_SENDER_EMAIL');
+  if (missing.length) throw new Error(`Missing Mailtrap env vars: ${missing.join(', ')}`);
 };
 
-// Send email function
+// Expose a status check for startup/health logs
+const getMailtrapStatus = () => {
+  const missing = [];
+  if (!process.env.MAILTRAP_TOKEN) missing.push('MAILTRAP_TOKEN');
+  if (!process.env.MAILTRAP_SENDER_EMAIL) missing.push('MAILTRAP_SENDER_EMAIL');
+  return { ok: missing.length === 0, missing };
+};
+
+const getClient = () => {
+  ensureMailtrapConfigured();
+  return new MailtrapClient({ token: process.env.MAILTRAP_TOKEN });
+};
+
+const FROM = {
+  email: process.env.MAILTRAP_SENDER_EMAIL,
+  name: process.env.MAILTRAP_SENDER_NAME || 'BamiHustle',
+};
+
+// Send email via Mailtrap API
+exports.getMailtrapStatus = getMailtrapStatus;
+
 exports.sendEmail = async (options) => {
   try {
-    const transporter = createTransporter();
-
-    const message = {
-      from: `${options.fromName || 'BamiHustle'} <${process.env.EMAIL_FROM}>`,
-      to: options.email,
+    const client = getClient();
+    const payload = {
+      from: { email: FROM.email, name: options.fromName || FROM.name },
+      to: [{ email: options.email }],
       subject: options.subject,
       text: options.message,
-      html: options.html || options.message
+      html: options.html || options.message,
     };
-
-    const info = await transporter.sendMail(message);
-    
-    console.log('Email sent successfully:', info.messageId);
-    return {
-      success: true,
-      messageId: info.messageId
-    };
+    const resp = await client.send(payload);
+    return { success: true, messageId: resp?.message_ids?.[0] || null };
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Mailtrap send error:', error?.response?.data || error.message || error);
     throw new Error('Email could not be sent');
   }
 };
@@ -48,7 +52,7 @@ exports.sendWelcomeEmail = async (user, temporaryPassword = null) => {
     ? `
       <h2>Welcome to BamiHustle!</h2>
       <p>Hello ${user.name},</p>
-      <p>Your admin account has been created successfully.</p>
+      <p>Your account has been created successfully.</p>
       <p><strong>Login Details:</strong></p>
       <p>Email: ${user.email}</p>
       <p>Temporary Password: ${temporaryPassword}</p>
@@ -68,11 +72,11 @@ exports.sendWelcomeEmail = async (user, temporaryPassword = null) => {
   return await this.sendEmail({
     email: user.email,
     subject: 'Welcome to BamiHustle!',
-    html: message
+    html: message,
   });
 };
 
-// Password reset email
+// Password reset email (link-based)
 exports.sendPasswordResetEmail = async (user, resetToken) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
 
@@ -90,7 +94,26 @@ exports.sendPasswordResetEmail = async (user, resetToken) => {
   return await this.sendEmail({
     email: user.email,
     subject: 'Password Reset Request',
-    html: message
+    html: message,
+  });
+};
+
+// OTP password reset email (6-digit)
+exports.sendPasswordResetOtpEmail = async (user, code) => {
+  const message = `
+    <h2>Password Reset Code</h2>
+    <p>Hello ${user.name},</p>
+    <p>Your password reset code is:</p>
+    <p style="font-size: 24px; letter-spacing: 4px;"><strong>${code}</strong></p>
+    <p>This code expires in 10 minutes.</p>
+    <p>If you did not request this, please ignore this email.</p>
+    <p>Best regards,<br>BamiHustle Team</p>
+  `;
+
+  return await exports.sendEmail({
+    email: user.email,
+    subject: 'Your Password Reset Code',
+    html: message,
   });
 };
 
@@ -111,7 +134,37 @@ exports.sendVerificationEmail = async (user, verificationToken) => {
   return await this.sendEmail({
     email: user.email,
     subject: 'Email Verification',
-    html: message
+    html: message,
+  });
+};
+
+// Tenant welcome with credentials and key details
+exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate) => {
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+  const message = `
+    <h2>Welcome to ${estate?.name || 'BamiHustle'}</h2>
+    <p>Hello ${user.name},</p>
+    <p>Your tenant portal account has been created. Use the details below to login:</p>
+    <ul>
+      <li><strong>Email:</strong> ${user.email}</li>
+      <li><strong>Temporary Password:</strong> ${temporaryPassword}</li>
+    </ul>
+    <p><strong>Unit Details:</strong></p>
+    <ul>
+      <li>Estate: ${estate?.name || '-'}</li>
+      <li>Unit: ${tenant?.unitLabel || '-'}</li>
+      <li>Rent Amount: ${tenant?.rentAmount != null ? tenant.rentAmount : '-'}</li>
+      <li>Next Due Date: ${tenant?.nextDueDate ? new Date(tenant.nextDueDate).toDateString() : '-'}</li>
+    </ul>
+    <p>Login: <a href="${loginUrl}">${loginUrl}</a></p>
+    <p><strong>Important:</strong> Please change your password after first login.</p>
+    <p>Best regards,<br>BamiHustle Team</p>
+  `;
+
+  return await exports.sendEmail({
+    email: user.email,
+    subject: 'Your Tenant Portal Account',
+    html: message,
   });
 };
 
@@ -127,9 +180,10 @@ exports.sendAdminNotificationEmail = async (adminEmail, subject, message) => {
   return await this.sendEmail({
     email: adminEmail,
     subject: `[BamiHustle] ${subject}`,
-    html: htmlMessage
+    html: htmlMessage,
   });
 };
+<<<<<<< HEAD
 
 // Tenant rent due reminder email
 exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
@@ -192,3 +246,5 @@ exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining
     html: message
   });
 };
+=======
+>>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695

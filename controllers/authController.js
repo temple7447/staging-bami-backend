@@ -6,6 +6,7 @@ const {
   sendPasswordResetEmail,
   sendVerificationEmail 
 } = require('../utils/emailService');
+const { sendPasswordResetOtpEmail } = require('../utils/emailService');
 
 // Generate JWT Token
 const sendTokenResponse = (user, statusCode, res) => {
@@ -215,7 +216,7 @@ exports.updatePassword = async (req, res, next) => {
   }
 };
 
-// @desc    Forgot password
+// @desc    Forgot password (link flow)
 // @route   POST /api/auth/forgotpassword
 // @access  Public
 exports.forgotPassword = async (req, res, next) => {
@@ -261,7 +262,7 @@ exports.forgotPassword = async (req, res, next) => {
   }
 };
 
-// @desc    Reset password
+// @desc    Reset password (link flow)
 // @route   PUT /api/auth/resetpassword/:resettoken
 // @access  Public
 exports.resetPassword = async (req, res, next) => {
@@ -406,6 +407,106 @@ exports.updateAdminStatus = async (req, res, next) => {
 // @desc    Delete admin
 // @route   DELETE /api/auth/admin/:id
 // @access  Private (Super Admin only)
+// @desc    Forgot password - send 6-digit OTP to email
+// @route   POST /api/auth/forgotpassword-otp
+// @access  Public
+exports.forgotPasswordOtp = async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // To avoid account enumeration, return success but do nothing
+      return res.status(200).json({ success: true, message: 'If the email exists, an OTP has been sent' });
+    }
+
+    // Generate 6-digit code
+    const code = (Math.floor(100000 + Math.random() * 900000)).toString();
+    const hash = require('crypto').createHash('sha256').update(code).digest('hex');
+
+    user.passwordResetOtpHash = hash;
+    user.passwordResetOtpExpire = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+    await user.save({ validateBeforeSave: false });
+
+    await sendPasswordResetOtpEmail(user, code);
+
+    return res.status(200).json({ success: true, message: 'OTP sent to email' });
+  } catch (error) {
+    console.error('forgotPasswordOtp error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// @desc    Reset password using email + 6-digit OTP
+// @route   POST /api/auth/resetpassword-otp
+// @access  Public
+exports.resetPasswordWithOtp = async (req, res) => {
+  try {
+    const { email, code, password } = req.body || {};
+    if (!email || !code || !password) {
+      return res.status(400).json({ success: false, message: 'Email, code and password are required' });
+    }
+
+    const user = await User.findOne({ email }).select('+password');
+    if (!user || !user.passwordResetOtpHash || !user.passwordResetOtpExpire) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired code' });
+    }
+
+    if (user.passwordResetOtpExpire.getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: 'Code expired' });
+    }
+
+    const hash = require('crypto').createHash('sha256').update(code).digest('hex');
+    if (hash !== user.passwordResetOtpHash) {
+      return res.status(400).json({ success: false, message: 'Invalid code' });
+    }
+
+    user.password = password;
+    user.passwordResetOtpHash = undefined;
+    user.passwordResetOtpExpire = undefined;
+    await user.save();
+
+    return res.status(200).json({ success: true, message: 'Password reset successful' });
+  } catch (error) {
+    console.error('resetPasswordWithOtp error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// @desc    Verify password reset OTP (no password change)
+// @route   POST /api/auth/verify-otp
+// @access  Public
+exports.verifyPasswordOtp = async (req, res) => {
+  try {
+    const { email, code } = req.body || {};
+    if (!email || !code) {
+      return res.status(400).json({ success: false, message: 'Email and code are required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user || !user.passwordResetOtpHash || !user.passwordResetOtpExpire) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired code' });
+    }
+
+    if (user.passwordResetOtpExpire.getTime() < Date.now()) {
+      return res.status(400).json({ success: false, message: 'Code expired' });
+    }
+
+    const hash = require('crypto').createHash('sha256').update(code).digest('hex');
+    if (hash !== user.passwordResetOtpHash) {
+      return res.status(400).json({ success: false, message: 'Invalid code' });
+    }
+
+    return res.status(200).json({ success: true, message: 'OTP verified' });
+  } catch (error) {
+    console.error('verifyPasswordOtp error:', error);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 exports.deleteAdmin = async (req, res, next) => {
   try {
     const admin = await User.findById(req.params.id);

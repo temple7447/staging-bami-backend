@@ -47,7 +47,10 @@ const UserSchema = new mongoose.Schema({
   },
   emailVerificationToken: String,
   passwordResetToken: String,
-  passwordResetExpire: Date
+  passwordResetExpire: Date,
+  // OTP-based password reset (6-digit) storage
+  passwordResetOtpHash: String,
+  passwordResetOtpExpire: Date
 }, {
   timestamps: true
 });
