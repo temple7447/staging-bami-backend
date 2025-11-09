@@ -130,3 +130,65 @@ exports.sendAdminNotificationEmail = async (adminEmail, subject, message) => {
     html: htmlMessage
   });
 };
+
+// Tenant rent due reminder email
+exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
+  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  
+  const message = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #007bff;">Rent Payment Reminder</h2>
+      <p>Hello ${tenant.tenantName},</p>
+      <p>This is a friendly reminder that your rent payment is due in <strong>${daysRemaining} day(s)</strong>.</p>
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <p><strong>Payment Details:</strong></p>
+        <p><strong>Estate:</strong> ${estate.name}</p>
+        <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
+        <p><strong>Rent Amount:</strong> ${tenant.rentAmount}</p>
+        <p><strong>Due Date:</strong> ${formattedDate}</p>
+      </div>
+      <p>Please ensure your payment is made on or before the due date to avoid any penalties.</p>
+      <p>If you have already made this payment, please disregard this reminder.</p>
+      <p>For any queries, please contact your estate management.</p>
+      <p>Best regards,<br><strong>BamiHustle Management System</strong></p>
+    </div>
+  `;
+
+  return await this.sendEmail({
+    email: tenant.tenantEmail,
+    subject: `Rent Payment Reminder - ${daysRemaining} Day(s) Until Due Date`,
+    html: message
+  });
+};
+
+// Admin rent due reminder email
+exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining) => {
+  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  
+  const message = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #ffc107;">Upcoming Rent Payment Alert</h2>
+      <p>Hello Admin,</p>
+      <p>The following tenant has an upcoming rent payment due in <strong>${daysRemaining} day(s)</strong>.</p>
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <p><strong>Tenant Details:</strong></p>
+        <p><strong>Name:</strong> ${tenant.tenantName}</p>
+        <p><strong>Email:</strong> ${tenant.tenantEmail || 'N/A'}</p>
+        <p><strong>Phone:</strong> ${tenant.tenantPhone || 'N/A'}</p>
+        <p><strong>Estate:</strong> ${estate.name}</p>
+        <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
+        <p><strong>Rent Amount:</strong> ${tenant.rentAmount}</p>
+        <p><strong>Due Date:</strong> ${formattedDate}</p>
+        <p><strong>Status:</strong> ${tenant.status}</p>
+      </div>
+      <p>This is an automated alert from BamiHustle Management System.</p>
+      <p>Best regards,<br><strong>BamiHustle System</strong></p>
+    </div>
+  `;
+
+  return await this.sendEmail({
+    email: adminEmail,
+    subject: `[BamiHustle Alert] Upcoming Rent Payment - ${daysRemaining} Day(s) - ${tenant.tenantName}`,
+    html: message
+  });
+};

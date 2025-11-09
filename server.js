@@ -8,6 +8,7 @@ const compression = require('compression');
 
 const connectDatabase = require('./config/database');
 const errorHandler = require('./middleware/error');
+const { initializeScheduler } = require('./utils/scheduler');
 
 // Load env vars
 dotenv.config();
@@ -16,6 +17,13 @@ dotenv.config();
 connectDatabase();
 
 const app = express();
+
+// Initialize reminder scheduler
+try {
+  initializeScheduler();
+} catch (error) {
+  console.error('Failed to initialize reminder scheduler:', error.message);
+}
 
 // Trust proxy
 app.set('trust proxy', 1);
@@ -142,6 +150,8 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
 app.use('/api/tenants', require('./routes/tenants'));
 app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
+app.use('/api/wallet', require('./routes/wallet'));
+app.use('/api/upload', require('./routes/upload'));
 
 // Handle undefined routes
 app.all('*', (req, res) => {
@@ -223,6 +233,20 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/estates/:estateId/tenants - Add tenant to an estate');
   console.log('   PUT    /api/tenants/:id               - Update tenant');
   console.log('   DELETE /api/tenants/:id               - Delete tenant');
+  console.log('');
+  console.log('🗂️  UPLOAD API ENDPOINTS:');
+  console.log('   POST   /api/upload/image              - Upload a single image (field: file)');
+  console.log('   POST   /api/upload/video              - Upload a single video (field: file)');
+  console.log('');
+  console.log('📧 SCHEDULER SERVICES:');
+  console.log('   Daily reminder check at 08:00 AM      - Sends rent payment reminders (7, 3, 1 day)');
+  console.log('');
+  console.log('═'.repeat(60) + '\n');
+  console.log('   GET    /api/wallet                    - Get wallet balance');
+  console.log('   POST   /api/wallet                    - Create wallet');
+  console.log('   POST   /api/wallet/add-funds          - Add funds to wallet');
+  console.log('   POST   /api/wallet/deduct-funds       - Deduct funds from wallet');
+  console.log('   PUT    /api/wallet/currency           - Update wallet currency');
   console.log('');
   console.log('═'.repeat(60) + '\n');
 });
