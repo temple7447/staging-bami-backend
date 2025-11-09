@@ -8,12 +8,9 @@ const compression = require('compression');
 
 const connectDatabase = require('./config/database');
 const errorHandler = require('./middleware/error');
-<<<<<<< HEAD
 const { initializeScheduler } = require('./utils/scheduler');
-=======
 const { ensureCloudinaryConfigured } = require('./config/cloudinary');
 const { getMailtrapStatus } = require('./utils/emailService');
->>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695
 
 // Load env vars
 dotenv.config();
@@ -155,10 +152,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
 app.use('/api/tenants', require('./routes/tenants'));
 app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
-<<<<<<< HEAD
 app.use('/api/wallet', require('./routes/wallet'));
-=======
->>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695
 app.use('/api/upload', require('./routes/upload'));
 
 // Handle undefined routes
@@ -254,19 +248,16 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/upload/image              - Upload a single image (field: file)');
   console.log('   POST   /api/upload/video              - Upload a single video (field: file)');
   console.log('');
-<<<<<<< HEAD
-  console.log('📧 SCHEDULER SERVICES:');
-  console.log('   Daily reminder check at 08:00 AM      - Sends rent payment reminders (7, 3, 1 day)');
-  console.log('');
-  console.log('═'.repeat(60) + '\n');
+  console.log('💰 WALLET API ENDPOINTS:');
   console.log('   GET    /api/wallet                    - Get wallet balance');
   console.log('   POST   /api/wallet                    - Create wallet');
   console.log('   POST   /api/wallet/add-funds          - Add funds to wallet');
   console.log('   POST   /api/wallet/deduct-funds       - Deduct funds from wallet');
   console.log('   PUT    /api/wallet/currency           - Update wallet currency');
   console.log('');
-=======
->>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695
+  console.log('📧 SCHEDULER SERVICES:');
+  console.log('   Daily reminder check at 08:00 AM      - Sends rent payment reminders (7, 3, 1 day)');
+  console.log('');
   console.log('═'.repeat(60) + '\n');
 });
 

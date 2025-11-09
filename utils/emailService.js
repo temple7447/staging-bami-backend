@@ -25,6 +25,16 @@ const FROM = {
   name: process.env.MAILTRAP_SENDER_NAME || 'BamiHustle',
 };
 
+// Helper to format currency (Nigeria Naira)
+const formatCurrency = (amount) => {
+  return new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount);
+};
+
 // Send email via Mailtrap API
 exports.getMailtrapStatus = getMailtrapStatus;
 
@@ -141,6 +151,8 @@ exports.sendVerificationEmail = async (user, verificationToken) => {
 // Tenant welcome with credentials and key details
 exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate) => {
   const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+  const rentAmountFormatted = formatCurrency(tenant?.rentAmount || 0);
+  
   const message = `
     <h2>Welcome to ${estate?.name || 'BamiHustle'}</h2>
     <p>Hello ${user.name},</p>
@@ -153,8 +165,8 @@ exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate)
     <ul>
       <li>Estate: ${estate?.name || '-'}</li>
       <li>Unit: ${tenant?.unitLabel || '-'}</li>
-      <li>Rent Amount: ${tenant?.rentAmount != null ? tenant.rentAmount : '-'}</li>
-      <li>Next Due Date: ${tenant?.nextDueDate ? new Date(tenant.nextDueDate).toDateString() : '-'}</li>
+      <li>Rent Amount: ${rentAmountFormatted}</li>
+      <li>Next Due Date: ${tenant?.nextDueDate ? new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</li>
     </ul>
     <p>Login: <a href="${loginUrl}">${loginUrl}</a></p>
     <p><strong>Important:</strong> Please change your password after first login.</p>
@@ -183,11 +195,11 @@ exports.sendAdminNotificationEmail = async (adminEmail, subject, message) => {
     html: htmlMessage,
   });
 };
-<<<<<<< HEAD
 
 // Tenant rent due reminder email
 exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
-  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+  const rentAmountFormatted = formatCurrency(tenant.rentAmount);
   
   const message = `
     <div style="font-family: Arial, sans-serif; max-width: 600px;">
@@ -198,7 +210,7 @@ exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
         <p><strong>Payment Details:</strong></p>
         <p><strong>Estate:</strong> ${estate.name}</p>
         <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
-        <p><strong>Rent Amount:</strong> ${tenant.rentAmount}</p>
+        <p><strong>Rent Amount:</strong> ${rentAmountFormatted}</p>
         <p><strong>Due Date:</strong> ${formattedDate}</p>
       </div>
       <p>Please ensure your payment is made on or before the due date to avoid any penalties.</p>
@@ -217,7 +229,8 @@ exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
 
 // Admin rent due reminder email
 exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining) => {
-  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+  const rentAmountFormatted = formatCurrency(tenant.rentAmount);
   
   const message = `
     <div style="font-family: Arial, sans-serif; max-width: 600px;">
@@ -231,7 +244,7 @@ exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining
         <p><strong>Phone:</strong> ${tenant.tenantPhone || 'N/A'}</p>
         <p><strong>Estate:</strong> ${estate.name}</p>
         <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
-        <p><strong>Rent Amount:</strong> ${tenant.rentAmount}</p>
+        <p><strong>Rent Amount:</strong> ${rentAmountFormatted}</p>
         <p><strong>Due Date:</strong> ${formattedDate}</p>
         <p><strong>Status:</strong> ${tenant.status}</p>
       </div>
@@ -246,5 +259,3 @@ exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining
     html: message
   });
 };
-=======
->>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695

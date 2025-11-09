@@ -32,11 +32,8 @@
     "mongoose": "^8.0.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
-<<<<<<< HEAD
     "node-schedule": "^2.1.1",
     "nodemailer": "^6.9.7",
-=======
->>>>>>> ef398eec00c5a99099a67eeef0ecd54c58ed2695
     "uuid": "^13.0.0"
   },
   "devDependencies": {
