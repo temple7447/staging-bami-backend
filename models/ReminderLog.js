@@ -13,7 +13,7 @@ const ReminderLogSchema = new mongoose.Schema({
   },
   reminderType: {
     type: String,
-    enum: ['7-day', '3-day', '1-day'],
+    enum: ['3-month', '2-month', '1-month', '2-week', '7-day', '3-day', '1-day'],
     required: true
   },
   tenantEmail: {

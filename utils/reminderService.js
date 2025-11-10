@@ -6,7 +6,7 @@ const { sendRentReminder, sendAdminRentReminder } = require('./emailService');
 
 /**
  * Check for upcoming due dates and send reminders
- * Sends reminders at 7 days, 3 days, and 1 day before due date
+ * Sends reminders at 3 months, 2 months, 1 month, 2 weeks, 7 days, 3 days, and 1 day before due date
  */
 const checkAndSendReminders = async () => {
   try {
@@ -15,8 +15,12 @@ const checkAndSendReminders = async () => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Define reminder thresholds
+    // Define reminder thresholds (long-term to short-term)
     const reminderThresholds = [
+      { days: 90, type: '3-month' },
+      { days: 60, type: '2-month' },
+      { days: 30, type: '1-month' },
+      { days: 14, type: '2-week' },
       { days: 7, type: '7-day' },
       { days: 3, type: '3-day' },
       { days: 1, type: '1-day' }
