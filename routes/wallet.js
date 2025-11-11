@@ -5,8 +5,7 @@ const {
   getWallet,
   createWallet,
   addFunds,
-  deductFunds,
-  updateCurrency
+  deductFunds
 } = require('../controllers/walletController');
 
 const router = express.Router();
@@ -16,8 +15,7 @@ router.get('/', protect, getWallet);
 
 // Create a new wallet
 router.post('/', protect, [
-  body('userId').isMongoId().withMessage('Invalid user ID'),
-  body('currency').optional().isIn(['GBP', 'USD', 'EUR']).withMessage('Invalid currency')
+  body('userId').isMongoId().withMessage('Invalid user ID')
 ], createWallet);
 
 // Add funds to wallet
@@ -29,10 +27,5 @@ router.post('/add-funds', protect, [
 router.post('/deduct-funds', protect, [
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0')
 ], deductFunds);
-
-// Update wallet currency
-router.put('/currency', protect, [
-  body('currency').isIn(['GBP', 'USD', 'EUR']).withMessage('Invalid currency')
-], updateCurrency);
 
 module.exports = router;

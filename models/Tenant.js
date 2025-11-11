@@ -18,11 +18,15 @@ const TenantSchema = new mongoose.Schema({
     ref: 'Estate',
     required: true
   },
+  unit: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'Unit',
+    required: [true, 'Unit is required']
+  },
   unitLabel: {
     type: String,
-    required: [true, 'Unit label is required'],
     trim: true,
-    maxlength: [100, 'Unit label cannot be more than 100 characters']
+    default: ''
   },
   tenantName: {
     type: String,
@@ -41,7 +45,7 @@ const TenantSchema = new mongoose.Schema({
   },
   rentAmount: {
     type: Number,
-    required: [true, 'Rent amount is required'],
+    default: 0,
     min: [0, 'Rent amount cannot be negative']
   },
   tenantType: {
@@ -56,7 +60,8 @@ const TenantSchema = new mongoose.Schema({
   },
   electricMeterNumber: {
     type: String,
-    trim: true
+    trim: true,
+    default: ''
   },
   nextDueDate: {
     type: Date
@@ -87,7 +92,10 @@ const TenantSchema = new mongoose.Schema({
 // Unique unit per active tenant in an estate
 TenantSchema.index(
   { estate: 1, unitLabel: 1, isActive: 1 },
-  { unique: true, partialFilterExpression: { isActive: true } }
+  { 
+    unique: true, 
+    partialFilterExpression: { isActive: true } 
+  }
 );
 
 module.exports = mongoose.model('Tenant', TenantSchema);

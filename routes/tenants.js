@@ -34,29 +34,26 @@ const {
 router.get('/', protect, getTenants);
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
 
-// Non-nested: /api/tenants (list all)
-// When mounted at /api/tenants, estateId is undefined so returns all
-
-// Single tenant ops
-router.get('/:id', protect, validateObjectId, handleValidationErrors, getTenant);
-router.put('/:id', protect, validateObjectId, validateTenantUpdate, handleValidationErrors, updateTenant);
-router.delete('/:id', protect, validateObjectId, handleValidationErrors, deleteTenant);
-
-// Logged-in tenant shortcuts
+// Special routes (must be before /:id routes)
 router.get('/me', protect, getMyTenant);
 router.get('/me/history', protect, listMyHistory);
+router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
+
+// Single tenant ops - parameterized routes
+router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getTenant);
+router.put('/:id', protect, validateObjectId('id'), validateTenantUpdate, handleValidationErrors, updateTenant);
+router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteTenant);
 
 // History endpoints
-router.get('/:id/history', protect, validateObjectId, handleValidationErrors, require('../controllers/tenantController').listHistory);
-router.post('/:id/history', protect, validateObjectId, require('../middleware/validation').validateHistoryCreate, handleValidationErrors, require('../controllers/tenantController').addHistory);
+router.get('/:id/history', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listHistory);
+router.post('/:id/history', protect, validateObjectId('id'), require('../middleware/validation').validateHistoryCreate, handleValidationErrors, require('../controllers/tenantController').addHistory);
 
 // Transaction endpoints
-router.get('/:id/transactions', protect, validateObjectId, handleValidationErrors, require('../controllers/tenantController').listTransactions);
-router.post('/:id/transactions', protect, validateObjectId, require('../middleware/validation').validateTransactionCreate, handleValidationErrors, require('../controllers/tenantController').addTransaction);
+router.get('/:id/transactions', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listTransactions);
+router.post('/:id/transactions', protect, validateObjectId('id'), require('../middleware/validation').validateTransactionCreate, handleValidationErrors, require('../controllers/tenantController').addTransaction);
 
-// Avatar upload (admin for any tenant, or the tenant themselves)
-router.post('/:id/avatar', protect, validateObjectId, handleValidationErrors, imageUpload.single('file'), uploadTenantAvatar);
-router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
+// Avatar upload
+router.post('/:id/avatar', protect, validateObjectId('id'), handleValidationErrors, imageUpload.single('file'), uploadTenantAvatar);
 
 // Multer error handler (JSON)
 router.use((err, req, res, next) => {

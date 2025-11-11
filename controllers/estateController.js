@@ -2,6 +2,7 @@ const Estate = require('../models/Estate');
 const Tenant = require('../models/Tenant');
 const Transaction = require('../models/Transaction');
 const { validationResult } = require('express-validator');
+const { logError, logInfo, logWarning } = require('../utils/logger');
 
 // Create estate
 const createEstate = async (req, res) => {
@@ -28,10 +29,11 @@ const createEstate = async (req, res) => {
 
     res.status(201).json({ success: true, message: 'Estate created successfully', data: estate });
   } catch (err) {
+    logError('POST /api/estates', err, { name, description, totalUnits });
     if (err.name === 'ValidationError') {
+      logWarning('Validation error on estate creation', { message: err.message });
       return res.status(400).json({ success: false, message: err.message });
     }
-    console.error('Create estate error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while creating estate' });
   }
 };
@@ -63,7 +65,7 @@ const getEstates = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error('Get estates error:', err);
+    logError('GET /api/estates', err, { page, limit, search });
     res.status(500).json({ success: false, message: 'Server error occurred while fetching estates' });
   }
 };
@@ -77,10 +79,10 @@ const getEstate = async (req, res) => {
     }
     res.status(200).json({ success: true, data: estate });
   } catch (err) {
+    logError('GET /api/estates/:id', err, { estateId: req.params.id });
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
-    console.error('Get estate error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while fetching estate' });
   }
 };
@@ -116,13 +118,14 @@ const updateEstate = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Estate updated successfully', data: estate });
   } catch (err) {
+    logError('PUT /api/estates/:id', err, { estateId: req.params.id, name, totalUnits });
     if (err.name === 'ValidationError') {
+      logWarning('Validation error on estate update', { message: err.message });
       return res.status(400).json({ success: false, message: err.message });
     }
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
-    console.error('Update estate error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while updating estate' });
   }
 };
@@ -160,10 +163,10 @@ const getEstateOverview = async (req, res) => {
       }
     });
   } catch (err) {
+    logError('GET /api/estates/:id/overview', err, { estateId: req.params.id });
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
-    console.error('Estate overview error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while fetching estate overview' });
   }
 };
@@ -182,10 +185,10 @@ const deleteEstate = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Estate deleted successfully' });
   } catch (err) {
+    logError('DELETE /api/estates/:id', err, { estateId: req.params.id });
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
-    console.error('Delete estate error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while deleting estate' });
   }
 };

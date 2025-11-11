@@ -21,7 +21,7 @@ const getClient = () => {
 };
 
 const FROM = {
-  email: process.env.MAILTRAP_SENDER_EMAIL,
+  email: process.env.MAILTRAP_SENDER_EMAIL || 'noreply@bamihustle.com',
   name: process.env.MAILTRAP_SENDER_NAME || 'BamiHustle',
 };
 
@@ -40,9 +40,23 @@ exports.getMailtrapStatus = getMailtrapStatus;
 
 exports.sendEmail = async (options) => {
   try {
+    // Validate required fields
+    if (!options.email) {
+      throw new Error('Recipient email is required');
+    }
+    if (!options.subject) {
+      throw new Error('Email subject is required');
+    }
+    if (!options.html && !options.message) {
+      throw new Error('Email body (html or message) is required');
+    }
+    
     const client = getClient();
     const payload = {
-      from: { email: FROM.email, name: options.fromName || FROM.name },
+      from: { 
+        email: options.from || FROM.email, 
+        name: options.fromName || FROM.name 
+      },
       to: [{ email: options.email }],
       subject: options.subject,
       text: options.message,

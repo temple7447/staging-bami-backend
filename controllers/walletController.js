@@ -15,7 +15,8 @@ const getWallet = async (req, res) => {
       success: true, 
       data: {
         ...wallet.toObject(),
-        currencySymbol: wallet.currency === 'GBP' ? '£' : wallet.currency === 'USD' ? '$' : '€'
+        currencySymbol: '₦',
+        currency: 'NGN'
       }
     });
   } catch (err) {
@@ -32,7 +33,7 @@ const createWallet = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Validation errors', errors: errors.array() });
     }
 
-    const { userId, currency = 'GBP' } = req.body;
+    const { userId } = req.body;
 
     // Check if user exists
     const user = await User.findById(userId);
@@ -48,7 +49,7 @@ const createWallet = async (req, res) => {
 
     const wallet = await Wallet.create({
       userId,
-      currency: currency.toUpperCase()
+      currency: 'NGN'
     });
 
     res.status(201).json({ success: true, message: 'Wallet created successfully', data: wallet });
@@ -83,7 +84,8 @@ const addFunds = async (req, res) => {
       message: 'Funds added successfully', 
       data: {
         ...wallet.toObject(),
-        currencySymbol: '£'
+        currencySymbol: '₦',
+        currency: 'NGN'
       }
     });
   } catch (err) {
@@ -121,7 +123,8 @@ const deductFunds = async (req, res) => {
       message: 'Funds deducted successfully', 
       data: {
         ...wallet.toObject(),
-        currencySymbol: '£'
+        currencySymbol: '₦',
+        currency: 'NGN'
       }
     });
   } catch (err) {
@@ -130,40 +133,9 @@ const deductFunds = async (req, res) => {
   }
 };
 
-// Update currency
-const updateCurrency = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, message: 'Validation errors', errors: errors.array() });
-    }
-
-    const { currency } = req.body;
-
-    const wallet = await Wallet.findOne({ userId: req.user.id });
-    if (!wallet) {
-      return res.status(404).json({ success: false, message: 'Wallet not found' });
-    }
-
-    wallet.currency = currency.toUpperCase();
-    wallet.lastUpdated = new Date();
-    await wallet.save();
-
-    res.status(200).json({ 
-      success: true, 
-      message: 'Currency updated successfully', 
-      data: wallet
-    });
-  } catch (err) {
-    console.error('Update currency error:', err);
-    res.status(500).json({ success: false, message: 'Server error occurred while updating currency' });
-  }
-};
-
 module.exports = {
   getWallet,
   createWallet,
   addFunds,
-  deductFunds,
-  updateCurrency
+  deductFunds
 };

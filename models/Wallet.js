@@ -14,9 +14,9 @@ const WalletSchema = new mongoose.Schema({
   },
   currency: {
     type: String,
-    default: 'GBP',
-    enum: ['GBP', 'USD', 'EUR'],
-    required: true
+    default: 'NGN',
+    enum: ['NGN'],
+    immutable: true
   },
   totalEarnings: {
     type: Number,

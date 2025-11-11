@@ -1,10 +1,12 @@
 const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
+const Unit = require('../models/Unit');
 const Transaction = require('../models/Transaction');
 const User = require('../models/User');
 const crypto = require('crypto');
 const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
+const { logError, logInfo, logWarning } = require('../utils/logger');
 
 // Generate a random alphanumeric password of given length (at least one letter and one digit)
 function generateTempPassword(len = 6) {
@@ -20,21 +22,23 @@ function generateTempPassword(len = 6) {
 
 // Create tenant under an estate
 const createTenant = async (req, res) => {
+  // Extract these early so they're available in error handling
+  const unitId = req.body?.unitId;
+  const tenantName = req.body?.tenantName;
+  const { estateId } = req.params;
+
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ success: false, message: 'Validation errors', errors: errors.array() });
     }
 
-    const { estateId } = req.params;
     const estate = await Estate.findById(estateId);
     if (!estate || !estate.isActive) {
       return res.status(404).json({ success: false, message: 'Estate not found' });
     }
 
     const {
-      unitLabel,
-      tenantName,
       firstName,
       surname,
       otherNames,
@@ -42,12 +46,23 @@ const createTenant = async (req, res) => {
       email,
       tenantPhone,
       whatsapp,
-      rentAmount,
       tenantType,
-      electricMeterNumber,
-      nextDueDate,
-      status
+      nextDueDate
     } = req.body;
+
+    if (!unitId) {
+      return res.status(400).json({ success: false, message: 'Unit ID is required' });
+    }
+
+    // Verify unit exists and is vacant
+    const unit = await Unit.findOne({ _id: unitId, estate: estateId, isActive: true });
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Unit not found in this estate' });
+    }
+
+    if (unit.status === 'occupied') {
+      return res.status(409).json({ success: false, message: 'This unit is already occupied' });
+    }
 
     // Build full name and contact fields from UI-friendly inputs
     const fullName = (tenantName && tenantName.trim()) ||
@@ -83,7 +98,7 @@ const createTenant = async (req, res) => {
           email: emailAddr,
           password: generatedPassword,
           role: 'user',
-          createdBy: req.user?.id,
+          createdBy: req.user?._id,
           emailVerified: true
         });
         userId = newUser._id;
@@ -92,19 +107,27 @@ const createTenant = async (req, res) => {
 
     const tenant = await Tenant.create({
       estate: estateId,
-      unitLabel,
+      unit: unitId,
+      unitLabel: unit.label,
       tenantName: fullName,
       tenantEmail: emailAddr || undefined,
       tenantPhone: phone || undefined,
-      rentAmount,
+      rentAmount: unit.monthlyPrice,
       tenantType,
-      electricMeterNumber,
+      electricMeterNumber: unit.meterNumber,
       nextDueDate: parsedNextDueDate,
-      status,
+      status: 'occupied',
       user: userId,
-      history: [{ event: 'created', note: 'Tenant record created', meta: { unitLabel, rentAmount }, createdBy: req.user?.id }],
-      createdBy: req.user?.id,
+      history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice }, createdBy: req.user?._id }],
+      createdBy: req.user?._id,
     });
+
+    // Update unit to mark as occupied
+    unit.occupiedBy = tenant._id;
+    unit.status = 'occupied';
+    unit.occupiedSince = new Date();
+    unit.updatedBy = req.user?._id;
+    await unit.save();
 
     // If we created a brand new user and have an email, send credentials
     if (emailAddr && generatedPassword) {
@@ -118,13 +141,17 @@ const createTenant = async (req, res) => {
 
     res.status(201).json({ success: true, message: 'Tenant created successfully', data: tenant });
   } catch (err) {
+    logError('POST /api/tenants', err, { unitId: req.body?.unitId, tenantName: req.body?.tenantName, estateId });
+    
     if (err.code === 11000) {
-      return res.status(400).json({ success: false, message: 'A tenant already exists for this unit in the estate' });
+      const message = 'A tenant already exists for this unit in the estate';
+      logWarning('Duplicate tenant entry attempted', { unitId, tenantName });
+      return res.status(400).json({ success: false, message });
     }
     if (err.name === 'ValidationError') {
+      logWarning('Validation error on tenant creation', { message: err.message });
       return res.status(400).json({ success: false, message: err.message });
     }
-    console.error('Create tenant error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while creating tenant' });
   }
 };
@@ -139,14 +166,13 @@ const getTenants = async (req, res) => {
     if (estateId) filter.estate = estateId;
     if (search) filter.$or = [
       { tenantName: new RegExp(search, 'i') },
-      { unitLabel: new RegExp(search, 'i') },
       { tenantEmail: new RegExp(search, 'i') },
       { tenantPhone: new RegExp(search, 'i') },
     ];
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [items, total] = await Promise.all([
-      Tenant.find(filter).populate('estate', 'name').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      Tenant.find(filter).populate('estate', 'name').populate('unit', 'label').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
       Tenant.countDocuments(filter)
     ]);
 
@@ -154,7 +180,7 @@ const getTenants = async (req, res) => {
       currentPage: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), totalItems: total, itemsPerPage: parseInt(limit)
     }});
   } catch (err) {
-    console.error('Get tenants error:', err);
+    logError('GET /api/tenants', err, { estateId, page, limit });
     res.status(500).json({ success: false, message: 'Server error occurred while fetching tenants' });
   }
 };
@@ -166,14 +192,22 @@ const getTenant = async (req, res) => {
     const includeHistory = expand?.includes('history');
     const includeTx = expand?.includes('transactions');
 
-    const tenant = await Tenant.findById(req.params.id).populate('estate', 'name');
+    console.log('[getTenant] Fetching tenant:', req.params.id, 'with expand:', expand);
+    
+    const tenant = await Tenant.findById(req.params.id).populate('estate', 'name').populate('unit', 'label monthlyPrice');
+    
+    console.log('[getTenant] Query result:', tenant ? 'found' : 'not found');
+    
     if (!tenant || !tenant.isActive) {
+      console.log('[getTenant] Tenant not found or inactive:', req.params.id);
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
+    
+    console.log('[getTenant] Tenant found:', tenant._id);
 
     const overview = {
       name: tenant.tenantName,
-      unit: tenant.unitLabel,
+      unit: tenant.unit ? tenant.unit.label : 'N/A',
       email: tenant.tenantEmail,
       phone: tenant.tenantPhone,
       rent: tenant.rentAmount,
@@ -205,10 +239,10 @@ const getTenant = async (req, res) => {
 
     res.status(200).json(response);
   } catch (err) {
+    logError('GET /api/tenants/:id', err, { tenantId: req.params.id, expand });
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
-    console.error('Get tenant error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while fetching tenant' });
   }
 };
@@ -276,16 +310,18 @@ const updateTenant = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Tenant updated successfully', data: tenant });
   } catch (err) {
+    logError('PUT /api/tenants/:id', err, { tenantId: req.params.id });
     if (err.code === 11000) {
+      logWarning('Duplicate tenant entry on update', { tenantId: req.params.id });
       return res.status(400).json({ success: false, message: 'A tenant already exists for this unit in the estate' });
     }
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
     if (err.name === 'ValidationError') {
+      logWarning('Validation error on tenant update', { message: err.message });
       return res.status(400).json({ success: false, message: err.message });
     }
-    console.error('Update tenant error:', err);
     res.status(500).json({ success: false, message: 'Server error occurred while updating tenant' });
   }
 };

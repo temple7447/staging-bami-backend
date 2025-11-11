@@ -14,8 +14,8 @@ const handleValidationErrors = (req, res, next) => {
 };
 
 // MongoDB ObjectId validation
-const validateObjectId = [
-  param('id').isMongoId().withMessage('Invalid ID format')
+const validateObjectId = (paramName = 'id') => [
+  param(paramName).isMongoId().withMessage('Invalid ID format')
 ];
 
 // Estate validators
@@ -50,7 +50,7 @@ const validateEstateUpdate = [
 
 // Tenant validators
 const validateTenantCreate = [
-  check('unitLabel').trim().notEmpty().withMessage('Unit label is required').isLength({ max: 100 }),
+  check('unitId').trim().notEmpty().withMessage('Unit ID is required').isMongoId().withMessage('Invalid unit ID'),
 
   // Accept either tenantName OR (firstName + surname); otherNames optional
   check('tenantName').optional().trim().isLength({ max: 150 }).withMessage('Tenant name cannot be more than 150 characters'),
@@ -72,20 +72,19 @@ const validateTenantCreate = [
   check('tenantPhone').optional().isLength({ min: 5, max: 25 }).withMessage('Invalid phone'),
   check('whatsapp').optional().isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
 
-  check('rentAmount').notEmpty().withMessage('Rent amount is required').isInt({ min: 0 }).withMessage('Rent amount must be a non-negative integer').toInt(),
+  check('rentAmount').optional().isInt({ min: 0 }).toInt(),
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
     .isIn(['new','existing','renewal','transfer'])
     .withMessage('Invalid tenant type'),
-  check('electricMeterNumber').optional().isLength({ max: 100 }),
 
   // Date: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
   check('nextDueDate').optional().isString().withMessage('nextDueDate must be a string date')
 ];
 
 const validateTenantUpdate = [
-  check('unitLabel').optional().trim().notEmpty().isLength({ max: 100 }),
+  check('unitId').optional().trim().isMongoId().withMessage('Invalid unit ID'),
 
   // Allow updating name via either full name or parts
   check('tenantName').optional().trim().notEmpty().isLength({ max: 150 }),
@@ -102,7 +101,6 @@ const validateTenantUpdate = [
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
     .isIn(['new','existing','renewal','transfer']),
-  check('electricMeterNumber').optional().isLength({ max: 100 }),
   check('nextDueDate').optional().isString()
 ];
 

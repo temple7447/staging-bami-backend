@@ -5,12 +5,14 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const compression = require('compression');
+const swaggerUi = require('swagger-ui-express');
 
 const connectDatabase = require('./config/database');
 const errorHandler = require('./middleware/error');
 const { initializeScheduler } = require('./utils/scheduler');
 const { ensureCloudinaryConfigured } = require('./config/cloudinary');
 const { getMailtrapStatus } = require('./utils/emailService');
+const swaggerSpec = require('./config/swagger');
 
 // Load env vars
 dotenv.config();
@@ -122,13 +124,23 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayOperationId: true
+  },
+  customCss: '.swagger-ui .topbar { display: none }'
+}));
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Server is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV
+    environment: process.env.NODE_ENV,
+    documentation: '/api-docs'
   });
 });
 
@@ -150,8 +162,11 @@ app.get('/', (req, res) => {
 // Mount routers
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/estates', require('./routes/estates'));
+app.use('/api/estates', require('./routes/units'));
+app.use('/api/estates', require('./routes/distribution'));
 app.use('/api/tenants', require('./routes/tenants'));
 app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
+app.use('/api/payments', require('./routes/payments'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/upload', require('./routes/upload'));
 
@@ -207,7 +222,7 @@ process.on('SIGINT', () => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 4000;
 
 const server = app.listen(PORT, () => {
   console.log('\n' + '═'.repeat(60));
@@ -237,6 +252,16 @@ const server = app.listen(PORT, () => {
   console.log('   PUT    /api/estates/:id               - Update estate');
   console.log('   DELETE /api/estates/:id               - Delete estate');
   console.log('');
+  console.log('🏠 UNIT API ENDPOINTS:');
+  console.log('   POST   /api/estates/:estateId/units         - Create unit for estate');
+  console.log('   GET    /api/estates/:estateId/units         - Get all units for estate');
+  console.log('   GET    /api/estates/:estateId/units/vacant  - Get vacant units (for tenant assignment)');
+  console.log('   GET    /api/estates/unit/:unitId            - Get unit details');
+  console.log('   PUT    /api/estates/unit/:unitId            - Update unit');
+  console.log('   POST   /api/estates/unit/:unitId/assign-tenant - Assign tenant to unit');
+  console.log('   POST   /api/estates/unit/:unitId/remove-tenant - Remove tenant from unit');
+  console.log('   DELETE /api/estates/unit/:unitId            - Delete unit');
+  console.log('');
   console.log('👥 TENANT API ENDPOINTS:');
   console.log('   GET    /api/tenants                   - List tenants');
   console.log('   GET    /api/tenants/:id               - Get tenant by id');
@@ -254,6 +279,19 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/wallet/add-funds          - Add funds to wallet');
   console.log('   POST   /api/wallet/deduct-funds       - Deduct funds from wallet');
   console.log('   PUT    /api/wallet/currency           - Update wallet currency');
+  console.log('');
+  console.log('💳 PAYMENT API ENDPOINTS (Paystack Integration):');
+  console.log('   POST   /api/payments/deposit          - Initiate tenant deposit payment');
+  console.log('   POST   /api/payments/rent             - Initiate rent payment');
+  console.log('   POST   /api/payments/service-charge   - Initiate service charge payment');
+  console.log('   POST   /api/payments/security-charge  - Initiate security charge payment');
+  console.log('   POST   /api/payments/caution-fee      - Initiate caution fee payment');
+  console.log('   POST   /api/payments/legal-fee        - Initiate legal fee payment');
+  console.log('   GET    /api/payments/:paymentId       - Get payment status');
+  console.log('   GET    /api/payments/tenant/:id       - Get tenant payment history');
+  console.log('   GET    /api/payments/estate/:id       - Get estate payments');
+  console.log('   POST   /api/payments/callback         - Payment webhook callback');
+  console.log('   POST   /api/payments/:id/refund       - Refund deposit');
   console.log('');
   console.log('📧 SCHEDULER SERVICES:');
   console.log('   Daily reminder check at 08:00 AM      - Sends rent payment reminders (7, 3, 1 day)');
