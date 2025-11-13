@@ -72,6 +72,7 @@ const corsOptions = {
       'http://localhost:8081',
       'https://bami-hustle.vercel.app',
       'https://bumi-hustle.vercel.app',
+      'https://bamihost.com',
     ];
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
