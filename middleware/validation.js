@@ -79,7 +79,8 @@ const validateTenantCreate = [
     .isIn(['new','existing','renewal','transfer'])
     .withMessage('Invalid tenant type'),
 
-  // Date: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
+  // Dates: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
+  check('entryDate').optional().isString().withMessage('entryDate must be a string date'),
   check('nextDueDate').optional().isString().withMessage('nextDueDate must be a string date')
 ];
 
@@ -101,6 +102,7 @@ const validateTenantUpdate = [
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
     .isIn(['new','existing','renewal','transfer']),
+  check('entryDate').optional().isString(),
   check('nextDueDate').optional().isString()
 ];
 

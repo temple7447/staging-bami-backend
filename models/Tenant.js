@@ -63,6 +63,9 @@ const TenantSchema = new mongoose.Schema({
     trim: true,
     default: ''
   },
+  entryDate: {
+    type: Date
+  },
   nextDueDate: {
     type: Date
   },

@@ -192,9 +192,14 @@
  *               tenantType:
  *                 type: string
  *                 enum: [new, existing, renewal, transfer]
+ *               entryDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Date tenant moved in (optional; defaults to today)
  *               nextDueDate:
  *                 type: string
  *                 format: date
+ *                 description: Next rent due date (optional)
  *     responses:
  *       201:
  *         description: Tenant created and assigned to unit

@@ -20,6 +20,18 @@ function generateTempPassword(len = 6) {
   return pwd.split('').sort(() => Math.random() - 0.5).join('');
 }
 
+function parseFlexibleDate(input) {
+  if (!input) return undefined;
+  if (typeof input === 'string' && /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(input)) {
+    const [, d, m, y] = input.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    const year = parseInt(y.length === 2 ? '20' + y : y, 10);
+    return new Date(year, parseInt(m, 10) - 1, parseInt(d, 10));
+  }
+  const dt = new Date(input);
+  if (!isNaN(dt.getTime())) return dt;
+  return undefined;
+}
+
 // Create tenant under an estate
 const createTenant = async (req, res) => {
   // Extract these early so they're available in error handling
@@ -47,6 +59,7 @@ const createTenant = async (req, res) => {
       tenantPhone,
       whatsapp,
       tenantType,
+      entryDate,
       nextDueDate
     } = req.body;
 
@@ -71,18 +84,9 @@ const createTenant = async (req, res) => {
     const phone = tenantPhone || whatsapp || '';
     const emailAddr = tenantEmail || email || '';
 
-    // Parse nextDueDate: accept ISO, timestamp, or dd/mm/yyyy
-    let parsedNextDueDate = undefined;
-    if (nextDueDate) {
-      if (typeof nextDueDate === 'string' && /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(nextDueDate)) {
-        const [, d, m, y] = nextDueDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-        const year = parseInt(y.length === 2 ? '20' + y : y, 10);
-        parsedNextDueDate = new Date(year, parseInt(m, 10) - 1, parseInt(d, 10));
-      } else {
-        const dt = new Date(nextDueDate);
-        if (!isNaN(dt.getTime())) parsedNextDueDate = dt;
-      }
-    }
+    // Parse dates: accept ISO, timestamp, or dd/mm/yyyy
+    const parsedEntryDate = parseFlexibleDate(entryDate);
+    const parsedNextDueDate = parseFlexibleDate(nextDueDate);
 
     // Optionally create or link a user account for tenant
     let userId = undefined;
@@ -115,6 +119,7 @@ const createTenant = async (req, res) => {
       rentAmount: unit.monthlyPrice,
       tenantType,
       electricMeterNumber: unit.meterNumber,
+      entryDate: parsedEntryDate || new Date(),
       nextDueDate: parsedNextDueDate,
       status: 'occupied',
       user: userId,
@@ -125,7 +130,7 @@ const createTenant = async (req, res) => {
     // Update unit to mark as occupied
     unit.occupiedBy = tenant._id;
     unit.status = 'occupied';
-    unit.occupiedSince = new Date();
+    unit.occupiedSince = parsedEntryDate || new Date();
     unit.updatedBy = req.user?._id;
     await unit.save();
 
@@ -273,6 +278,7 @@ const updateTenant = async (req, res) => {
       rentAmount,
       tenantType,
       electricMeterNumber,
+      entryDate,
       nextDueDate
     } = req.body;
 
@@ -291,17 +297,12 @@ const updateTenant = async (req, res) => {
     if (tenantType !== undefined) tenant.tenantType = tenantType;
     if (electricMeterNumber !== undefined) tenant.electricMeterNumber = electricMeterNumber;
 
+    if (entryDate !== undefined) {
+      tenant.entryDate = parseFlexibleDate(entryDate);
+    }
+
     if (nextDueDate !== undefined) {
-      let parsed;
-      if (typeof nextDueDate === 'string' && /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.test(nextDueDate)) {
-        const [, d, m, y] = nextDueDate.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-        const year = parseInt(y.length === 2 ? '20' + y : y, 10);
-        parsed = new Date(year, parseInt(m, 10) - 1, parseInt(d, 10));
-      } else {
-        const dt = new Date(nextDueDate);
-        if (!isNaN(dt.getTime())) parsed = dt;
-      }
-      tenant.nextDueDate = parsed;
+      tenant.nextDueDate = parseFlexibleDate(nextDueDate);
     }
 
     if (req.user?.id) tenant.updatedBy = req.user.id;
