@@ -9,7 +9,16 @@ const { logError, logInfo, logWarning } = require('../utils/logger');
 const createUnit = async (req, res) => {
   try {
     const { estateId } = req.params;
-    const { label, monthlyPrice, meterNumber, description, features } = req.body;
+    const {
+      label,
+      monthlyPrice,
+      meterNumber,
+      description,
+      features,
+      serviceChargeYearly,
+      cautionFee,
+      legalFee,
+    } = req.body;
     const adminId = req.user?._id;
 
     if (!label || !monthlyPrice) {
@@ -23,6 +32,20 @@ const createUnit = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Monthly price must be greater than 0'
+      });
+    }
+
+    // Optional billing configuration validation
+    const sc = serviceChargeYearly != null ? Number(serviceChargeYearly) : undefined;
+    const cf = cautionFee != null ? Number(cautionFee) : undefined;
+    const lf = legalFee != null ? Number(legalFee) : undefined;
+
+    if ((sc != null && (Number.isNaN(sc) || sc < 0)) ||
+        (cf != null && (Number.isNaN(cf) || cf < 0)) ||
+        (lf != null && (Number.isNaN(lf) || lf < 0))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Service charge, caution fee and legal fee must be non-negative numbers when provided'
       });
     }
 
@@ -54,6 +77,9 @@ const createUnit = async (req, res) => {
       meterNumber: meterNumber || '',
       description: description || '',
       features: features || [],
+      serviceChargeYearly: sc != null ? sc : undefined,
+      cautionFee: cf != null ? cf : undefined,
+      legalFee: lf != null ? lf : undefined,
       createdBy: adminId
     });
 
@@ -68,6 +94,9 @@ const createUnit = async (req, res) => {
         label: unit.label,
         monthlyPrice: unit.monthlyPrice,
         meterNumber: unit.meterNumber,
+        serviceChargeYearly: unit.serviceChargeYearly,
+        cautionFee: unit.cautionFee,
+        legalFee: unit.legalFee,
         status: unit.status,
         estate: unit.estate.name
       }
@@ -129,6 +158,9 @@ const getEstateUnits = async (req, res) => {
         monthlyPrice: unit.monthlyPrice,
         meterNumber: unit.meterNumber,
         description: unit.description,
+        serviceChargeYearly: unit.serviceChargeYearly,
+        cautionFee: unit.cautionFee,
+        legalFee: unit.legalFee,
         status: unit.status,
         occupiedBy: unit.occupiedBy ? {
           tenantId: unit.occupiedBy._id,
@@ -184,7 +216,10 @@ const getVacantUnits = async (req, res) => {
         monthlyPrice: unit.monthlyPrice,
         meterNumber: unit.meterNumber,
         status: unit.status,
-        description: unit.description
+        description: unit.description,
+        serviceChargeYearly: unit.serviceChargeYearly,
+        cautionFee: unit.cautionFee,
+        legalFee: unit.legalFee,
       })),
       total: vacantUnits.length
     });

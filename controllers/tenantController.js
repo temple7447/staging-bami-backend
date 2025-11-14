@@ -2,6 +2,7 @@ const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
 const Unit = require('../models/Unit');
 const Transaction = require('../models/Transaction');
+const Payment = require('../models/Payment');
 const User = require('../models/User');
 const crypto = require('crypto');
 const { sendTenantWelcomeEmail } = require('../utils/emailService');
@@ -419,6 +420,116 @@ const listTransactions = async (req, res) => {
   }
 };
 
+// List billing items (what this tenant should pay for)
+const listBillingItems = async (req, res) => {
+  try {
+    const tenant = await Tenant.findById(req.params.id).populate('unit', 'label monthlyPrice serviceChargeYearly cautionFee legalFee');
+    if (!tenant || !tenant.isActive) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    const unit = tenant.unit;
+    if (!unit) {
+      return res.status(400).json({ success: false, message: 'Tenant is not assigned to any unit' });
+    }
+
+    const tenantType = tenant.tenantType || 'new';
+    const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
+
+    // Determine which charge types apply
+    const items = [];
+
+    // Rent is always applicable (ongoing). Base amount is monthly; duration is chosen at payment time.
+    if (tenant.rentAmount && tenant.rentAmount > 0) {
+      items.push({
+        code: 'rent',
+        label: 'Rent',
+        amount: tenant.rentAmount,
+        frequency: 'monthly',
+        type: 'recurring'
+      });
+    }
+
+    // Service charge (typically yearly) – applicable for both new and existing tenants
+    if (unit.serviceChargeYearly && unit.serviceChargeYearly > 0) {
+      // If there is any completed service_charge payment, we hide it (assume paid already)
+      const paidService = await Payment.exists({
+        tenant: tenant._id,
+        paymentType: 'service_charge',
+        paymentStatus: 'completed',
+        isActive: true,
+      });
+      if (!paidService) {
+        items.push({
+          code: 'service_charge',
+          label: 'Service Charge (1 year)',
+          amount: unit.serviceChargeYearly,
+          frequency: 'once',
+          type: 'one_time'
+        });
+      }
+    }
+
+    // For "new" tenants we also expose caution and legal fees if configured and not yet paid
+    if (!isExistingLike) {
+      if (unit.cautionFee && unit.cautionFee > 0) {
+        const paidCaution = await Payment.exists({
+          tenant: tenant._id,
+          paymentType: 'caution_fee',
+          paymentStatus: 'completed',
+          isActive: true,
+        });
+        if (!paidCaution) {
+          items.push({
+            code: 'caution_fee',
+            label: 'Caution Fee (one-time)',
+            amount: unit.cautionFee,
+            frequency: 'once',
+            type: 'one_time'
+          });
+        }
+      }
+
+      if (unit.legalFee && unit.legalFee > 0) {
+        const paidLegal = await Payment.exists({
+          tenant: tenant._id,
+          paymentType: 'legal_fee',
+          paymentStatus: 'completed',
+          isActive: true,
+        });
+        if (!paidLegal) {
+          items.push({
+            code: 'legal_fee',
+            label: 'Legal Fee (one-time)',
+            amount: unit.legalFee,
+            frequency: 'once',
+            type: 'one_time'
+          });
+        }
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        tenant: {
+          id: tenant._id,
+          name: tenant.tenantName,
+          type: tenant.tenantType,
+          unit: unit.label,
+        },
+        items,
+      },
+    });
+  } catch (err) {
+    console.error('List billing items error:', err);
+    if (err.name === 'CastError') {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    res.status(500).json({ success: false, message: 'Server error occurred while fetching billing items' });
+  }
+};
+
 // List tenant history
 const listHistory = async (req, res) => {
   try {
@@ -564,6 +675,7 @@ module.exports = {
   listHistory,
   addTransaction,
   listTransactions,
+  listBillingItems,
   uploadTenantAvatar,
   uploadMyAvatar,
   getMyTenant,

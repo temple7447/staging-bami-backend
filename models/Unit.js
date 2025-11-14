@@ -17,6 +17,22 @@ const UnitSchema = new mongoose.Schema({
     required: [true, 'Monthly price is required'],
     min: [0, 'Monthly price cannot be negative']
   },
+  // Billing configuration per unit
+  serviceChargeYearly: {
+    type: Number,
+    default: 0,
+    min: [0, 'Service charge cannot be negative']
+  },
+  cautionFee: {
+    type: Number,
+    default: 0,
+    min: [0, 'Caution fee cannot be negative']
+  },
+  legalFee: {
+    type: Number,
+    default: 0,
+    min: [0, 'Legal fee cannot be negative']
+  },
   meterNumber: {
     type: String,
     trim: true,

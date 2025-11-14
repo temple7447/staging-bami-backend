@@ -52,7 +52,10 @@ class PaystackService {
 
       const reference = paymentData.reference || this.generateReference();
 
-      const callbackUrl = paymentData.callbackUrl || `${process.env.BACKEND_URL || 'http://localhost:5000'}/api/payments/verify/${reference}?redirect=true`;
+      // Backend callback URL that Paystack will notify after payment.
+      // Points to backend verify endpoint which will redirect to frontend dashboard.
+      const backendBaseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+      const callbackUrl = paymentData.callbackUrl || `${backendBaseUrl}/api/payments/verify/${reference}?redirect=true&redirectUrl=http://localhost:8081/dashboard/payment/success`;
       
       const payload = {
         email: paymentData.customerEmail,

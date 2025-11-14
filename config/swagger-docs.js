@@ -97,6 +97,18 @@
  *               monthlyPrice:
  *                 type: number
  *                 example: 40000
+ *               serviceChargeYearly:
+ *                 type: number
+ *                 example: 60000
+ *                 description: Total service charge per year for this unit
+ *               cautionFee:
+ *                 type: number
+ *                 example: 50000
+ *                 description: One-time caution fee for a new tenant in this unit
+ *               legalFee:
+ *                 type: number
+ *                 example: 30000
+ *                 description: One-time legal fee for a new tenant in this unit
  *               meterNumber:
  *                 type: string
  *               description:
@@ -277,6 +289,24 @@
  *       404:
  *         description: Tenant not found
  *
+ * /api/tenants/{id}/billing:
+ *   get:
+ *     summary: Get billing items for a tenant (what they should pay for)
+ *     tags: [Tenants]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: List of billing items the tenant should pay for
+ *       404:
+ *         description: Tenant not found
+ *
  * /api/payments/rent:
  *   post:
  *     summary: Initiate rent payment via Paystack
@@ -291,12 +321,19 @@
  *             type: object
  *             required:
  *               - tenantId
- *               - amount
  *             properties:
  *               tenantId:
  *                 type: string
  *               amount:
  *                 type: number
+ *                 description: Optional when durationMonths or duration is provided; otherwise required
+ *               durationMonths:
+ *                 type: integer
+ *                 description: Number of months of rent to charge (e.g. 6, 12, 24)
+ *               duration:
+ *                 type: string
+ *                 enum: ["6_months", "1_year", "2_years"]
+ *                 description: Preset duration for convenience; maps to durationMonths internally
  *               description:
  *                 type: string
  *     responses:

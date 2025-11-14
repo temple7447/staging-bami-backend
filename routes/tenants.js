@@ -48,6 +48,9 @@ router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, d
 router.get('/:id/history', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listHistory);
 router.post('/:id/history', protect, validateObjectId('id'), require('../middleware/validation').validateHistoryCreate, handleValidationErrors, require('../controllers/tenantController').addHistory);
 
+// Billing endpoints (what this tenant should pay for)
+router.get('/:id/billing', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listBillingItems);
+
 // Transaction endpoints
 router.get('/:id/transactions', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listTransactions);
 router.post('/:id/transactions', protect, validateObjectId('id'), require('../middleware/validation').validateTransactionCreate, handleValidationErrors, require('../controllers/tenantController').addTransaction);
