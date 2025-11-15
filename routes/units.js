@@ -8,7 +8,8 @@ const {
   createUnit,
   getEstateUnits,
   getVacantUnits,
-  assignTenantToUnit
+  assignTenantToUnit,
+  removeTenantFromUnit,
 } = require('../controllers/unitController');
 
 const router = express.Router();
@@ -24,5 +25,8 @@ router.get('/:estateId/units/vacant', protect, validateObjectId('estateId'), han
 
 // Assign tenant to a unit
 router.post('/:estateId/units/:unitId/assign-tenant', protect, validateObjectId('estateId'), validateObjectId('unitId'), handleValidationErrors, assignTenantToUnit);
+
+// Remove tenant from a unit (make it vacant)
+router.post('/:estateId/units/:unitId/remove-tenant', protect, validateObjectId('estateId'), validateObjectId('unitId'), handleValidationErrors, removeTenantFromUnit);
 
 module.exports = router;

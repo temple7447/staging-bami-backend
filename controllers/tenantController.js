@@ -423,7 +423,7 @@ const listTransactions = async (req, res) => {
 // List billing items (what this tenant should pay for)
 const listBillingItems = async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.id).populate('unit', 'label monthlyPrice serviceChargeYearly cautionFee legalFee');
+    const tenant = await Tenant.findById(req.params.id).populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
     if (!tenant || !tenant.isActive) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
@@ -450,24 +450,15 @@ const listBillingItems = async (req, res) => {
       });
     }
 
-    // Service charge (typically yearly) – applicable for both new and existing tenants
-    if (unit.serviceChargeYearly && unit.serviceChargeYearly > 0) {
-      // If there is any completed service_charge payment, we hide it (assume paid already)
-      const paidService = await Payment.exists({
-        tenant: tenant._id,
-        paymentType: 'service_charge',
-        paymentStatus: 'completed',
-        isActive: true,
+    // Service charge (monthly) – recurring charge similar to rent
+    if (unit.serviceChargeMonthly && unit.serviceChargeMonthly > 0) {
+      items.push({
+        code: 'service_charge',
+        label: 'Service Charge',
+        amount: unit.serviceChargeMonthly,
+        frequency: 'monthly',
+        type: 'recurring'
       });
-      if (!paidService) {
-        items.push({
-          code: 'service_charge',
-          label: 'Service Charge (1 year)',
-          amount: unit.serviceChargeYearly,
-          frequency: 'once',
-          type: 'one_time'
-        });
-      }
     }
 
     // For "new" tenants we also expose caution and legal fees if configured and not yet paid
@@ -551,22 +542,32 @@ const listHistory = async (req, res) => {
 // Delete tenant (soft)
 const deleteTenant = async (req, res) => {
   try {
-    const tenant = await Tenant.findById(req.params.id);
-    if (!tenant || !tenant.isActive) {
+    // Use an update to avoid re-validating the whole document (which can fail
+    // if legacy records are missing newly required fields like `unit`).
+    const update = { isActive: false };
+    if (req.user?.id) update.updatedBy = req.user.id;
+
+    const tenant = await Tenant.findOneAndUpdate(
+      { _id: req.params.id, isActive: true },
+      { $set: update },
+      { new: true, runValidators: false }
+    );
+
+    if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    tenant.isActive = false;
-    if (req.user?.id) tenant.updatedBy = req.user.id;
-    await tenant.save();
+    // NOTE: We deliberately do NOT touch the linked unit here.
+    // The unit document stays intact and retains its data. If you want
+    // to free up the unit, use the remove-tenant endpoint instead.
 
-    res.status(200).json({ success: true, message: 'Tenant deleted successfully' });
+    return res.status(200).json({ success: true, message: 'Tenant deleted successfully' });
   } catch (err) {
     if (err.name === 'CastError') {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
     console.error('Delete tenant error:', err);
-    res.status(500).json({ success: false, message: 'Server error occurred while deleting tenant' });
+    return res.status(500).json({ success: false, message: 'Server error occurred while deleting tenant' });
   }
 };
 

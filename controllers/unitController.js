@@ -15,7 +15,7 @@ const createUnit = async (req, res) => {
       meterNumber,
       description,
       features,
-      serviceChargeYearly,
+      serviceChargeMonthly,
       cautionFee,
       legalFee,
     } = req.body;
@@ -36,7 +36,7 @@ const createUnit = async (req, res) => {
     }
 
     // Optional billing configuration validation
-    const sc = serviceChargeYearly != null ? Number(serviceChargeYearly) : undefined;
+    const sc = serviceChargeMonthly != null ? Number(serviceChargeMonthly) : undefined;
     const cf = cautionFee != null ? Number(cautionFee) : undefined;
     const lf = legalFee != null ? Number(legalFee) : undefined;
 
@@ -77,7 +77,7 @@ const createUnit = async (req, res) => {
       meterNumber: meterNumber || '',
       description: description || '',
       features: features || [],
-      serviceChargeYearly: sc != null ? sc : undefined,
+      serviceChargeMonthly: sc != null ? sc : undefined,
       cautionFee: cf != null ? cf : undefined,
       legalFee: lf != null ? lf : undefined,
       createdBy: adminId
@@ -94,7 +94,7 @@ const createUnit = async (req, res) => {
         label: unit.label,
         monthlyPrice: unit.monthlyPrice,
         meterNumber: unit.meterNumber,
-        serviceChargeYearly: unit.serviceChargeYearly,
+        serviceChargeMonthly: unit.serviceChargeMonthly,
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
         status: unit.status,
@@ -158,7 +158,7 @@ const getEstateUnits = async (req, res) => {
         monthlyPrice: unit.monthlyPrice,
         meterNumber: unit.meterNumber,
         description: unit.description,
-        serviceChargeYearly: unit.serviceChargeYearly,
+        serviceChargeMonthly: unit.serviceChargeMonthly,
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
         status: unit.status,
@@ -217,7 +217,7 @@ const getVacantUnits = async (req, res) => {
         meterNumber: unit.meterNumber,
         status: unit.status,
         description: unit.description,
-        serviceChargeYearly: unit.serviceChargeYearly,
+        serviceChargeMonthly: unit.serviceChargeMonthly,
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
       })),
@@ -331,9 +331,53 @@ const assignTenantToUnit = async (req, res) => {
   }
 };
 
+/**
+ * Remove tenant from a unit (make unit vacant but keep tenant record)
+ */
+const removeTenantFromUnit = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+
+    // Find unit with an occupied tenant
+    const unit = await Unit.findOne({ _id: unitId, isActive: true }).populate('occupiedBy');
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    if (!unit.occupiedBy) {
+      return res.status(400).json({ success: false, message: 'Unit is already vacant' });
+    }
+
+    const tenantId = unit.occupiedBy._id;
+
+    // Free up the unit
+    unit.occupiedBy = null;
+    unit.status = 'vacant';
+    unit.occupiedSince = null;
+    unit.updatedBy = req.user?._id;
+    await unit.save();
+
+    // Optionally update tenant status but DO NOT delete tenant or its unit reference
+    await Tenant.findByIdAndUpdate(tenantId, {
+      status: 'pending',
+      updatedBy: req.user?._id,
+    });
+
+    return res.status(200).json({ success: true, message: 'Tenant removed from unit successfully' });
+  } catch (error) {
+    console.error('Remove tenant from unit error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error removing tenant from unit',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
   getVacantUnits,
-  assignTenantToUnit
+  assignTenantToUnit,
+  removeTenantFromUnit,
 };

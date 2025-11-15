@@ -97,10 +97,10 @@
  *               monthlyPrice:
  *                 type: number
  *                 example: 40000
- *               serviceChargeYearly:
+ *               serviceChargeMonthly:
  *                 type: number
- *                 example: 60000
- *                 description: Total service charge per year for this unit
+ *                 example: 5000
+ *                 description: Service charge per month for this unit
  *               cautionFee:
  *                 type: number
  *                 example: 50000

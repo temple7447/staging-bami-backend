@@ -17,8 +17,8 @@ const UnitSchema = new mongoose.Schema({
     required: [true, 'Monthly price is required'],
     min: [0, 'Monthly price cannot be negative']
   },
-  // Billing configuration per unit
-  serviceChargeYearly: {
+  // Billing configuration per unit (service charge per month)
+  serviceChargeMonthly: {
     type: Number,
     default: 0,
     min: [0, 'Service charge cannot be negative']
