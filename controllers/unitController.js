@@ -357,9 +357,11 @@ const removeTenantFromUnit = async (req, res) => {
     unit.updatedBy = req.user?._id;
     await unit.save();
 
-    // Optionally update tenant status but DO NOT delete tenant or its unit reference
+    // Mark previous tenant as inactive so a new tenant can be created
+    // for the same unit (unique index is on estate+unitLabel+isActive=true).
     await Tenant.findByIdAndUpdate(tenantId, {
-      status: 'pending',
+      status: 'vacant',
+      isActive: false,
       updatedBy: req.user?._id,
     });
 

@@ -110,6 +110,13 @@ const createTenant = async (req, res) => {
       }
     }
 
+    // Ensure only one active tenant per unitLabel in an estate by
+    // deactivating any existing active tenants for this flat.
+    await Tenant.updateMany(
+      { estate: estateId, unitLabel: unit.label, isActive: true },
+      { $set: { isActive: false, status: 'vacant', updatedBy: req.user?._id } }
+    );
+
     const tenant = await Tenant.create({
       estate: estateId,
       unit: unitId,
