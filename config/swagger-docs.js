@@ -208,10 +208,14 @@
  *                 type: string
  *                 format: date
  *                 description: Date tenant moved in (optional; defaults to today)
+ *               durationMonths:
+ *                 type: integer
+ *                 example: 12
+ *                 description: Number of months from entryDate to calculate nextDueDate automatically
  *               nextDueDate:
  *                 type: string
  *                 format: date
- *                 description: Next rent due date (optional)
+ *                 description: Next rent due date (optional; if durationMonths is provided, this is ignored)
  *     responses:
  *       201:
  *         description: Tenant created and assigned to unit

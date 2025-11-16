@@ -81,7 +81,13 @@ const validateTenantCreate = [
 
   // Dates: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
   check('entryDate').optional().isString().withMessage('entryDate must be a string date'),
-  check('nextDueDate').optional().isString().withMessage('nextDueDate must be a string date')
+  check('nextDueDate').optional().isString().withMessage('nextDueDate must be a string date'),
+
+  // Billing period length in months (if provided, nextDueDate will be auto-calculated)
+  check('durationMonths')
+    .optional()
+    .isInt({ min: 1, max: 60 }).withMessage('durationMonths must be a positive integer between 1 and 60')
+    .toInt(),
 ];
 
 const validateTenantUpdate = [

@@ -89,6 +89,20 @@ const createTenant = async (req, res) => {
     const parsedEntryDate = parseFlexibleDate(entryDate);
     const parsedNextDueDate = parseFlexibleDate(nextDueDate);
 
+    // Optionally accept durationMonths to auto-calculate nextDueDate
+    const durationMonths = req.body?.durationMonths != null
+      ? parseInt(req.body.durationMonths, 10)
+      : undefined;
+
+    let effectiveNextDueDate = parsedNextDueDate;
+    if (Number.isInteger(durationMonths) && durationMonths > 0) {
+      const baseDate = parsedEntryDate || new Date();
+      const due = new Date(baseDate.getTime());
+      // Add N months while letting JS handle year rollover
+      due.setMonth(due.getMonth() + durationMonths);
+      effectiveNextDueDate = due;
+    }
+
     // Optionally create or link a user account for tenant
     let userId = undefined;
     let generatedPassword = null;
@@ -128,7 +142,7 @@ const createTenant = async (req, res) => {
       tenantType,
       electricMeterNumber: unit.meterNumber,
       entryDate: parsedEntryDate || new Date(),
-      nextDueDate: parsedNextDueDate,
+      nextDueDate: effectiveNextDueDate,
       status: 'occupied',
       user: userId,
       history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice }, createdBy: req.user?._id }],
@@ -207,7 +221,9 @@ const getTenant = async (req, res) => {
 
     console.log('[getTenant] Fetching tenant:', req.params.id, 'with expand:', expand);
     
-    const tenant = await Tenant.findById(req.params.id).populate('estate', 'name').populate('unit', 'label monthlyPrice');
+    const tenant = await Tenant.findById(req.params.id)
+      .populate('estate', 'name')
+      .populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
     
     console.log('[getTenant] Query result:', tenant ? 'found' : 'not found');
     
@@ -223,7 +239,14 @@ const getTenant = async (req, res) => {
       unit: tenant.unit ? tenant.unit.label : 'N/A',
       email: tenant.tenantEmail,
       phone: tenant.tenantPhone,
-      rent: tenant.rentAmount,
+
+      // Pricing breakdown
+      rent: tenant.rentAmount, // current rent amount stored on tenant
+      unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
+      serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
+      cautionFee: tenant.unit ? tenant.unit.cautionFee : null,
+      legalFee: tenant.unit ? tenant.unit.legalFee : null,
+
       nextDue: tenant.nextDueDate,
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
