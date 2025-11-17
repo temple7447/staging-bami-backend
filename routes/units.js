@@ -8,6 +8,8 @@ const {
   createUnit,
   getEstateUnits,
   getVacantUnits,
+  getUnitDetails,
+  updateUnit,
   assignTenantToUnit,
   removeTenantFromUnit,
 } = require('../controllers/unitController');
@@ -28,5 +30,11 @@ router.post('/:estateId/units/:unitId/assign-tenant', protect, validateObjectId(
 
 // Remove tenant from a unit (make it vacant)
 router.post('/:estateId/units/:unitId/remove-tenant', protect, validateObjectId('estateId'), validateObjectId('unitId'), handleValidationErrors, removeTenantFromUnit);
+
+// Get a single unit (by id)
+router.get('/unit/:unitId', protect, validateObjectId('unitId'), handleValidationErrors, getUnitDetails);
+
+// Update a unit (pricing & info)
+router.put('/unit/:unitId', protect, validateObjectId('unitId'), handleValidationErrors, updateUnit);
 
 module.exports = router;

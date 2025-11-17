@@ -324,7 +324,14 @@ const updateTenant = async (req, res) => {
 
     if (tenantEmail !== undefined || email !== undefined) tenant.tenantEmail = (tenantEmail || email) || undefined;
     if (tenantPhone !== undefined || whatsapp !== undefined) tenant.tenantPhone = (tenantPhone || whatsapp) || undefined;
-    if (rentAmount !== undefined) tenant.rentAmount = parseInt(rentAmount);
+
+    // Rent and unit monthly price are the same concept. If rent is updated here,
+    // also update the linked unit's monthlyPrice so they stay in sync.
+    let newRentAmount = undefined;
+    if (rentAmount !== undefined) {
+      newRentAmount = parseInt(rentAmount);
+      tenant.rentAmount = newRentAmount;
+    }
     if (tenantType !== undefined) tenant.tenantType = tenantType;
     if (electricMeterNumber !== undefined) tenant.electricMeterNumber = electricMeterNumber;
 
@@ -337,6 +344,22 @@ const updateTenant = async (req, res) => {
     }
 
     if (req.user?.id) tenant.updatedBy = req.user.id;
+
+    // If rent changed and this tenant has a unit, mirror it to the unit.monthlyPrice
+    if (newRentAmount != null && tenant.unit) {
+      try {
+        await Unit.findByIdAndUpdate(tenant.unit, {
+          monthlyPrice: newRentAmount,
+          updatedBy: req.user?.id,
+        });
+      } catch (e) {
+        logWarning('Failed to sync unit monthlyPrice from tenant rentAmount', {
+          tenantId: tenant._id,
+          unitId: tenant.unit,
+          error: e?.message,
+        });
+      }
+    }
 
     await tenant.save();
 

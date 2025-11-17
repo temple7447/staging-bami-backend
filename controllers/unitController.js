@@ -234,6 +234,128 @@ const getVacantUnits = async (req, res) => {
 };
 
 /**
+ * Get details for a single unit
+ */
+const getUnitDetails = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const unit = await Unit.findById(unitId).populate('estate', 'name');
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        unitId: unit._id,
+        label: unit.label,
+        monthlyPrice: unit.monthlyPrice,
+        meterNumber: unit.meterNumber,
+        description: unit.description,
+        serviceChargeMonthly: unit.serviceChargeMonthly,
+        cautionFee: unit.cautionFee,
+        legalFee: unit.legalFee,
+        status: unit.status,
+        estate: unit.estate ? { id: unit.estate._id, name: unit.estate.name } : null,
+        occupiedBy: unit.occupiedBy,
+        occupiedSince: unit.occupiedSince,
+        createdAt: unit.createdAt,
+        updatedAt: unit.updatedAt,
+      },
+    });
+  } catch (error) {
+    logError('GET /api/estates/unit/:unitId', error, { unitId: req.params.unitId });
+    return res.status(500).json({ success: false, message: 'Error fetching unit details' });
+  }
+};
+
+/**
+ * Update a unit (pricing & basic info) without changing its ID
+ */
+const updateUnit = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    const {
+      label,
+      monthlyPrice,
+      meterNumber,
+      description,
+      features,
+      serviceChargeMonthly,
+      cautionFee,
+      legalFee,
+      status,
+    } = req.body;
+
+    // If label is changing, enforce uniqueness within estate for active units
+    if (label && label !== unit.label) {
+      const existing = await Unit.findOne({
+        _id: { $ne: unitId },
+        estate: unit.estate,
+        label,
+        isActive: true,
+      });
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message: `Another unit with label "${label}" already exists in this estate`,
+        });
+      }
+      unit.label = label;
+    }
+
+    // Pricing fields: coerce to numbers and validate non-negative
+    const mp = monthlyPrice != null ? Number(monthlyPrice) : undefined;
+    const sc = serviceChargeMonthly != null ? Number(serviceChargeMonthly) : undefined;
+    const cf = cautionFee != null ? Number(cautionFee) : undefined;
+    const lf = legalFee != null ? Number(legalFee) : undefined;
+
+    if (mp != null && (Number.isNaN(mp) || mp <= 0)) {
+      return res.status(400).json({ success: false, message: 'Monthly price must be a positive number' });
+    }
+    if ((sc != null && (Number.isNaN(sc) || sc < 0)) ||
+        (cf != null && (Number.isNaN(cf) || cf < 0)) ||
+        (lf != null && (Number.isNaN(lf) || lf < 0))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Service charge, caution fee and legal fee must be non-negative numbers when provided',
+      });
+    }
+
+    if (mp != null) unit.monthlyPrice = mp;
+    if (sc != null) unit.serviceChargeMonthly = sc;
+    if (cf != null) unit.cautionFee = cf;
+    if (lf != null) unit.legalFee = lf;
+
+    if (meterNumber !== undefined) unit.meterNumber = meterNumber;
+    if (description !== undefined) unit.description = description;
+    if (features !== undefined) unit.features = features;
+    if (status !== undefined) unit.status = status;
+
+    unit.updatedBy = req.user?._id;
+    await unit.save();
+
+    // Keep active tenants in this unit in sync with the unit's monthlyPrice
+    if (mp != null) {
+      await Tenant.updateMany(
+        { unit: unit._id, isActive: true },
+        { $set: { rentAmount: mp, updatedBy: req.user?._id } }
+      );
+    }
+
+    return res.status(200).json({ success: true, message: 'Unit updated successfully', data: unit });
+  } catch (error) {
+    logError('PUT /api/estates/unit/:unitId', error, { unitId: req.params.unitId });
+    return res.status(500).json({ success: false, message: 'Error updating unit' });
+  }
+};
+
+/**
  * Assign a tenant to a unit
  */
 const assignTenantToUnit = async (req, res) => {
@@ -380,6 +502,8 @@ module.exports = {
   createUnit,
   getEstateUnits,
   getVacantUnits,
+  getUnitDetails,
+  updateUnit,
   assignTenantToUnit,
   removeTenantFromUnit,
 };
