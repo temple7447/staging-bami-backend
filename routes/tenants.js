@@ -28,11 +28,15 @@ const {
   uploadMyAvatar,
   getMyTenant,
   listMyHistory,
+  getQuarterlyRentByDueMonth,
 } = require('../controllers/tenantController');
 
 // Nested: /api/estates/:estateId/tenants (list/create for a given estate)
 router.get('/', protect, getTenants);
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
+
+// Summary/reporting routes (must be before /:id routes)
+router.get('/summary/quarters', protect, getQuarterlyRentByDueMonth);
 
 // Special routes (must be before /:id routes)
 router.get('/me', protect, getMyTenant);
