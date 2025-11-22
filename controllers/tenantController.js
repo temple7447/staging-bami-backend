@@ -199,7 +199,12 @@ const getTenants = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [items, total] = await Promise.all([
-      Tenant.find(filter).populate('estate', 'name').populate('unit', 'label').sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)),
+      Tenant.find(filter)
+        .populate('estate', 'name')
+        .populate('unit', 'label')
+        .sort({ nextDueDate: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
       Tenant.countDocuments(filter)
     ]);
 
