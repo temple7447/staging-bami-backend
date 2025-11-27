@@ -1,10 +1,10 @@
 const crypto = require('crypto');
 const User = require('../models/User');
-const { 
-  sendEmail, 
-  sendWelcomeEmail, 
+const {
+  sendEmail,
+  sendWelcomeEmail,
   sendPasswordResetEmail,
-  sendVerificationEmail 
+  sendVerificationEmail
 } = require('../utils/emailService');
 const { sendPasswordResetOtpEmail } = require('../utils/emailService');
 
@@ -50,7 +50,7 @@ exports.registerSuperAdmin = async (req, res, next) => {
   try {
     // Check if super admin already exists
     const existingSuperAdmin = await User.findOne({ role: 'super_admin' });
-    
+
     if (existingSuperAdmin) {
       return res.status(400).json({
         success: false,
@@ -528,6 +528,85 @@ exports.deleteAdmin = async (req, res, next) => {
     res.status(500).json({
       success: false,
       message: 'Server error'
+    });
+  }
+};
+
+// @desc    Update super admin email
+// @route   PUT /api/auth/update-superadmin-email
+// @access  Private (Super Admin only)
+exports.updateSuperAdminEmail = async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+
+    // Verify user is super admin
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only super administrators can use this endpoint'
+      });
+    }
+
+    // Validate email and password are provided
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    // Get user with password for verification
+    const user = await User.findById(req.user.id).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid password'
+      });
+    }
+
+    // Check if new email is already in use by another user
+    const existingUser = await User.findOne({
+      email: email.toLowerCase(),
+      _id: { $ne: user._id }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already in use'
+      });
+    }
+
+    // Update email
+    user.email = email.toLowerCase();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Email updated successfully',
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    console.error('Update super admin email error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating email',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

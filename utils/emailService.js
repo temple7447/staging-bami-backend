@@ -50,12 +50,12 @@ exports.sendEmail = async (options) => {
     if (!options.html && !options.message) {
       throw new Error('Email body (html or message) is required');
     }
-    
+
     const client = getClient();
     const payload = {
-      from: { 
-        email: options.from || FROM.email, 
-        name: options.fromName || FROM.name 
+      from: {
+        email: options.from || FROM.email,
+        name: options.fromName || FROM.name
       },
       to: [{ email: options.email }],
       subject: options.subject,
@@ -72,7 +72,7 @@ exports.sendEmail = async (options) => {
 
 // Welcome email template
 exports.sendWelcomeEmail = async (user, temporaryPassword = null) => {
-  const message = temporaryPassword 
+  const message = temporaryPassword
     ? `
       <h2>Welcome to BamiHustle!</h2>
       <p>Hello ${user.name},</p>
@@ -166,7 +166,7 @@ exports.sendVerificationEmail = async (user, verificationToken) => {
 exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate) => {
   const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
   const rentAmountFormatted = formatCurrency(tenant?.rentAmount || 0);
-  
+
   const message = `
     <h2>Welcome to ${estate?.name || 'BamiHustle'}</h2>
     <p>Hello ${user.name},</p>
@@ -210,12 +210,33 @@ exports.sendAdminNotificationEmail = async (adminEmail, subject, message) => {
   });
 };
 
-// Tenant rent due reminder email
+// Tenant rent due reminder email (handles both upcoming and overdue)
 exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
   const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
   const rentAmountFormatted = formatCurrency(tenant.rentAmount);
-  
-  const message = `
+
+  const isOverdue = daysRemaining < 0;
+  const daysOverdue = Math.abs(daysRemaining);
+
+  const message = isOverdue ? `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #dc3545;">⚠️ URGENT: Rent Payment Overdue</h2>
+      <p>Hello ${tenant.tenantName},</p>
+      <p style="color: #dc3545; font-weight: bold;">Your rent payment is now <strong>${daysOverdue} day(s) OVERDUE</strong>.</p>
+      <div style="background-color: #fff3cd; border-left: 4px solid #dc3545; padding: 20px; margin: 20px 0;">
+        <p><strong>Payment Details:</strong></p>
+        <p><strong>Estate:</strong> ${estate.name}</p>
+        <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
+        <p><strong>Rent Amount:</strong> ${rentAmountFormatted}</p>
+        <p><strong>Due Date:</strong> ${formattedDate}</p>
+        <p style="color: #dc3545;"><strong>Days Overdue:</strong> ${daysOverdue}</p>
+      </div>
+      <p><strong>IMMEDIATE ACTION REQUIRED:</strong> Please make this payment as soon as possible to avoid additional penalties and legal action.</p>
+      <p>If you have made this payment, please contact estate management immediately with proof of payment.</p>
+      <p>For payment arrangements or queries, please contact your estate management urgently.</p>
+      <p>Best regards,<br><strong>BamiHustle Management System</strong></p>
+    </div>
+  ` : `
     <div style="font-family: Arial, sans-serif; max-width: 600px;">
       <h2 style="color: #007bff;">Rent Payment Reminder</h2>
       <p>Hello ${tenant.tenantName},</p>
@@ -234,19 +255,47 @@ exports.sendRentReminder = async (tenant, estate, daysRemaining) => {
     </div>
   `;
 
+  const subject = isOverdue
+    ? `⚠️ URGENT: Rent Payment ${daysOverdue} Day(s) OVERDUE`
+    : `Rent Payment Reminder - ${daysRemaining} Day(s) Until Due Date`;
+
   return await this.sendEmail({
     email: tenant.tenantEmail,
-    subject: `Rent Payment Reminder - ${daysRemaining} Day(s) Until Due Date`,
+    subject,
     html: message
   });
 };
 
-// Admin rent due reminder email
+// Admin rent due reminder email (handles both upcoming and overdue)
 exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining) => {
   const formattedDate = new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
   const rentAmountFormatted = formatCurrency(tenant.rentAmount);
-  
-  const message = `
+
+  const isOverdue = daysRemaining < 0;
+  const daysOverdue = Math.abs(daysRemaining);
+
+  const message = isOverdue ? `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #dc3545;">⚠️ OVERDUE RENT PAYMENT ALERT</h2>
+      <p>Hello Admin,</p>
+      <p style="color: #dc3545; font-weight: bold;">The following tenant's rent payment is now <strong>${daysOverdue} day(s) OVERDUE</strong>.</p>
+      <div style="background-color: #fff3cd; border-left: 4px solid #dc3545; padding: 20px; margin: 20px 0;">
+        <p><strong>Tenant Details:</strong></p>
+        <p><strong>Name:</strong> ${tenant.tenantName}</p>
+        <p><strong>Email:</strong> ${tenant.tenantEmail || 'N/A'}</p>
+        <p><strong>Phone:</strong> ${tenant.tenantPhone || 'N/A'}</p>
+        <p><strong>Estate:</strong> ${estate.name}</p>
+        <p><strong>Unit:</strong> ${tenant.unitLabel}</p>
+        <p><strong>Rent Amount:</strong> ${rentAmountFormatted}</p>
+        <p><strong>Due Date:</strong> ${formattedDate}</p>
+        <p style="color: #dc3545;"><strong>Days Overdue:</strong> ${daysOverdue}</p>
+        <p><strong>Status:</strong> ${tenant.status}</p>
+      </div>
+      <p><strong>Recommended Action:</strong> Please follow up with the tenant immediately regarding this overdue payment.</p>
+      <p>This is an automated alert from BamiHustle Management System.</p>
+      <p>Best regards,<br><strong>BamiHustle System</strong></p>
+    </div>
+  ` : `
     <div style="font-family: Arial, sans-serif; max-width: 600px;">
       <h2 style="color: #ffc107;">Upcoming Rent Payment Alert</h2>
       <p>Hello Admin,</p>
@@ -267,9 +316,13 @@ exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining
     </div>
   `;
 
+  const subject = isOverdue
+    ? `[BamiHustle Alert] ⚠️ OVERDUE: ${daysOverdue} Day(s) - ${tenant.tenantName}`
+    : `[BamiHustle Alert] Upcoming Rent Payment - ${daysRemaining} Day(s) - ${tenant.tenantName}`;
+
   return await this.sendEmail({
     email: adminEmail,
-    subject: `[BamiHustle Alert] Upcoming Rent Payment - ${daysRemaining} Day(s) - ${tenant.tenantName}`,
+    subject,
     html: message
   });
 };

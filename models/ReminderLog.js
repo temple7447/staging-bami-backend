@@ -13,7 +13,17 @@ const ReminderLogSchema = new mongoose.Schema({
   },
   reminderType: {
     type: String,
-    enum: ['3-month', '2-month', '1-month', '2-week', '7-day', '3-day', '1-day'],
+    enum: [
+      // Legacy types (keeping for backward compatibility)
+      '3-month', '2-month', '1-month', '2-week', '7-day', '3-day', '1-day',
+      // New weekly-based reminder types
+      'month1-reminder',
+      'month2-week1', 'month2-week3',
+      'month3-week1', 'month3-week2', 'month3-week3', 'month3-week4',
+      'final-notice',
+      // Overdue reminder types
+      'overdue-week1', 'overdue-week2', 'overdue-week3', 'overdue-month1'
+    ],
     required: true
   },
   tenantEmail: {

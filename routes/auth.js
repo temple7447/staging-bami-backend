@@ -15,7 +15,8 @@ const {
   createAdmin,
   getAdmins,
   updateAdminStatus,
-  deleteAdmin
+  deleteAdmin,
+  updateSuperAdminEmail
 } = require('../controllers/authController');
 
 const { protect, superAdminOnly } = require('../middleware/auth');
@@ -79,7 +80,7 @@ const validateCreateAdmin = [
 const handleValidationErrors = (req, res, next) => {
   const { validationResult } = require('express-validator');
   const errors = validationResult(req);
-  
+
   if (!errors.isEmpty()) {
     return res.status(400).json({
       success: false,
@@ -112,5 +113,14 @@ router.post('/create-admin', protect, superAdminOnly, validateCreateAdmin, handl
 router.get('/admins', protect, superAdminOnly, getAdmins);
 router.put('/admin/:id/status', protect, superAdminOnly, updateAdminStatus);
 router.delete('/admin/:id', protect, superAdminOnly, deleteAdmin);
+router.put('/update-superadmin-email', protect, superAdminOnly, [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('password')
+    .notEmpty()
+    .withMessage('Password is required')
+], handleValidationErrors, updateSuperAdminEmail);
 
 module.exports = router;
