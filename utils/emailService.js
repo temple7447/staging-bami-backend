@@ -17,11 +17,12 @@ const getMailtrapStatus = () => {
 
 const getClient = () => {
   ensureMailtrapConfigured();
+  // Create a NEW instance each time to avoid token caching issues
   return new MailtrapClient({ token: process.env.MAILTRAP_TOKEN });
 };
 
 const FROM = {
-  email: process.env.MAILTRAP_SENDER_EMAIL || 'noreply@bamihustle.com',
+  email: process.env.MAILTRAP_SENDER_EMAIL || 'noreply@bamihost.com',
   name: process.env.MAILTRAP_SENDER_NAME || 'BamiHustle',
 };
 
@@ -51,6 +52,11 @@ exports.sendEmail = async (options) => {
       throw new Error('Email body (html or message) is required');
     }
 
+    // Debug: Log token info (first 8 chars for security)
+    console.log('[EMAIL DEBUG] Token prefix:', process.env.MAILTRAP_TOKEN?.substring(0, 8) || 'MISSING');
+    console.log('[EMAIL DEBUG] Sending to:', options.email);
+    console.log('[EMAIL DEBUG] Subject:', options.subject);
+
     const client = getClient();
     const payload = {
       from: {
@@ -63,6 +69,7 @@ exports.sendEmail = async (options) => {
       html: options.html || options.message,
     };
     const resp = await client.send(payload);
+    console.log('[EMAIL DEBUG] Success! Message ID:', resp?.message_ids?.[0]);
     return { success: true, messageId: resp?.message_ids?.[0] || null };
   } catch (error) {
     console.error('Mailtrap send error:', error?.response?.data || error.message || error);
@@ -326,3 +333,54 @@ exports.sendAdminRentReminder = async (adminEmail, tenant, estate, daysRemaining
     html: message
   });
 };
+
+// Business Owner welcome email with credentials and assigned estates
+exports.sendBusinessOwnerWelcomeEmail = async (user, temporaryPassword, assignedEstates = []) => {
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+
+  const estatesList = assignedEstates.length > 0
+    ? assignedEstates.map(estate => `<li>${estate.name} (${estate.totalUnits} units)</li>`).join('')
+    : '<li>No estates assigned yet</li>';
+
+  const message = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #007bff;">Welcome to BamiHustle!</h2>
+      <p>Hello ${user.name},</p>
+      <p>Your <strong>Business Owner</strong> account has been successfully created.</p>
+      
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0;">🔐 Login Credentials</h3>
+        <p><strong>Email:</strong> ${user.email}</p>
+        <p><strong>Temporary Password:</strong> <span style="background: #fff; padding: 5px 10px; border: 1px solid #ddd; font-family: monospace;">${temporaryPassword}</span></p>
+        ${user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ''}
+      </div>
+
+      <div style="background-color: #e7f3ff; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0;">🏘️ Your Estates</h3>
+        <ul style="margin: 10px 0;">
+          ${estatesList}
+        </ul>
+      </div>
+
+      <p><a href="${loginUrl}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">Login to Dashboard</a></p>
+      
+      <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+        <p style="margin: 0;"><strong>⚠️ Important Security Notice:</strong></p>
+        <p style="margin: 5px 0 0 0;">Please change your password immediately after your first login for security reasons.</p>
+      </div>
+
+      <p>As a business owner, you have full access to manage your assigned estates, tenants, units, and view comprehensive analytics.</p>
+      
+      <p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+      
+      <p>Best regards,<br><strong>BamiHustle Team</strong></p>
+    </div>
+  `;
+
+  return await exports.sendEmail({
+    email: user.email,
+    subject: 'Welcome to BamiHustle - Your Business Owner Account',
+    html: message,
+  });
+};
+

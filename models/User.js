@@ -27,8 +27,26 @@ const UserSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super_admin', 'admin', 'manager', 'vendor', 'user'],
+    enum: ['super_admin', 'admin', 'business_owner', 'manager', 'vendor', 'user'],
     default: 'admin'
+  },
+  // For business_owner role - estates they own
+  assignedEstates: [{
+    type: mongoose.Schema.ObjectId,
+    ref: 'Estate'
+  }],
+  // For future extensibility - other business types
+  assignedBusinesses: [{
+    businessType: {
+      type: String,
+      enum: ['estate', 'hotel', 'restaurant', 'retail', 'other']
+    },
+    businessId: mongoose.Schema.ObjectId
+  }],
+  // Contact information
+  phone: {
+    type: String,
+    trim: true
   },
   isActive: {
     type: Boolean,
@@ -56,7 +74,7 @@ const UserSchema = new mongoose.Schema({
 });
 
 // Encrypt password using bcrypt
-UserSchema.pre('save', async function(next) {
+UserSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     next();
   }
@@ -67,19 +85,19 @@ UserSchema.pre('save', async function(next) {
 });
 
 // Sign JWT and return
-UserSchema.methods.getSignedJwtToken = function() {
+UserSchema.methods.getSignedJwtToken = function () {
   return jwt.sign({ id: this._id, role: this.role }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || '30d'
   });
 };
 
 // Match user entered password to hashed password in database
-UserSchema.methods.matchPassword = async function(enteredPassword) {
+UserSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
 // Generate and hash password token
-UserSchema.methods.getResetPasswordToken = function() {
+UserSchema.methods.getResetPasswordToken = function () {
   // Generate token
   const resetToken = require('crypto').randomBytes(20).toString('hex');
 
@@ -96,7 +114,7 @@ UserSchema.methods.getResetPasswordToken = function() {
 };
 
 // Generate email verification token
-UserSchema.methods.getEmailVerificationToken = function() {
+UserSchema.methods.getEmailVerificationToken = function () {
   const verificationToken = require('crypto').randomBytes(20).toString('hex');
 
   this.emailVerificationToken = require('crypto')
@@ -108,7 +126,7 @@ UserSchema.methods.getEmailVerificationToken = function() {
 };
 
 // Update last login
-UserSchema.methods.updateLastLogin = function() {
+UserSchema.methods.updateLastLogin = function () {
   this.lastLogin = new Date();
   return this.save({ validateBeforeSave: false });
 };

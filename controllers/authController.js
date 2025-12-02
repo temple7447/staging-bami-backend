@@ -4,7 +4,8 @@ const {
   sendEmail,
   sendWelcomeEmail,
   sendPasswordResetEmail,
-  sendVerificationEmail
+  sendVerificationEmail,
+  sendBusinessOwnerWelcomeEmail
 } = require('../utils/emailService');
 const { sendPasswordResetOtpEmail } = require('../utils/emailService');
 
@@ -372,6 +373,173 @@ exports.getAdmins = async (req, res, next) => {
   }
 };
 
+// @desc    Get all business owners
+// @route   GET /api/auth/business-owners
+// @access  Private (Super Admin only)
+exports.getBusinessOwners = async (req, res) => {
+  try {
+    const businessOwners = await User.find({ role: 'business_owner' })
+      .populate('createdBy', 'name email')
+      .populate('assignedEstates', 'name totalUnits')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: businessOwners.length,
+      data: businessOwners
+    });
+  } catch (error) {
+    console.error('Get business owners error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Update business owner details
+// @route   PUT /api/auth/business-owner/:id
+// @access  Private (Super Admin only)
+exports.updateBusinessOwner = async (req, res) => {
+  try {
+    const { name, email, phone, estateIds } = req.body;
+
+    const businessOwner = await User.findById(req.params.id);
+
+    if (!businessOwner || businessOwner.role !== 'business_owner') {
+      return res.status(404).json({
+        success: false,
+        message: 'Business owner not found'
+      });
+    }
+
+    // Update basic fields
+    if (name) businessOwner.name = name;
+    if (email) businessOwner.email = email.toLowerCase();
+    if (phone !== undefined) businessOwner.phone = phone;
+
+    // Update estates if provided
+    if (estateIds) {
+      const Estate = require('../models/Estate');
+
+      // Validate estates exist
+      const estates = await Estate.find({
+        _id: { $in: estateIds },
+        isActive: true
+      });
+
+      if (estates.length !== estateIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more estates not found or inactive'
+        });
+      }
+
+      // Remove ownership from old estates
+      await Estate.updateMany(
+        { owner: businessOwner._id },
+        { $unset: { owner: 1 } }
+      );
+
+      // Set ownership for new estates
+      await Estate.updateMany(
+        { _id: { $in: estateIds } },
+        { owner: businessOwner._id, updatedBy: req.user.id }
+      );
+
+      businessOwner.assignedEstates = estateIds;
+    }
+
+    await businessOwner.save();
+
+    // Populate estates for response
+    await businessOwner.populate('assignedEstates', 'name totalUnits');
+
+    res.status(200).json({
+      success: true,
+      message: 'Business owner updated successfully',
+      data: businessOwner
+    });
+  } catch (error) {
+    console.error('Update business owner error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Update business owner status
+// @route   PUT /api/auth/business-owner/:id/status
+// @access  Private (Super Admin only)
+exports.updateBusinessOwnerStatus = async (req, res) => {
+  try {
+    const { isActive } = req.body;
+
+    const businessOwner = await User.findById(req.params.id);
+
+    if (!businessOwner || businessOwner.role !== 'business_owner') {
+      return res.status(404).json({
+        success: false,
+        message: 'Business owner not found'
+      });
+    }
+
+    businessOwner.isActive = isActive;
+    await businessOwner.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Business owner ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: businessOwner
+    });
+  } catch (error) {
+    console.error('Update business owner status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Delete business owner
+// @route   DELETE /api/auth/business-owner/:id
+// @access  Private (Super Admin only)
+exports.deleteBusinessOwner = async (req, res) => {
+  try {
+    const businessOwner = await User.findById(req.params.id);
+
+    if (!businessOwner || businessOwner.role !== 'business_owner') {
+      return res.status(404).json({
+        success: false,
+        message: 'Business owner not found'
+      });
+    }
+
+    // Remove ownership from estates
+    const Estate = require('../models/Estate');
+    await Estate.updateMany(
+      { owner: businessOwner._id },
+      { $unset: { owner: 1 }, updatedBy: req.user.id }
+    );
+
+    // Delete the user
+    await businessOwner.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: 'Business owner deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete business owner error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
 // @desc    Update admin status
 // @route   PUT /api/auth/admin/:id/status
 // @access  Private (Super Admin only)
@@ -606,6 +774,128 @@ exports.updateSuperAdminEmail = async (req, res, next) => {
     res.status(500).json({
       success: false,
       message: 'Error updating email',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// Helper function to generate secure password
+const generateSecurePassword = (length = 12) => {
+  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+  let password = '';
+  const randomBytes = require('crypto').randomBytes(length);
+
+  for (let i = 0; i < length; i++) {
+    password += charset[randomBytes[i] % charset.length];
+  }
+
+  return password;
+};
+
+// @desc    Onboard Business Owner (Super Admin only)
+// @route   POST /api/auth/onboard-business-owner
+// @access  Private (Super Admin only)
+exports.onboardBusinessOwner = async (req, res) => {
+  try {
+    const { name, email, phone, estateIds = [], sendCredentials = true } = req.body;
+
+    // Validate required fields
+    if (!name || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and email are required'
+      });
+    }
+
+    // Check ifuser already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Validate estates if provided
+    const Estate = require('../models/Estate');
+    let assignedEstates = [];
+
+    if (estateIds.length > 0) {
+      assignedEstates = await Estate.find({
+        _id: { $in: estateIds },
+        isActive: true
+      });
+
+      if (assignedEstates.length !== estateIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more estates not found or inactive'
+        });
+      }
+    }
+
+    // Generate secure password
+    const temporaryPassword = generateSecurePassword(12);
+
+    // Create business owner user
+    const businessOwner = await User.create({
+      name,
+      email: email.toLowerCase(),
+      phone,
+      password: temporaryPassword,
+      role: 'business_owner',
+      assignedEstates: estateIds,
+      createdBy: req.user.id,
+      emailVerified: false
+    });
+
+    // Update estates to set owner
+    if (assignedEstates.length > 0) {
+      await Estate.updateMany(
+        { _id: { $in: estateIds } },
+        {
+          owner: businessOwner._id,
+          updatedBy: req.user.id
+        }
+      );
+    }
+
+    // Send welcome email with credentials
+    if (sendCredentials) {
+      try {
+        await sendBusinessOwnerWelcomeEmail(businessOwner, temporaryPassword, assignedEstates);
+      } catch (error) {
+        console.log('Failed to send welcome email:', error.message);
+        // Don't fail the request if email fails
+      }
+    }
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      message: sendCredentials
+        ? `Business owner onboarded successfully. Credentials sent to ${email}`
+        : 'Business owner onboarded successfully',
+      data: {
+        id: businessOwner._id,
+        name: businessOwner.name,
+        email: businessOwner.email,
+        phone: businessOwner.phone,
+        role: businessOwner.role,
+        assignedEstates: assignedEstates.map(e => ({
+          _id: e._id,
+          name: e.name,
+          totalUnits: e.totalUnits
+        })),
+        isActive: businessOwner.isActive,
+        createdAt: businessOwner.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Onboard business owner error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error onboarding business owner',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

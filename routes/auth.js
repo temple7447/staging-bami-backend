@@ -16,7 +16,12 @@ const {
   getAdmins,
   updateAdminStatus,
   deleteAdmin,
-  updateSuperAdminEmail
+  updateSuperAdminEmail,
+  onboardBusinessOwner,
+  getBusinessOwners,
+  updateBusinessOwner,
+  updateBusinessOwnerStatus,
+  deleteBusinessOwner
 } = require('../controllers/authController');
 
 const { protect, superAdminOnly } = require('../middleware/auth');
@@ -122,5 +127,52 @@ router.put('/update-superadmin-email', protect, superAdminOnly, [
     .notEmpty()
     .withMessage('Password is required')
 ], handleValidationErrors, updateSuperAdminEmail);
+
+// Validation for business owner onboarding
+const validateOnboardBusinessOwner = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('estateIds')
+    .optional()
+    .isArray()
+    .withMessage('Estate IDs must be an array')
+];
+
+router.post('/onboard-business-owner', protect, superAdminOnly, validateOnboardBusinessOwner, handleValidationErrors, onboardBusinessOwner);
+
+// Business owner management routes (Super Admin only)
+router.get('/business-owners', protect, superAdminOnly, getBusinessOwners);
+router.put('/business-owner/:id', protect, superAdminOnly, [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .optional()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('estateIds')
+    .optional()
+    .isArray()
+    .withMessage('Estate IDs must be an array')
+], handleValidationErrors, updateBusinessOwner);
+router.put('/business-owner/:id/status', protect, superAdminOnly, updateBusinessOwnerStatus);
+router.delete('/business-owner/:id', protect, superAdminOnly, deleteBusinessOwner);
 
 module.exports = router;

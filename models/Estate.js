@@ -21,6 +21,20 @@ const EstateSchema = new mongoose.Schema({
     required: [true, 'Please provide total units for this estate'],
     min: [0, 'Total units cannot be negative']
   },
+  // Ownership tracking
+  owner: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
+    required: function () {
+      // Owner required if createdBy user is business_owner
+      return this.createdBy && this.createdBy.role === 'business_owner';
+    }
+  },
+  // Admins/managers who can manage this estate
+  managers: [{
+    type: mongoose.Schema.ObjectId,
+    ref: 'User'
+  }],
   isActive: {
     type: Boolean,
     default: true
@@ -41,7 +55,7 @@ const EstateSchema = new mongoose.Schema({
 });
 
 // Slug from name
-EstateSchema.pre('save', function(next) {
+EstateSchema.pre('save', function (next) {
   if (this.isModified('name')) {
     this.slug = this.name.toLowerCase()
       .replace(/[^a-zA-Z0-9]/g, '-')
@@ -52,7 +66,7 @@ EstateSchema.pre('save', function(next) {
 });
 
 // Ensure unique active name (case-insensitive)
-EstateSchema.pre('save', async function(next) {
+EstateSchema.pre('save', async function (next) {
   if (!this.isModified('name')) return next();
   const existing = await this.constructor.findOne({
     name: new RegExp(`^${this.name}$`, 'i'),

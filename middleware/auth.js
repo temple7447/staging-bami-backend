@@ -87,3 +87,83 @@ exports.adminOrSuperAdmin = (req, res, next) => {
   }
   next();
 };
+
+// Filter data by ownership (Multi-tenant middleware)
+exports.filterByOwnership = async (req, res, next) => {
+  try {
+    if (req.user.role === 'super_admin') {
+      // Super admin can see everything
+      req.dataFilter = {};
+      req.canAccessAll = true;
+    } else if (req.user.role === 'business_owner') {
+      // Business owner can only see their own estates
+      req.dataFilter = {
+        $or: [
+          { owner: req.user.id },
+          { createdBy: req.user.id }
+        ]
+      };
+      req.canAccessAll = false;
+      req.ownedEstates = req.user.assignedEstates || [];
+    } else if (req.user.role === 'admin') {
+      // Admin can only see estates they manage
+      req.dataFilter = {
+        managers: req.user.id
+      };
+      req.canAccessAll = false;
+    } else {
+      // Other roles have no access by default
+      req.dataFilter = { _id: null }; // Will match nothing
+      req.canAccessAll = false;
+    }
+
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error applying data filter'
+    });
+  }
+};
+
+// Check if user has access to specific estate
+exports.checkEstateAccess = async (req, res, next) => {
+  try {
+    const estateId = req.params.id;
+
+    if (req.user.role === 'super_admin') {
+      // Super admin has access to all
+      return next();
+    }
+
+    const Estate = require('../models/Estate');
+    const estate = await Estate.findById(estateId);
+
+    if (!estate) {
+      return res.status(404).json({
+        success: false,
+        message: 'Estate not found'
+      });
+    }
+
+    // Check ownership/management access
+    const hasAccess =
+      req.user.role === 'business_owner' && estate.owner && estate.owner.toString() === req.user.id ||
+      req.user.role === 'admin' && estate.managers && estate.managers.some(m => m.toString() === req.user.id);
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have access to this estate'
+      });
+    }
+
+    req.estate = estate;
+    next();
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error checking estate access'
+    });
+  }
+};
