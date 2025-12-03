@@ -170,7 +170,7 @@ const createTenant = async (req, res) => {
     res.status(201).json({ success: true, message: 'Tenant created successfully', data: tenant });
   } catch (err) {
     logError('POST /api/tenants', err, { unitId: req.body?.unitId, tenantName: req.body?.tenantName, estateId });
-    
+
     if (err.code === 11000) {
       const message = 'A tenant already exists for this unit in the estate';
       logWarning('Duplicate tenant entry attempted', { unitId, tenantName });
@@ -209,9 +209,11 @@ const getTenants = async (req, res) => {
       Tenant.countDocuments(filter)
     ]);
 
-    res.status(200).json({ success: true, data: items, pagination: {
-      currentPage: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), totalItems: total, itemsPerPage: parseInt(limit)
-    }});
+    res.status(200).json({
+      success: true, data: items, pagination: {
+        currentPage: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), totalItems: total, itemsPerPage: parseInt(limit)
+      }
+    });
   } catch (err) {
     logError('GET /api/tenants', err, { estateId, page, limit });
     res.status(500).json({ success: false, message: 'Server error occurred while fetching tenants' });
@@ -409,18 +411,18 @@ const getTenant = async (req, res) => {
     const includeTx = expand?.includes('transactions');
 
     console.log('[getTenant] Fetching tenant:', req.params.id, 'with expand:', expand);
-    
+
     const tenant = await Tenant.findById(req.params.id)
       .populate('estate', 'name')
       .populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
-    
+
     console.log('[getTenant] Query result:', tenant ? 'found' : 'not found');
-    
+
     if (!tenant || !tenant.isActive) {
       console.log('[getTenant] Tenant not found or inactive:', req.params.id);
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
-    
+
     console.log('[getTenant] Tenant found:', tenant._id);
 
     const overview = {
@@ -838,7 +840,7 @@ async function uploadTenantAvatar(req, res) {
 
     // Destroy previous image if exists
     if (tenant.profileImagePublicId) {
-      try { await cloudinary.uploader.destroy(tenant.profileImagePublicId, { resource_type: 'image' }); } catch (_) {}
+      try { await cloudinary.uploader.destroy(tenant.profileImagePublicId, { resource_type: 'image' }); } catch (_) { }
     }
 
     const folder = (process.env.CLOUDINARY_FOLDER || 'uploads') + '/avatars';
@@ -908,6 +910,109 @@ async function listMyHistory(req, res) {
   }
 }
 
+// Shift next due date based on payment duration (separate months for rent and service)
+const shiftNextDueDate = async (req, res) => {
+  try {
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant || !tenant.isActive) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    const { rentMonths, serviceMonths } = req.body;
+
+    // Validate at least one is provided
+    if (!rentMonths && !serviceMonths) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide at least one of rentMonths or serviceMonths'
+      });
+    }
+
+    // Get the current next due date or use today if not set
+    const currentDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
+
+    // Calculate the new due date using the maximum of the two months
+    // This ensures the next due date covers both rent and service periods
+    const maxMonths = Math.max(rentMonths || 0, serviceMonths || 0);
+    const newDueDate = new Date(currentDueDate);
+    newDueDate.setMonth(newDueDate.getMonth() + maxMonths);
+
+    // Store the old date for history
+    const oldDueDate = tenant.nextDueDate;
+
+    // Update the tenant's next due date
+    tenant.nextDueDate = newDueDate;
+    tenant.updatedBy = req.user?.id;
+
+    // Build payment description
+    const paymentParts = [];
+    if (rentMonths) paymentParts.push(`${rentMonths} month${rentMonths > 1 ? 's' : ''} rent`);
+    if (serviceMonths) paymentParts.push(`${serviceMonths} month${serviceMonths > 1 ? 's' : ''} service`);
+    const paymentDesc = paymentParts.join(' and ');
+
+    // Create history entry
+    const historyEntry = {
+      event: 'payment',
+      note: `Payment received for ${paymentDesc}. Next due date shifted from ${oldDueDate ? oldDueDate.toISOString().split('T')[0] : 'not set'} to ${newDueDate.toISOString().split('T')[0]}`,
+      meta: {
+        rentMonths: rentMonths || 0,
+        serviceMonths: serviceMonths || 0,
+        oldNextDueDate: oldDueDate,
+        newNextDueDate: newDueDate
+      },
+      createdBy: req.user?.id
+    };
+
+    // Update tenant using findByIdAndUpdate to avoid full document validation
+    // This is necessary because some legacy tenants might not have the required 'unit' field
+    await Tenant.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          nextDueDate: newDueDate,
+          updatedBy: req.user?.id
+        },
+        $push: {
+          history: historyEntry
+        }
+      },
+      { runValidators: false }
+    );
+
+    logInfo('Tenant next due date shifted', {
+      tenantId: tenant._id,
+      tenantName: tenant.tenantName,
+      rentMonths,
+      serviceMonths,
+      oldDueDate,
+      newDueDate
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Next due date successfully shifted by ${maxMonths} month${maxMonths > 1 ? 's' : ''} (${paymentDesc})`,
+      data: {
+        tenantId: tenant._id,
+        tenantName: tenant.tenantName,
+        oldNextDueDate: oldDueDate,
+        newNextDueDate: newDueDate,
+        rentMonthsPaid: rentMonths || 0,
+        serviceMonthsPaid: serviceMonths || 0,
+        totalMonthsShifted: maxMonths
+      }
+    });
+  } catch (err) {
+    logError('POST /api/tenants/:id/shift-due-date', err, { tenantId: req.params.id });
+    if (err.name === 'CastError') {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+    res.status(500).json({
+      success: false,
+      message: 'Server error occurred while shifting next due date'
+    });
+  }
+};
+
 module.exports = {
   createTenant,
   getTenants,
@@ -925,4 +1030,5 @@ module.exports = {
   listMyHistory,
   getQuarterlyRentByDueMonth,
   getThreeMonthRent,
+  shiftNextDueDate,
 };

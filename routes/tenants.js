@@ -5,7 +5,7 @@ const { protect } = require('../middleware/auth');
 const multer = require('multer');
 const imageStorage = multer.memoryStorage();
 const imageOnly = (req, file, cb) => {
-  const allowed = ['image/jpeg','image/png','image/gif','image/webp','image/svg+xml'];
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
   if (allowed.includes(file.mimetype)) return cb(null, true);
   cb(new Error('Only image files are allowed'));
 };
@@ -16,6 +16,7 @@ const {
   handleValidationErrors,
   validateTenantCreate,
   validateTenantUpdate,
+  validateShiftDueDate,
 } = require('../middleware/validation');
 
 const {
@@ -29,6 +30,7 @@ const {
   getMyTenant,
   listMyHistory,
   getQuarterlyRentByDueMonth,
+  shiftNextDueDate,
 } = require('../controllers/tenantController');
 
 // Nested: /api/estates/:estateId/tenants (list/create for a given estate)
@@ -47,6 +49,9 @@ router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
 router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getTenant);
 router.put('/:id', protect, validateObjectId('id'), validateTenantUpdate, handleValidationErrors, updateTenant);
 router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteTenant);
+
+// Shift next due date endpoint - MUST be before catch-all /:id routes
+router.post('/:id/shift-due-date', protect, validateObjectId('id'), validateShiftDueDate, handleValidationErrors, shiftNextDueDate);
 
 // History endpoints
 router.get('/:id/history', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listHistory);

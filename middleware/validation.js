@@ -76,7 +76,7 @@ const validateTenantCreate = [
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
-    .isIn(['new','existing','renewal','transfer'])
+    .isIn(['new', 'existing', 'renewal', 'transfer'])
     .withMessage('Invalid tenant type'),
 
   // Dates: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
@@ -107,7 +107,7 @@ const validateTenantUpdate = [
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
-    .isIn(['new','existing','renewal','transfer']),
+    .isIn(['new', 'existing', 'renewal', 'transfer']),
   check('entryDate').optional().isString(),
   check('nextDueDate').optional().isString()
 ];
@@ -115,19 +115,36 @@ const validateTenantUpdate = [
 // Transaction validators
 const validateTransactionCreate = [
   check('amount').notEmpty().withMessage('Amount is required').isInt({ min: 0 }).withMessage('Amount must be a non-negative integer').toInt(),
-  check('type').notEmpty().isIn(['rent','utility','deposit','other']).withMessage('Invalid type'),
-  check('method').optional().isIn(['cash','transfer','card','bank','other']).withMessage('Invalid method'),
-  check('status').optional().isIn(['paid','pending','failed']).withMessage('Invalid status'),
-  check('periodMonth').optional().isInt({ min:1, max:12 }).toInt(),
-  check('periodYear').optional().isInt({ min:1900 }).toInt(),
+  check('type').notEmpty().isIn(['rent', 'utility', 'deposit', 'other']).withMessage('Invalid type'),
+  check('method').optional().isIn(['cash', 'transfer', 'card', 'bank', 'other']).withMessage('Invalid method'),
+  check('status').optional().isIn(['paid', 'pending', 'failed']).withMessage('Invalid status'),
+  check('periodMonth').optional().isInt({ min: 1, max: 12 }).toInt(),
+  check('periodYear').optional().isInt({ min: 1900 }).toInt(),
   check('reference').optional().isLength({ max: 120 }),
   check('notes').optional().isLength({ max: 1000 })
 ];
 
 const validateHistoryCreate = [
-  check('event').notEmpty().isIn(['created','moved_in','moved_out','rent_update','payment','note']).withMessage('Invalid event'),
+  check('event').notEmpty().isIn(['created', 'moved_in', 'moved_out', 'rent_update', 'payment', 'note']).withMessage('Invalid event'),
   check('note').optional().isLength({ max: 1000 }),
   check('meta').optional().isObject()
+];
+
+const validateShiftDueDate = [
+  check('rentMonths')
+    .optional()
+    .isInt({ min: 1, max: 60 }).withMessage('Rent months must be between 1 and 60')
+    .toInt(),
+  check('serviceMonths')
+    .optional()
+    .isInt({ min: 1, max: 60 }).withMessage('Service months must be between 1 and 60')
+    .toInt(),
+  body().custom((value, { req }) => {
+    if (!req.body.rentMonths && !req.body.serviceMonths) {
+      throw new Error('At least one of rentMonths or serviceMonths is required');
+    }
+    return true;
+  })
 ];
 
 module.exports = {
@@ -138,5 +155,6 @@ module.exports = {
   validateTenantCreate,
   validateTenantUpdate,
   validateTransactionCreate,
-  validateHistoryCreate
+  validateHistoryCreate,
+  validateShiftDueDate
 };
