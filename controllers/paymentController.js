@@ -681,11 +681,32 @@ const sendTenantReceipt = async (req, res) => {
           console.log(`💰 No user account linked, no wallet data`);
         }
 
+        // Calculate total rent from move-in date to expiration date
+        let totalRent = tenant.rentAmount || 0;
+
+        if (tenant.entryDate && tenant.nextDueDate && tenant.rentAmount) {
+          // Calculate the number of months between entryDate and nextDueDate
+          const moveInDate = new Date(tenant.entryDate);
+          const expireDate = new Date(tenant.nextDueDate);
+
+          // Calculate difference in months
+          const monthsDiff = (expireDate.getFullYear() - moveInDate.getFullYear()) * 12
+            + (expireDate.getMonth() - moveInDate.getMonth());
+
+          // Calculate total rent (ensure at least 1 month)
+          const totalMonths = Math.max(1, monthsDiff);
+          totalRent = tenant.rentAmount * totalMonths;
+
+          console.log(`📊 Rent calculation: ${tenant.rentAmount} x ${totalMonths} months = ${totalRent}`);
+        } else {
+          console.log(`⚠️ Using single month rent: ${totalRent} (missing date fields)`);
+        }
+
         // Create a mock payment object with current date
         const mockPayment = {
           _id: tenant._id, // Use tenant ID as receipt reference
           paymentDate: new Date(),
-          amount: tenant.rentAmount || 0
+          amount: totalRent
         };
 
         console.log(`📄 Generating PDF and sending email to ${tenant.tenantEmail}...`);
