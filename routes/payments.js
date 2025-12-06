@@ -15,7 +15,9 @@ const {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
-  refundDeposit
+  refundDeposit,
+  sendPaymentReceipt,
+  sendTenantReceipt
 } = require('../controllers/paymentController');
 
 const router = express.Router();
@@ -29,13 +31,13 @@ router.post('/caution-fee', protect, initiateCautionFeePayment);
 router.post('/legal-fee', protect, initiateLegalFeePayment);
 
 // Get payment status
-router.get('/:paymentId', protect, validateObjectId, handleValidationErrors, getPaymentStatus);
+router.get('/:paymentId', protect, validateObjectId('paymentId'), handleValidationErrors, getPaymentStatus);
 
 // Get all payments for a tenant
-router.get('/tenant/:tenantId', protect, validateObjectId, handleValidationErrors, getTenantPayments);
+router.get('/tenant/:tenantId', protect, validateObjectId('tenantId'), handleValidationErrors, getTenantPayments);
 
 // Get all payments for an estate
-router.get('/estate/:estateId', protect, validateObjectId, handleValidationErrors, getEstatePayments);
+router.get('/estate/:estateId', protect, validateObjectId('estateId'), handleValidationErrors, getEstatePayments);
 
 // Payment callback (webhook)
 router.post('/callback', (req, res) => {
@@ -47,6 +49,12 @@ router.post('/callback', (req, res) => {
 router.get('/verify/:reference', verifyPayment);
 
 // Refund deposit
-router.post('/:paymentId/refund', protect, validateObjectId, handleValidationErrors, refundDeposit);
+router.post('/:paymentId/refund', protect, validateObjectId('paymentId'), handleValidationErrors, refundDeposit);
+
+// Send receipt email by tenant ID (alternative endpoint) - MUST come before /:paymentId/receipt
+router.post('/tenant/:tenantId/receipt', protect, validateObjectId('tenantId'), handleValidationErrors, sendTenantReceipt);
+
+// Send receipt email by payment ID
+router.post('/:paymentId/receipt', protect, validateObjectId('paymentId'), handleValidationErrors, sendPaymentReceipt);
 
 module.exports = router;

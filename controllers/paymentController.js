@@ -2,8 +2,9 @@ const Payment = require('../models/Payment');
 const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
 const User = require('../models/User');
+const Wallet = require('../models/Wallet');
 const paystackService = require('../utils/paystackService');
-const { sendEmail } = require('../utils/emailService');
+const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
 const { distributePayment } = require('../utils/distributionService');
 const { logError, logInfo } = require('../utils/logger');
 
@@ -491,12 +492,12 @@ const verifyPayment = async (req, res) => {
   } catch (error) {
     console.error('Payment verification error:', error);
     const reference = req.params.reference || 'unknown';
-    
+
     // If browser redirect requested, redirect to dashboard with error
     if (req.query.redirect) {
       return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=error`);
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Error verifying payment',
@@ -565,6 +566,150 @@ const refundDeposit = async (req, res) => {
   }
 };
 
+/**
+ * Send payment receipt email manually
+ */
+const sendPaymentReceipt = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    const payment = await Payment.findById(paymentId)
+      .populate({
+        path: 'tenant',
+        populate: { path: 'unit' }
+      })
+      .populate('estate');
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    // Respond immediately to frontend
+    res.status(200).json({
+      success: true,
+      message: 'Receipt is being sent to tenant email'
+    });
+
+    // Process email asynchronously (don't wait for it)
+    setImmediate(async () => {
+      try {
+        // Find wallet for the tenant (if they have a user account)
+        let wallet = null;
+        if (payment.tenant.user) {
+          wallet = await Wallet.findOne({ userId: payment.tenant.user });
+        }
+
+        // Send the receipt email
+        await sendReceiptEmail(payment, payment.tenant, payment.estate, wallet);
+        console.log(`✅ Receipt sent successfully for payment ${paymentId}`);
+      } catch (emailError) {
+        console.error(`❌ Error sending receipt for payment ${paymentId}:`, emailError.message);
+      }
+    });
+
+  } catch (error) {
+    console.error('Error processing receipt request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing receipt request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Send receipt email using tenant ID (without requiring payment ID)
+ * This generates a receipt based on current tenant information
+ */
+const sendTenantReceipt = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    console.log(`📧 Receipt request received for tenant: ${tenantId}`);
+
+    const tenant = await Tenant.findById(tenantId)
+      .populate('unit')
+      .populate('estate');
+
+    if (!tenant) {
+      console.log(`❌ Tenant not found: ${tenantId}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found'
+      });
+    }
+
+    if (!tenant.isActive) {
+      console.log(`❌ Tenant is inactive: ${tenantId}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant is not active'
+      });
+    }
+
+    if (!tenant.tenantEmail) {
+      console.log(`❌ Tenant has no email: ${tenantId}`);
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant has no email address'
+      });
+    }
+
+    console.log(`✅ Tenant found: ${tenant.tenantName} (${tenant.tenantEmail})`);
+    console.log(`📍 Estate: ${tenant.estate?.name || 'N/A'}`);
+    console.log(`🏠 Unit: ${tenant.unit?.label || tenant.unitLabel || 'N/A'}`);
+
+    // Respond immediately to frontend
+    res.status(200).json({
+      success: true,
+      message: 'Receipt is being sent to tenant email'
+    });
+
+    // Process email asynchronously (don't wait for it)
+    setImmediate(async () => {
+      try {
+        console.log(`🔄 Starting email generation for tenant ${tenantId}...`);
+
+        // Find wallet for the tenant (if they have a user account)
+        let wallet = null;
+        if (tenant.user) {
+          wallet = await Wallet.findOne({ userId: tenant.user });
+          console.log(`💰 Wallet found: Balance = ${wallet?.balance || 0}`);
+        } else {
+          console.log(`💰 No user account linked, no wallet data`);
+        }
+
+        // Create a mock payment object with current date
+        const mockPayment = {
+          _id: tenant._id, // Use tenant ID as receipt reference
+          paymentDate: new Date(),
+          amount: tenant.rentAmount || 0
+        };
+
+        console.log(`📄 Generating PDF and sending email to ${tenant.tenantEmail}...`);
+
+        // Send the receipt email
+        await sendReceiptEmail(mockPayment, tenant, tenant.estate, wallet);
+
+        console.log(`✅ Receipt sent successfully for tenant ${tenantId} to ${tenant.tenantEmail}`);
+      } catch (emailError) {
+        console.error(`❌ Error sending receipt for tenant ${tenantId}:`, emailError.message);
+        console.error('Full error:', emailError);
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error processing tenant receipt request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error processing receipt request',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   initiateDepositPayment,
   initiateRentPayment,
@@ -576,5 +721,7 @@ module.exports = {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
-  refundDeposit
+  refundDeposit,
+  sendPaymentReceipt,
+  sendTenantReceipt
 };

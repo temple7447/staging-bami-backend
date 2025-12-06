@@ -1,4 +1,5 @@
 const { MailtrapClient } = require('mailtrap');
+const PDFDocument = require('pdfkit');
 
 const ensureMailtrapConfigured = () => {
   const missing = [];
@@ -36,6 +37,15 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
+// Helper to format currency for PDF (PDFKit doesn't support ₦ symbol)
+const formatCurrencyForPDF = (amount) => {
+  const formatted = new Intl.NumberFormat('en-NG', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  }).format(amount);
+  return `N ${formatted}`; // Using 'N' instead of '₦' for PDF compatibility
+};
+
 // Send email via Mailtrap API
 exports.getMailtrapStatus = getMailtrapStatus;
 
@@ -68,6 +78,11 @@ exports.sendEmail = async (options) => {
       text: options.message,
       html: options.html || options.message,
     };
+
+    if (options.attachments) {
+      payload.attachments = options.attachments;
+    }
+
     const resp = await client.send(payload);
     console.log('[EMAIL DEBUG] Success! Message ID:', resp?.message_ids?.[0]);
     return { success: true, messageId: resp?.message_ids?.[0] || null };
@@ -384,3 +399,460 @@ exports.sendBusinessOwnerWelcomeEmail = async (user, temporaryPassword, assigned
   });
 };
 
+// Helper to generate PDF Receipt
+const generateReceiptPdf = (payment, tenant, estate, wallet, data) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: 30 });
+      const buffers = [];
+
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+
+      // --- Compact PDF Content for Single Page ---
+
+      const pageWidth = 595.28; // A4 width in points
+      const leftMargin = 30;
+      const rightMargin = 30;
+      const contentWidth = pageWidth - leftMargin - rightMargin;
+
+      // Compact Header Section
+      doc.save();
+
+      // Company Name - Left aligned (smaller)
+      doc.font('Helvetica-Bold')
+        .fontSize(16)
+        .fillColor('#2c5aa0')
+        .text('SAMFRED GLOBAL RESOURCES LTD', leftMargin, 35);
+
+      // Company Details (compact)
+      doc.font('Helvetica')
+        .fontSize(7)
+        .fillColor('#333333')
+        .text('BALADO ESTATE MASON IFIE OFF MATRIX DEPOT | Tel: 07052258160, 0905665358', leftMargin, 52);
+
+      // Logo - Right aligned with actual image
+      const logoX = pageWidth - rightMargin - 60;
+      const logoPath = require('path').join(__dirname, '../uploads/samfred-logo.png');
+
+      try {
+        // Add the logo image
+        doc.image(logoPath, logoX, 35, {
+          width: 60,
+          height: 60,
+          fit: [60, 60],
+          align: 'center'
+        });
+      } catch (logoError) {
+        // Fallback to placeholder if logo image not found
+        console.warn('Logo image not found, using placeholder:', logoError.message);
+        doc.roundedRect(logoX, 35, 60, 60, 3)
+          .lineWidth(1.5)
+          .strokeColor('#2c5aa0')
+          .fillAndStroke('#2c5aa0', '#2c5aa0');
+
+        doc.fillColor('white')
+          .fontSize(7)
+          .font('Helvetica-Bold')
+          .text('SAMFRED', logoX, 50, { width: 60, align: 'center' })
+          .fontSize(6)
+          .text('GLOBAL', logoX, 60, { width: 60, align: 'center' })
+          .text('RESOURCES', logoX, 68, { width: 60, align: 'center' });
+      }
+
+      doc.fillColor('#666666')
+        .fontSize(6)
+        .font('Helvetica')
+        .text('1-3 BED ROOMS', logoX, 100, { width: 60, align: 'center' });
+
+      doc.restore();
+
+      // Divider line
+      doc.moveTo(leftMargin, 105)
+        .lineTo(pageWidth - rightMargin, 105)
+        .lineWidth(1.5)
+        .strokeColor('#2c5aa0')
+        .stroke();
+
+      // Receipt Title and Date (compact)
+      doc.font('Helvetica-Bold')
+        .fontSize(12)
+        .fillColor('#2c5aa0')
+        .text('PAYMENT RECEIPT', leftMargin, 112);
+
+      doc.font('Helvetica')
+        .fontSize(7)
+        .fillColor('#666666')
+        .text(`Date: ${data.paymentDate} | Receipt #: ${payment._id?.toString().slice(-8).toUpperCase() || 'N/A'}`, leftMargin, 128);
+
+      // Start table at Y position
+      let currentY = 145;
+      const col1X = leftMargin;
+      const col2X = leftMargin + 260;
+      const rowHeight = 16; // Reduced from 28
+      const labelWidth = 250;
+      const valueWidth = 245;
+
+      // Compact row drawing function
+      const drawRow = (label, value, options = {}) => {
+        const {
+          color = '#333333',
+          bold = false,
+          fontSize = 7, // Reduced from 9
+          section = false
+        } = options;
+
+        // Section header styling
+        if (section) {
+          doc.rect(col1X, currentY, contentWidth, rowHeight)
+            .fill('#f0f4f8');
+
+          doc.font('Helvetica-Bold')
+            .fontSize(8)
+            .fillColor('#2c5aa0')
+            .text(label, col1X + 6, currentY + 4, { width: contentWidth - 12 });
+
+          currentY += rowHeight;
+          return;
+        }
+
+        // Draw cell borders
+        doc.rect(col1X, currentY, labelWidth, rowHeight)
+          .strokeColor('#d0d0d0')
+          .lineWidth(0.5)
+          .stroke();
+
+        doc.rect(col2X, currentY, valueWidth, rowHeight)
+          .strokeColor('#d0d0d0')
+          .lineWidth(0.5)
+          .stroke();
+
+        // Label
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
+          .fontSize(fontSize)
+          .fillColor(color)
+          .text(label, col1X + 5, currentY + 4, { width: labelWidth - 10 });
+
+        // Value
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
+          .fontSize(fontSize)
+          .fillColor(color)
+          .text(value, col2X + 5, currentY + 4, { width: valueWidth - 10 });
+
+        currentY += rowHeight;
+      };
+
+      // Tenant Information Section
+      drawRow('TENANT INFORMATION', '', { section: true });
+      drawRow('Tenant Full Name:', tenant.tenantName, { bold: true });
+      drawRow('Bedroom Type:', tenant.unitLabel || 'Standard');
+      drawRow('Flat/Unit:', tenant.unitLabel);
+      drawRow('Move In Date:', data.moveInDate);
+      drawRow('Lease Expiry Date:', data.expiryDate);
+
+      currentY += 2; // Reduced section spacing
+
+      // Payment Details Section
+      drawRow('PAYMENT DETAILS', '', { section: true });
+      drawRow('Monthly Rent:', data.rentAmount, { bold: true });
+      drawRow('Rent Outstanding:', data.rentOutstanding, {
+        color: data.rentOutstanding !== 'N 0' ? '#d32f2f' : '#333333'
+      });
+      drawRow('Service Charge (Annual):', data.serviceCharge);
+      drawRow('Service Charge Outstanding:', data.serviceChargeOutstanding, {
+        color: data.serviceChargeOutstanding !== 'N 0' ? '#d32f2f' : '#333333'
+      });
+      drawRow('Caution Fee (One-time):', data.cautionFee);
+      drawRow('Total Outstanding Balance:', data.outstandingBalance, {
+        bold: true,
+        color: data.outstandingBalance !== 'N 0' ? '#d32f2f' : '#2e7d32'
+      });
+
+      currentY += 2;
+
+      // Tenancy Summary Section
+      drawRow('TENANCY SUMMARY', '', { section: true });
+      drawRow(`Current Total Tenancy Rate (${data.currentYear}):`, data.currentTotalTenancyRate, {
+        bold: true,
+        color: '#2e7d32',
+        fontSize: 8
+      });
+      drawRow(`Next Total Tenancy Rate (${data.nextYear}):`, data.nextTotalTenancyRate, {
+        bold: true,
+        color: '#f57c00',
+        fontSize: 8
+      });
+      drawRow('Tenancy Duration:', '1 YEAR');
+      drawRow('Current Stay Period:', '1st YEAR');
+      drawRow('Year Duration:', data.yearDuration);
+
+      currentY += 2;
+
+      // Future Projections Section
+      drawRow('FUTURE RENT ADJUSTMENTS', '', { section: true });
+      drawRow(`Next Rental Increase (26%) - ${data.nextIncreaseDate}:`, data.nextRentIncrease, {
+        color: '#d32f2f',
+        bold: true
+      });
+      drawRow(`Next Service Charge Increase (26%) - ${data.nextIncreaseDate}:`, data.nextServiceChargeIncrease, {
+        color: '#d32f2f',
+        bold: true
+      });
+      drawRow(`Total Rate Increase (26%) - ${data.nextIncreaseDate}:`, data.totalTenancyRateIncrease, {
+        color: '#d32f2f',
+        bold: true,
+        fontSize: 8
+      });
+
+      // Footer Notice with compact styling
+      currentY += 8;
+
+      doc.roundedRect(leftMargin, currentY, contentWidth, 40, 3)
+        .fillAndStroke('#fff3cd', '#ffc107');
+
+      doc.font('Helvetica-Bold')
+        .fontSize(8)
+        .fillColor('#d32f2f')
+        .text('⚠ Important Notice Regarding Rent Adjustment', leftMargin + 8, currentY + 6, {
+          width: contentWidth - 16
+        });
+
+      doc.font('Helvetica')
+        .fontSize(6.5)
+        .fillColor('#333333')
+        .text(
+          'Please be advised that there will be a 26% increase in the combined Rent and Service Charge applicable every two (2) years of continuous tenancy. We appreciate your understanding and continued residency.',
+          leftMargin + 8,
+          currentY + 18,
+          { width: contentWidth - 16, align: 'justify' }
+        );
+
+      // Footer
+      currentY += 48;
+      doc.fontSize(6)
+        .fillColor('#999999')
+        .text(
+          'This is a computer-generated receipt. For any queries, please contact our office.',
+          leftMargin,
+          currentY,
+          { width: contentWidth, align: 'center' }
+        );
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+// Receipt email
+exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
+  const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+  const formatMoney = (amount) => formatCurrency(amount || 0);
+
+  // Calculate dates
+  const moveInDate = tenant.entryDate ? formatDate(tenant.entryDate) : '-';
+  const expiryDate = tenant.nextDueDate ? formatDate(tenant.nextDueDate) : '-';
+  const paymentDate = payment.paymentDate ? formatDate(payment.paymentDate) : formatDate(new Date());
+
+  // Calculate durations and years
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
+  const yearDuration = `${currentYear} - ${nextYear}`;
+
+  // Calculate financial figures
+  const rentAmount = tenant.rentAmount || 0;
+  const serviceCharge = tenant.unit?.serviceChargeMonthly ? tenant.unit.serviceChargeMonthly * 12 : 0;
+  const cautionFee = tenant.unit?.cautionFee || 0;
+
+  const rentOutstanding = 0;
+  const serviceChargeOutstanding = 0;
+  const outstandingBalance = wallet?.balance ? (wallet.balance < 0 ? Math.abs(wallet.balance) : 0) : 0;
+
+  // Totals
+  const currentTotalTenancyRate = rentAmount + serviceCharge;
+
+  // Future projections
+  const increaseRate = 0.26;
+  const nextRentIncrease = rentAmount * increaseRate;
+  const nextServiceChargeIncrease = serviceCharge * increaseRate;
+  const totalTenancyRateIncrease = nextRentIncrease + nextServiceChargeIncrease;
+  const nextTotalTenancyRate = currentTotalTenancyRate + totalTenancyRateIncrease;
+
+  const nextIncreaseDate = tenant.nextDueDate
+    ? new Date(new Date(tenant.nextDueDate).setFullYear(new Date(tenant.nextDueDate).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
+    : 'July 3rd, 2026';
+
+  // Prepare data object for PDF (using PDF-compatible currency formatting)
+  const data = {
+    paymentDate,
+    moveInDate,
+    expiryDate,
+    currentYear,
+    nextYear,
+    yearDuration,
+    rentAmount: formatCurrencyForPDF(rentAmount),
+    rentOutstanding: formatCurrencyForPDF(rentOutstanding),
+    serviceCharge: formatCurrencyForPDF(serviceCharge),
+    serviceChargeOutstanding: formatCurrencyForPDF(serviceChargeOutstanding),
+    cautionFee: formatCurrencyForPDF(cautionFee),
+    outstandingBalance: formatCurrencyForPDF(outstandingBalance),
+    currentTotalTenancyRate: formatCurrencyForPDF(currentTotalTenancyRate),
+    nextTotalTenancyRate: formatCurrencyForPDF(nextTotalTenancyRate),
+    nextIncreaseDate,
+    nextRentIncrease: formatCurrencyForPDF(nextRentIncrease),
+    nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncrease),
+    totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncrease)
+  };
+
+  // Generate PDF
+  let pdfBuffer = null;
+  try {
+    pdfBuffer = await generateReceiptPdf(payment, tenant, estate, wallet, data);
+  } catch (pdfError) {
+    console.error('Error generating PDF receipt:', pdfError);
+    // Continue without PDF if generation fails
+  }
+
+  const message = `
+    <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 0 auto; color: #333; background: #fff; padding: 20px;">
+      
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+        <div>
+          <h1 style="color: #4472c4; margin: 0; font-size: 24px; font-weight: bold;">SAMFRED</h1>
+          <h2 style="color: #4472c4; margin: 5px 0; font-size: 18px; font-weight: bold; text-decoration: underline;">GLOBAL RESOURCES LTD</h2>
+          <p style="margin: 5px 0; font-size: 14px;">BALADO ESTATE MASON IFIE OFF MATRIX DEPOT</p>
+          <p style="margin: 10px 0; font-size: 14px;">Tel: 07052258160, 0905665358</p>
+        </div>
+        <div style="text-align: right;">
+           <!-- Logo Placeholder -->
+           <div style="width: 80px; height: 80px; border: 2px solid #0056b3; display: inline-flex; align-items: center; justify-content: center; background: #0056b3; color: white;">
+             <span style="font-size: 10px; text-align: center;">SAM FRED<br>LOGO</span>
+           </div>
+           <div style="font-size: 10px; margin-top: 5px; text-align: right;">
+             1 BED ROOM<br>
+             2 BED ROOMS<br>
+             3 BED ROOMS
+           </div>
+        </div>
+      </div>
+
+      <!-- Title & Date -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 5px;">
+        <h3 style="margin: 0; background: #e7e6e6; padding: 2px 5px; font-weight: bold;">RECEIPT</h3>
+        <h3 style="margin: 0; font-weight: bold;">DATE: ${paymentDate}</h3>
+      </div>
+
+      <!-- Table -->
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold; width: 50%;">TENANT FULL NAME:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.tenantName}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">BEDROOM TYPE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.unitLabel || 'Standard'}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">FLAT TYPE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.unitLabel}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">MOVE IN DATE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${moveInDate}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">EXPIRY DATE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${expiryDate}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">RENT:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(rentAmount)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">RENT OUTSTANDING:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(rentOutstanding)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">SERVICE CHARGE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(serviceCharge)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">SERVICE CHARGE OUTSTANDING:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(serviceChargeOutstanding)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1 TIME CAUTION FEE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(cautionFee)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">OUTSTANDING BALANCE:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(outstandingBalance)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #70ad47; font-weight: bold;">CURRENT TOTAL TENANCY RATE: ${currentYear}</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #70ad47; font-weight: bold;">${formatMoney(currentTotalTenancyRate)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #ffc000; font-weight: bold;">NEXT TOTAL TENANCY RATE ${nextYear}:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #ffc000; font-weight: bold;">${formatMoney(nextTotalTenancyRate)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">TENANCY DURATION:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1 YEAR</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">TENANT TOTAL STAY:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1st YEAR</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">YEAR DURATION</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">${yearDuration}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">NEXT RENTAL INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(nextRentIncrease)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">NEXT SERVICE CHARGE INCREASE BY (26%) ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(nextServiceChargeIncrease)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">TOTAL TENANCY RATE INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(totalTenancyRateIncrease)}</td>
+        </tr>
+      </table>
+
+      <!-- Footer Notice -->
+      <div style="margin-top: 20px;">
+        <h4 style="color: #ff0000; margin-bottom: 5px;">Important Notice Regarding Rent Adjustment</h4>
+        <p style="color: #ff0000; font-size: 12px; margin: 0;">
+          Please be advised that there will be a <strong>26% increase in the combined Rent and Service Charge</strong> applicable <strong>every two (2) years</strong> of continuous tenancy. We appreciate your understanding and continued residency.
+        </p>
+      </div>
+
+    </div>
+  `;
+
+  const emailOptions = {
+    email: tenant.tenantEmail,
+    subject: `Payment Receipt - ${paymentDate}`,
+    html: message,
+  };
+
+  if (pdfBuffer) {
+    emailOptions.attachments = [
+      {
+        filename: `Receipt-${paymentDate.replace(/ /g, '-')}.pdf`,
+        content: pdfBuffer,
+        type: 'application/pdf'
+      }
+    ];
+  }
+
+  return await exports.sendEmail(emailOptions);
+};
