@@ -1,128 +1,50 @@
 /**
- * In-Memory Cache Middleware
- * Simple, fast caching without external dependencies
- * No Redis, no API keys required
+ * Enhanced Caching Middleware using node-cache
+ * Production-ready, high-performance caching
+ * No external services, no API keys required
  */
 
-class MemoryCache {
-    constructor() {
-        this.cache = new Map();
-        this.timers = new Map();
-    }
+const NodeCache = require('node-cache');
 
-    /**
-     * Get value from cache
-     */
-    get(key) {
-        const item = this.cache.get(key);
-        if (!item) return null;
+// Create cache instance with configuration
+const cache = new NodeCache({
+    stdTTL: 300, // Default TTL: 5 minutes
+    checkperiod: 60, // Check for expired keys every 60 seconds
+    useClones: false, // Better performance (don't clone objects)
+    deleteOnExpire: true, // Auto-delete expired keys
+    maxKeys: 1000 // Maximum number of keys (prevent memory overflow)
+});
 
-        // Check if expired
-        if (item.expiresAt && Date.now() > item.expiresAt) {
-            this.delete(key);
-            return null;
-        }
+// Log cache events
+cache.on('set', (key, value) => {
+    console.log(`📦 Cache SET: ${key}`);
+});
 
-        return item.value;
-    }
+cache.on('expired', (key, value) => {
+    console.log(`⏰ Cache EXPIRED: ${key}`);
+});
 
-    /**
-     * Set value in cache with TTL (time to live in seconds)
-     */
-    set(key, value, ttl = 300) {
-        const expiresAt = ttl ? Date.now() + (ttl * 1000) : null;
-
-        this.cache.set(key, {
-            value,
-            expiresAt,
-            createdAt: Date.now()
-        });
-
-        // Auto-cleanup after TTL
-        if (ttl) {
-            if (this.timers.has(key)) {
-                clearTimeout(this.timers.get(key));
-            }
-
-            const timer = setTimeout(() => {
-                this.delete(key);
-            }, ttl * 1000);
-
-            this.timers.set(key, timer);
-        }
-
-        return true;
-    }
-
-    /**
-     * Delete specific key
-     */
-    delete(key) {
-        if (this.timers.has(key)) {
-            clearTimeout(this.timers.get(key));
-            this.timers.delete(key);
-        }
-        return this.cache.delete(key);
-    }
-
-    /**
-     * Delete keys matching pattern
-     */
-    deletePattern(pattern) {
-        const regex = new RegExp(pattern);
-        let deleted = 0;
-
-        for (const key of this.cache.keys()) {
-            if (regex.test(key)) {
-                this.delete(key);
-                deleted++;
-            }
-        }
-
-        return deleted;
-    }
-
-    /**
-     * Clear all cache
-     */
-    clear() {
-        for (const timer of this.timers.values()) {
-            clearTimeout(timer);
-        }
-        this.timers.clear();
-        this.cache.clear();
-    }
-
-    /**
-     * Get cache stats
-     */
-    getStats() {
-        return {
-            size: this.cache.size,
-            keys: Array.from(this.cache.keys())
-        };
-    }
-}
-
-// Create singleton instance
-const memoryCache = new MemoryCache();
+cache.on('flush', () => {
+    console.log(`🗑️  Cache FLUSHED`);
+});
 
 /**
  * Cache middleware for Express routes
- * @param {number} duration - Cache duration in seconds (default: 300 = 5 minutes)
+ * @param {number} duration - Cache duration in seconds (default: 300)
  */
-const cache = (duration = 300) => {
+const cacheMiddleware = (duration = 300) => {
     return (req, res, next) => {
         // Only cache GET requests
         if (req.method !== 'GET') {
             return next();
         }
 
-        // Create cache key from URL and query params
-        const key = `cache:${req.originalUrl}`;
+        // Create cache key from URL and user ID (for user-specific caching)
+        const userId = req.user?.id || 'anonymous';
+        const key = `${req.originalUrl}:${userId}`;
 
         // Check cache
-        const cached = memoryCache.get(key);
+        const cached = cache.get(key);
         if (cached) {
             console.log(`✅ Cache HIT: ${key}`);
             return res.json(cached);
@@ -135,7 +57,10 @@ const cache = (duration = 300) => {
 
         // Override res.json to cache the response
         res.json = (data) => {
-            memoryCache.set(key, data, duration);
+            // Only cache successful responses
+            if (res.statusCode === 200) {
+                cache.set(key, data, duration);
+            }
             return originalJson(data);
         };
 
@@ -144,30 +69,80 @@ const cache = (duration = 300) => {
 };
 
 /**
- * Invalidate cache by pattern
+ * Invalidate cache by pattern (supports wildcards)
+ * @param {string} pattern - Pattern to match (e.g., '/api/estates*')
  */
 const invalidateCache = (pattern) => {
-    return memoryCache.deletePattern(pattern);
+    const keys = cache.keys();
+    let deleted = 0;
+
+    // Convert pattern to regex
+    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+
+    keys.forEach(key => {
+        if (regex.test(key)) {
+            cache.del(key);
+            deleted++;
+        }
+    });
+
+    if (deleted > 0) {
+        console.log(`🗑️  Invalidated ${deleted} cache entries matching: ${pattern}`);
+    }
+
+    return deleted;
 };
 
 /**
  * Clear all cache
  */
 const clearCache = () => {
-    return memoryCache.clear();
+    cache.flushAll();
+    console.log('🗑️  All cache cleared');
+    return true;
 };
 
 /**
- * Get cache stats
+ * Get cache statistics
  */
 const getCacheStats = () => {
-    return memoryCache.getStats();
+    return {
+        keys: cache.keys().length,
+        hits: cache.getStats().hits,
+        misses: cache.getStats().misses,
+        ksize: cache.getStats().ksize,
+        vsize: cache.getStats().vsize
+    };
+};
+
+/**
+ * Manually set cache value
+ */
+const setCache = (key, value, ttl = 300) => {
+    return cache.set(key, value, ttl);
+};
+
+/**
+ * Manually get cache value
+ */
+const getCache = (key) => {
+    return cache.get(key);
+};
+
+/**
+ * Delete specific cache key
+ */
+const deleteCache = (key) => {
+    return cache.del(key);
 };
 
 module.exports = {
-    cache,
+    cache: cacheMiddleware,
     invalidateCache,
     clearCache,
     getCacheStats,
-    memoryCache
+    setCache,
+    getCache,
+    deleteCache,
+    cacheInstance: cache // Export instance for advanced usage
 };
