@@ -21,7 +21,12 @@ const {
   getBusinessOwners,
   updateBusinessOwner,
   updateBusinessOwnerStatus,
-  deleteBusinessOwner
+  deleteBusinessOwner,
+  onboardVendor,
+  getVendors,
+  updateVendor,
+  updateVendorStatus,
+  deleteVendor
 } = require('../controllers/authController');
 
 const { protect, superAdminOnly } = require('../middleware/auth');
@@ -174,5 +179,70 @@ router.put('/business-owner/:id', protect, superAdminOnly, [
 ], handleValidationErrors, updateBusinessOwner);
 router.put('/business-owner/:id/status', protect, superAdminOnly, updateBusinessOwnerStatus);
 router.delete('/business-owner/:id', protect, superAdminOnly, deleteBusinessOwner);
+
+// Vendor management routes (Admin and Super Admin)
+const validateOnboardVendor = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('businessTypeId')
+    .optional()
+    .isMongoId()
+    .withMessage('Please provide a valid business type ID'),
+  body('businessName')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Business name must be a string'),
+  body('specialization')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Specialization must be a string')
+];
+
+router.post('/onboard-vendor', protect, validateOnboardVendor, handleValidationErrors, onboardVendor);
+router.get('/vendors', protect, getVendors);
+router.put('/vendor/:id', protect, [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .optional()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('businessTypeId')
+    .optional()
+    .isMongoId()
+    .withMessage('Please provide a valid business type ID'),
+  body('businessName')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Business name must be a string'),
+  body('specialization')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Specialization must be a string')
+], handleValidationErrors, updateVendor);
+router.put('/vendor/:id/status', protect, updateVendorStatus);
+router.delete('/vendor/:id', protect, deleteVendor);
 
 module.exports = router;

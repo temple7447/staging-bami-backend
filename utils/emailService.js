@@ -399,6 +399,54 @@ exports.sendBusinessOwnerWelcomeEmail = async (user, temporaryPassword, assigned
   });
 };
 
+// Vendor welcome email with credentials
+exports.sendVendorWelcomeEmail = async (user, temporaryPassword, additionalInfo = {}) => {
+  const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+
+  const message = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2 style="color: #007bff;">Welcome to BamiHustle!</h2>
+      <p>Hello ${user.name},</p>
+      <p>Your <strong>Vendor</strong> account has been successfully created.</p>
+      
+      <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0;">🔐 Login Credentials</h3>
+        <p><strong>Email:</strong> ${user.email}</p>
+        <p><strong>Temporary Password:</strong> <span style="background: #fff; padding: 5px 10px; border: 1px solid #ddd; font-family: monospace;">${temporaryPassword}</span></p>
+        ${user.phone ? `<p><strong>Phone:</strong> ${user.phone}</p>` : ''}
+      </div>
+
+      ${additionalInfo.businessType ? `
+      <div style="background-color: #e7f3ff; padding: 20px; border-radius: 5px; margin: 20px 0;">
+        <h3 style="margin-top: 0;">📋 Vendor Information</h3>
+        <p><strong>Business Type:</strong> ${additionalInfo.businessType}</p>
+        ${additionalInfo.businessName ? `<p><strong>Business Name:</strong> ${additionalInfo.businessName}</p>` : ''}
+        ${additionalInfo.specialization ? `<p><strong>Specialization:</strong> ${additionalInfo.specialization}</p>` : ''}
+      </div>
+      ` : ''}
+
+      <p><a href="${loginUrl}" style="background-color: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 10px 0;">Login to Portal</a></p>
+      
+      <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;">
+        <p style="margin: 0;"><strong>⚠️ Important Security Notice:</strong></p>
+        <p style="margin: 5px 0 0 0;">Please change your password immediately after your first login for security reasons.</p>
+      </div>
+
+      <p>As a vendor, you can access the tenant portal to view your profile and receive updates.</p>
+      
+      <p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+      
+      <p>Best regards,<br><strong>BamiHustle Team</strong></p>
+    </div>
+  `;
+
+  return await exports.sendEmail({
+    email: user.email,
+    subject: 'Welcome to BamiHustle - Your Vendor Account',
+    html: message,
+  });
+};
+
 // Helper to generate PDF Receipt
 const generateReceiptPdf = (payment, tenant, estate, wallet, data) => {
   return new Promise((resolve, reject) => {

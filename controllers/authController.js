@@ -901,6 +901,264 @@ exports.onboardBusinessOwner = async (req, res) => {
   }
 };
 
+// @desc    Onboard Vendor (Admin only)
+// @route   POST /api/auth/onboard-vendor
+// @access  Private (Admin/Super Admin)
+exports.onboardVendor = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      phone,
+      businessTypeId,
+      businessName,
+      specialization,
+      sendCredentials = true
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and email are required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Validate business type if provided
+    let businessType = null;
+    if (businessTypeId) {
+      const BusinessType = require('../models/BusinessType');
+      businessType = await BusinessType.findOne({
+        _id: businessTypeId,
+        isActive: true
+      });
+
+      if (!businessType) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or inactive business type'
+        });
+      }
+    }
+
+    // Generate secure password
+    const temporaryPassword = generateSecurePassword(12);
+
+    // Create vendor user
+    const vendor = await User.create({
+      name,
+      email: email.toLowerCase(),
+      phone,
+      password: temporaryPassword,
+      role: 'vendor',
+      createdBy: req.user.id,
+      emailVerified: false
+    });
+
+    // Send welcome email with credentials
+    if (sendCredentials) {
+      try {
+        const { sendVendorWelcomeEmail } = require('../utils/emailService');
+        await sendVendorWelcomeEmail(vendor, temporaryPassword, {
+          businessType: businessType?.name,
+          businessName,
+          specialization
+        });
+      } catch (error) {
+        console.log('Failed to send welcome email:', error.message);
+        // Don't fail the request if email fails
+      }
+    }
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      message: sendCredentials
+        ? `Vendor onboarded successfully. Credentials sent to ${email}`
+        : 'Vendor onboarded successfully',
+      data: {
+        id: vendor._id,
+        name: vendor.name,
+        email: vendor.email,
+        phone: vendor.phone,
+        role: vendor.role,
+        businessType: businessType?.name,
+        businessName,
+        specialization,
+        isActive: vendor.isActive,
+        createdAt: vendor.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Onboard vendor error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error onboarding vendor',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Update vendor details
+// @route   PUT /api/auth/vendor/:id
+// @access  Private (Admin/Super Admin)
+exports.updateVendor = async (req, res) => {
+  try {
+    const { name, email, phone, businessTypeId, businessName, specialization } = req.body;
+
+    const vendor = await User.findById(req.params.id);
+
+    if (!vendor || vendor.role !== 'vendor') {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    // Validate business type if provided
+    let businessType = null;
+    if (businessTypeId) {
+      const BusinessType = require('../models/BusinessType');
+      businessType = await BusinessType.findOne({
+        _id: businessTypeId,
+        isActive: true
+      });
+
+      if (!businessType) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid or inactive business type'
+        });
+      }
+    }
+
+    // Update basic fields
+    if (name) vendor.name = name;
+    if (email) vendor.email = email.toLowerCase();
+    if (phone !== undefined) vendor.phone = phone;
+
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Vendor updated successfully',
+      data: {
+        id: vendor._id,
+        name: vendor.name,
+        email: vendor.email,
+        phone: vendor.phone,
+        role: vendor.role,
+        businessType: businessType?.name,
+        businessName,
+        specialization,
+        isActive: vendor.isActive
+      }
+    });
+  } catch (error) {
+    console.error('Update vendor error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Get all vendors
+// @route   GET /api/auth/vendors
+// @access  Private (Admin/Super Admin)
+exports.getVendors = async (req, res) => {
+  try {
+    const vendors = await User.find({ role: 'vendor' })
+      .populate('createdBy', 'name email')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: vendors.length,
+      data: vendors
+    });
+  } catch (error) {
+    console.error('Get vendors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Update vendor status
+// @route   PUT /api/auth/vendor/:id/status
+// @access  Private (Admin/Super Admin)
+exports.updateVendorStatus = async (req, res) => {
+  try {
+    const { isActive } = req.body;
+
+    const vendor = await User.findById(req.params.id);
+
+    if (!vendor || vendor.role !== 'vendor') {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    vendor.isActive = isActive;
+    await vendor.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Vendor ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: vendor
+    });
+  } catch (error) {
+    console.error('Update vendor status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Delete vendor
+// @route   DELETE /api/auth/vendor/:id
+// @access  Private (Admin/Super Admin)
+exports.deleteVendor = async (req, res) => {
+  try {
+    const vendor = await User.findById(req.params.id);
+
+    if (!vendor || vendor.role !== 'vendor') {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    // Delete the user
+    await vendor.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: 'Vendor deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete vendor error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
 // @desc    Logout user / clear cookie
 // @route   GET /api/auth/logout
 // @access  Private

@@ -153,6 +153,7 @@ app.use('/api/payments', require('./routes/payments'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
+app.use('/api/business-types', require('./routes/businessTypes'));
 
 // Handle undefined routes
 app.all('*', (req, res) => {
