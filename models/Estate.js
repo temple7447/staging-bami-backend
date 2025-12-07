@@ -81,4 +81,11 @@ EstateSchema.pre('save', async function (next) {
   next();
 });
 
+// Performance indexes for common query patterns
+EstateSchema.index({ name: 'text' }); // For search functionality
+EstateSchema.index({ isActive: 1, createdAt: -1 });
+EstateSchema.index({ owner: 1, isActive: 1 });
+EstateSchema.index({ managers: 1, isActive: 1 });
+EstateSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('Estate', EstateSchema);

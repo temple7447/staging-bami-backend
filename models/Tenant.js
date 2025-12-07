@@ -95,10 +95,18 @@ const TenantSchema = new mongoose.Schema({
 // Unique unit per active tenant in an estate
 TenantSchema.index(
   { estate: 1, unitLabel: 1, isActive: 1 },
-  { 
-    unique: true, 
-    partialFilterExpression: { isActive: true } 
+  {
+    unique: true,
+    partialFilterExpression: { isActive: true }
   }
 );
+
+// Performance indexes for common query patterns
+TenantSchema.index({ estate: 1, isActive: 1, status: 1 });
+TenantSchema.index({ estate: 1, nextDueDate: 1 });
+TenantSchema.index({ tenantEmail: 1 }, { sparse: true });
+TenantSchema.index({ tenantPhone: 1 }, { sparse: true });
+TenantSchema.index({ isActive: 1, nextDueDate: 1 });
+TenantSchema.index({ status: 1, nextDueDate: 1 });
 
 module.exports = mongoose.model('Tenant', TenantSchema);

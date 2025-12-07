@@ -79,7 +79,8 @@ UserSchema.pre('save', async function (next) {
     next();
   }
 
-  const salt = await bcrypt.genSalt(parseInt(process.env.BCRYPT_SALT_ROUNDS) || 12);
+  // Reduced from 12 to 10 for 4x faster hashing (still very secure)
+  const salt = await bcrypt.genSalt(parseInt(process.env.BCRYPT_SALT_ROUNDS) || 10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
@@ -130,5 +131,11 @@ UserSchema.methods.updateLastLogin = function () {
   this.lastLogin = new Date();
   return this.save({ validateBeforeSave: false });
 };
+
+// Performance indexes for common query patterns
+UserSchema.index({ email: 1, isActive: 1 });
+UserSchema.index({ role: 1, isActive: 1 });
+UserSchema.index({ assignedEstates: 1 });
+UserSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('User', UserSchema);

@@ -1,5 +1,6 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
+const { cache, invalidateCache } = require('../middleware/cache');
 const {
   validateObjectId,
   handleValidationErrors,
@@ -88,7 +89,7 @@ const router = express.Router();
  *       401:
  *         description: Unauthorized
  */
-router.get('/overview/all', protect, getOverallEstateOverview);
+router.get('/overview/all', protect, cache(300), getOverallEstateOverview); // Cache for 5 minutes
 
 /**
  * @swagger
@@ -158,7 +159,7 @@ router.get('/overview/all', protect, getOverallEstateOverview);
  *       401:
  *         description: Unauthorized
  */
-router.get('/', protect, getEstates);
+router.get('/', protect, cache(120), getEstates); // Cache for 2 minutes
 
 /**
  * @swagger
@@ -190,7 +191,11 @@ router.get('/', protect, getEstates);
  *       400:
  *         description: Validation error
  */
-router.post('/', protect, validateEstateCreate, handleValidationErrors, createEstate);
+router.post('/', protect, validateEstateCreate, handleValidationErrors, async (req, res, next) => {
+  await createEstate(req, res);
+  // Invalidate estate list cache after creation
+  invalidateCache('cache:/api/estates');
+});
 
 /**
  * @swagger
@@ -212,7 +217,7 @@ router.post('/', protect, validateEstateCreate, handleValidationErrors, createEs
  *       404:
  *         description: Estate not found
  */
-router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErrors, getEstateOverview);
+router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErrors, cache(60), getEstateOverview); // Cache for 1 minute
 
 /**
  * @swagger
@@ -234,7 +239,7 @@ router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErr
  *       404:
  *         description: Estate not found
  */
-router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getEstate);
+router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, cache(180), getEstate); // Cache for 3 minutes
 
 /**
  * @swagger
@@ -266,7 +271,7 @@ router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getE
  *       404:
  *         description: Estate not found
  */
-router.get('/:id/three-month-rent', protect, validateObjectId('id'), handleValidationErrors, getThreeMonthRent);
+router.get('/:id/three-month-rent', protect, validateObjectId('id'), handleValidationErrors, cache(120), getThreeMonthRent);
 
 /**
  * @swagger
@@ -300,7 +305,12 @@ router.get('/:id/three-month-rent', protect, validateObjectId('id'), handleValid
  *       404:
  *         description: Estate not found
  */
-router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handleValidationErrors, updateEstate);
+router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handleValidationErrors, async (req, res, next) => {
+  await updateEstate(req, res);
+  // Invalidate related caches
+  invalidateCache(`cache:/api/estates/${req.params.id}`);
+  invalidateCache('cache:/api/estates\\?');
+});
 
 /**
  * @swagger
@@ -322,6 +332,10 @@ router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handle
  *       404:
  *         description: Estate not found
  */
-router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteEstate);
+router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, async (req, res, next) => {
+  await deleteEstate(req, res);
+  // Invalidate all estate caches
+  invalidateCache('cache:/api/estates');
+});
 
 module.exports = router;

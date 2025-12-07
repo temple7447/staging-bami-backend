@@ -4,9 +4,9 @@ const TransactionSchema = new mongoose.Schema({
   tenant: { type: mongoose.Schema.ObjectId, ref: 'Tenant', required: true },
   estate: { type: mongoose.Schema.ObjectId, ref: 'Estate', required: true },
   amount: { type: Number, required: true, min: 0 },
-  type: { type: String, enum: ['rent','utility','deposit','other'], required: true },
-  method: { type: String, enum: ['cash','transfer','card','bank','other'], default: 'transfer' },
-  status: { type: String, enum: ['paid','pending','failed'], default: 'paid' },
+  type: { type: String, enum: ['rent', 'utility', 'deposit', 'other'], required: true },
+  method: { type: String, enum: ['cash', 'transfer', 'card', 'bank', 'other'], default: 'transfer' },
+  status: { type: String, enum: ['paid', 'pending', 'failed'], default: 'paid' },
   reference: { type: String },
   periodMonth: { type: Number, min: 1, max: 12 },
   periodYear: { type: Number },
@@ -16,6 +16,11 @@ const TransactionSchema = new mongoose.Schema({
   updatedBy: { type: mongoose.Schema.ObjectId, ref: 'User' }
 }, { timestamps: true });
 
+// Performance indexes for common query patterns
 TransactionSchema.index({ tenant: 1, createdAt: -1 });
+TransactionSchema.index({ estate: 1, createdAt: -1 });
+TransactionSchema.index({ tenant: 1, status: 1, createdAt: -1 });
+TransactionSchema.index({ status: 1, createdAt: -1 });
+TransactionSchema.index({ estate: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Transaction', TransactionSchema);

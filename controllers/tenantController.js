@@ -201,11 +201,13 @@ const getTenants = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [items, total] = await Promise.all([
       Tenant.find(filter)
+        .select('tenantName tenantEmail tenantPhone rentAmount nextDueDate status tenantType unitLabel createdAt')
         .populate('estate', 'name')
-        .populate('unit', 'label')
+        .populate('unit', 'label monthlyPrice')
         .sort({ nextDueDate: 1, createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
+        .limit(parseInt(limit))
+        .lean(), // Returns plain JS objects (faster than Mongoose documents)
       Tenant.countDocuments(filter)
     ]);
 
