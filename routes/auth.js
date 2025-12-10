@@ -26,10 +26,15 @@ const {
   getVendors,
   updateVendor,
   updateVendorStatus,
-  deleteVendor
+  deleteVendor,
+  onboardManager,
+  getManagers,
+  updateManager,
+  updateManagerStatus,
+  deleteManager
 } = require('../controllers/authController');
 
-const { protect, superAdminOnly } = require('../middleware/auth');
+const { protect, superAdminOnly, adminOrSuperAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -244,5 +249,50 @@ router.put('/vendor/:id', protect, [
 ], handleValidationErrors, updateVendor);
 router.put('/vendor/:id/status', protect, updateVendorStatus);
 router.delete('/vendor/:id', protect, deleteVendor);
+
+// Manager management routes (Admin and Super Admin)
+const validateOnboardManager = [
+  body('name')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('estateIds')
+    .optional()
+    .isArray()
+    .withMessage('Estate IDs must be an array')
+];
+
+router.post('/onboard-manager', protect, adminOrSuperAdmin, validateOnboardManager, handleValidationErrors, onboardManager);
+router.get('/managers', protect, adminOrSuperAdmin, getManagers);
+router.put('/manager/:id', protect, adminOrSuperAdmin, [
+  body('name')
+    .optional()
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('Name must be between 2 and 50 characters'),
+  body('email')
+    .optional()
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('phone')
+    .optional()
+    .isMobilePhone()
+    .withMessage('Please provide a valid phone number'),
+  body('estateIds')
+    .optional()
+    .isArray()
+    .withMessage('Estate IDs must be an array')
+], handleValidationErrors, updateManager);
+router.put('/manager/:id/status', protect, adminOrSuperAdmin, updateManagerStatus);
+router.delete('/manager/:id', protect, adminOrSuperAdmin, deleteManager);
 
 module.exports = router;

@@ -1159,6 +1159,254 @@ exports.deleteVendor = async (req, res) => {
   }
 };
 
+// @desc    Onboard Manager (Admin/Super Admin)
+// @route   POST /api/auth/onboard-manager
+// @access  Private (Admin/Super Admin)
+exports.onboardManager = async (req, res) => {
+  try {
+    const { name, email, phone, estateIds = [], sendCredentials = true } = req.body;
+
+    // Validate required fields
+    if (!name || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name and email are required'
+      });
+    }
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Validate estates if provided
+    const Estate = require('../models/Estate');
+    let assignedEstates = [];
+
+    if (estateIds.length > 0) {
+      assignedEstates = await Estate.find({
+        _id: { $in: estateIds },
+        isActive: true
+      });
+
+      if (assignedEstates.length !== estateIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more estates not found or inactive'
+        });
+      }
+    }
+
+    // Generate secure password
+    const temporaryPassword = generateSecurePassword(12);
+
+    // Create manager user
+    const manager = await User.create({
+      name,
+      email: email.toLowerCase(),
+      phone,
+      password: temporaryPassword,
+      role: 'manager',
+      assignedEstates: estateIds,
+      createdBy: req.user.id,
+      emailVerified: false
+    });
+
+    // Send welcome email with credentials
+    if (sendCredentials) {
+      try {
+        const { sendManagerWelcomeEmail } = require('../utils/emailService');
+        await sendManagerWelcomeEmail(manager, temporaryPassword, assignedEstates);
+      } catch (error) {
+        console.log('Failed to send welcome email:', error.message);
+        // Don't fail the request if email fails
+      }
+    }
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      message: sendCredentials
+        ? `Manager onboarded successfully. Credentials sent to ${email}`
+        : 'Manager onboarded successfully',
+      data: {
+        id: manager._id,
+        name: manager.name,
+        email: manager.email,
+        phone: manager.phone,
+        role: manager.role,
+        assignedEstates: assignedEstates.map(e => ({
+          _id: e._id,
+          name: e.name,
+          totalUnits: e.totalUnits
+        })),
+        isActive: manager.isActive,
+        createdAt: manager.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Onboard manager error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error onboarding manager',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Get all managers
+// @route   GET /api/auth/managers
+// @access  Private (Admin/Super Admin)
+exports.getManagers = async (req, res) => {
+  try {
+    const managers = await User.find({ role: 'manager' })
+      .populate('createdBy', 'name email')
+      .populate('assignedEstates', 'name totalUnits')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: managers.length,
+      data: managers
+    });
+  } catch (error) {
+    console.error('Get managers error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Update manager details
+// @route   PUT /api/auth/manager/:id
+// @access  Private (Admin/Super Admin)
+exports.updateManager = async (req, res) => {
+  try {
+    const { name, email, phone, estateIds } = req.body;
+
+    const manager = await User.findById(req.params.id);
+
+    if (!manager || manager.role !== 'manager') {
+      return res.status(404).json({
+        success: false,
+        message: 'Manager not found'
+      });
+    }
+
+    // Update basic fields
+    if (name) manager.name = name;
+    if (email) manager.email = email.toLowerCase();
+    if (phone !== undefined) manager.phone = phone;
+
+    // Update estates if provided
+    if (estateIds) {
+      const Estate = require('../models/Estate');
+
+      // Validate estates exist
+      const estates = await Estate.find({
+        _id: { $in: estateIds },
+        isActive: true
+      });
+
+      if (estates.length !== estateIds.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'One or more estates not found or inactive'
+        });
+      }
+
+      manager.assignedEstates = estateIds;
+    }
+
+    await manager.save();
+
+    // Populate estates for response
+    await manager.populate('assignedEstates', 'name totalUnits');
+
+    res.status(200).json({
+      success: true,
+      message: 'Manager updated successfully',
+      data: manager
+    });
+  } catch (error) {
+    console.error('Update manager error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+// @desc    Update manager status
+// @route   PUT /api/auth/manager/:id/status
+// @access  Private (Admin/Super Admin)
+exports.updateManagerStatus = async (req, res) => {
+  try {
+    const { isActive } = req.body;
+
+    const manager = await User.findById(req.params.id);
+
+    if (!manager || manager.role !== 'manager') {
+      return res.status(404).json({
+        success: false,
+        message: 'Manager not found'
+      });
+    }
+
+    manager.isActive = isActive;
+    await manager.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Manager ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: manager
+    });
+  } catch (error) {
+    console.error('Update manager status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Delete manager
+// @route   DELETE /api/auth/manager/:id
+// @access  Private (Admin/Super Admin)
+exports.deleteManager = async (req, res) => {
+  try {
+    const manager = await User.findById(req.params.id);
+
+    if (!manager || manager.role !== 'manager') {
+      return res.status(404).json({
+        success: false,
+        message: 'Manager not found'
+      });
+    }
+
+    // Soft delete by setting isActive to false
+    manager.isActive = false;
+    await manager.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Manager deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete manager error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
 // @desc    Logout user / clear cookie
 // @route   GET /api/auth/logout
 // @access  Private
