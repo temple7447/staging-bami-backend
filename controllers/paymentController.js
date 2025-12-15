@@ -1,11 +1,13 @@
 const Payment = require('../models/Payment');
 const Tenant = require('../models/Tenant');
+const BillingItem = require('../models/BillingItem');
 const Estate = require('../models/Estate');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
+const WalletAccount = require('../models/WalletAccount');
 const paystackService = require('../utils/paystackService');
-const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
 const { distributePayment } = require('../utils/distributionService');
+const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
 const { logError, logInfo } = require('../utils/logger');
 
 // Supported duration presets for rent payments
@@ -419,6 +421,26 @@ const verifyPayment = async (req, res) => {
       payment.transactionId = verificationResult.transactionId.toString();
       payment.paystackResponse = verificationResult.rawResponse;
       await payment.save();
+
+      // Check if this is a multiple billing items payment
+      const metadata = payment.paystackResponse?.metadata || {};
+      if (metadata.payment_type === 'multiple_billing_items' && metadata.billing_items) {
+        // Mark billing items as paid
+        for (const item of metadata.billing_items) {
+          if (item.type === 'billing_item' && item.id) {
+            try {
+              await BillingItem.findByIdAndUpdate(item.id, {
+                isPaid: true,
+                paidDate: new Date(),
+                paymentReference: payment._id
+              });
+              logInfo(`Marked billing item ${item.id} as paid`, { paymentId: payment._id });
+            } catch (err) {
+              logError('Failed to mark billing item as paid', err, { itemId: item.id, paymentId: payment._id });
+            }
+          }
+        }
+      }
 
       // Distribute payment to the three accounts (50% marketing, 30% owner, 20% operations)
       // This applies to ALL payment types: rent, deposit, service charges, etc.

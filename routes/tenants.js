@@ -29,6 +29,8 @@ const {
   uploadMyAvatar,
   getMyTenant,
   listMyHistory,
+  getMyBillingItems,
+  paySelectedBillingItems,
   getQuarterlyRentByDueMonth,
   shiftNextDueDate,
 } = require('../controllers/tenantController');
@@ -43,6 +45,8 @@ router.get('/summary/quarters', protect, getQuarterlyRentByDueMonth);
 // Special routes (must be before /:id routes)
 router.get('/me', protect, getMyTenant);
 router.get('/me/history', protect, listMyHistory);
+router.get('/me/billing', protect, getMyBillingItems);
+router.post('/me/billing/pay', protect, paySelectedBillingItems);
 router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
 
 // Single tenant ops - parameterized routes

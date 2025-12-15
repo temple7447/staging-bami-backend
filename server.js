@@ -150,6 +150,7 @@ app.use('/api/estates', require('./routes/distribution'));
 app.use('/api/tenants', require('./routes/tenants'));
 app.use('/api/estates/:estateId/tenants', require('./routes/tenants'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/billing', require('./routes/billing'));
 app.use('/api/wallet', require('./routes/wallet'));
 app.use('/api/upload', require('./routes/upload'));
 app.use('/api/subscriptions', require('./routes/subscriptions'));
