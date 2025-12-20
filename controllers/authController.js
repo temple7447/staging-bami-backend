@@ -585,8 +585,9 @@ exports.forgotPasswordOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email is required' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
+      console.log(`[AUTH DEBUG] OTP request failed: User not found with email ${email}`);
       // To avoid account enumeration, return success but do nothing
       return res.status(200).json({ success: true, message: 'If the email exists, an OTP has been sent' });
     }

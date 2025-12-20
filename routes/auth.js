@@ -113,9 +113,35 @@ router.post('/forgotpassword', forgotPassword);
 router.put('/resetpassword/:resettoken', resetPassword);
 
 // OTP-based password reset
-router.post('/forgotpassword-otp', forgotPasswordOtp);
-router.post('/resetpassword-otp', resetPasswordWithOtp);
-router.post('/verify-otp', verifyPasswordOtp);
+router.post('/forgotpassword-otp', [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email')
+], handleValidationErrors, forgotPasswordOtp);
+router.post('/resetpassword-otp', [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('code')
+    .notEmpty()
+    .withMessage('OTP code is required')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('OTP must be 6 digits'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters long')
+], handleValidationErrors, resetPasswordWithOtp);
+router.post('/verify-otp', [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email'),
+  body('code')
+    .notEmpty()
+    .withMessage('OTP code is required')
+], handleValidationErrors, verifyPasswordOtp);
 
 // Protected routes (require authentication)
 router.get('/logout', logout);
