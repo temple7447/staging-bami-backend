@@ -14,6 +14,7 @@ const {
   removeTenantFromUnit,
   getPublicListings,
   getPublicListingDetail,
+  deleteUnit,
 } = require('../controllers/unitController');
 
 const router = express.Router();
@@ -42,5 +43,8 @@ router.get('/unit/:unitId', protect, validateObjectId('unitId'), handleValidatio
 
 // Update a unit (pricing & info)
 router.put('/unit/:unitId', protect, validateObjectId('unitId'), handleValidationErrors, updateUnit);
+
+// Delete a unit (soft delete)
+router.delete('/unit/:unitId', protect, validateObjectId('unitId'), handleValidationErrors, deleteUnit);
 
 module.exports = router;

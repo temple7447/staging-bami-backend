@@ -69,6 +69,7 @@ Authorization: Bearer YOUR_JWT_TOKEN
 - **GET** `/api/estates/{estateId}/units/vacant` - Get vacant units only
 - **GET** `/api/estates/public/listings` - List all vacant properties (Public, No Auth)
 - **GET** `/api/estates/public/listings/{id}` - Get property details (Public, No Auth)
+- **DELETE** `/api/estates/unit/{id}` - Delete a unit (soft delete)
 
 ### 👥 Tenants
 - **GET** `/api/estates/{estateId}/tenants` - List tenants for estate

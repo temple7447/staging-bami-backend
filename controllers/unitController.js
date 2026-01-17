@@ -668,6 +668,47 @@ const getPublicListingDetail = async (req, res) => {
   }
 };
 
+/**
+ * Delete a unit (soft delete)
+ */
+const deleteUnit = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const unit = await Unit.findById(unitId);
+
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({
+        success: false,
+        message: 'Unit not found'
+      });
+    }
+
+    // Check if unit is occupied
+    if (unit.status === 'occupied') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete an occupied unit. Please remove the tenant first.'
+      });
+    }
+
+    // Perform soft delete
+    unit.isActive = false;
+    unit.updatedBy = req.user?._id;
+    await unit.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Unit deleted successfully'
+    });
+  } catch (error) {
+    logError('DELETE /api/estates/unit/:unitId', error, { unitId: req.params.unitId });
+    res.status(500).json({
+      success: false,
+      message: 'Error deleting unit'
+    });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
@@ -678,4 +719,5 @@ module.exports = {
   removeTenantFromUnit,
   getPublicListings,
   getPublicListingDetail,
+  deleteUnit,
 };
