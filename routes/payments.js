@@ -5,6 +5,7 @@ const {
   handleValidationErrors
 } = require('../middleware/validation');
 const {
+  initiateInitialPayment,
   initiateDepositPayment,
   initiateRentPayment,
   initiateServiceChargePayment,
@@ -23,6 +24,7 @@ const {
 const router = express.Router();
 
 // Payment initiation endpoints
+router.post('/initial', protect, initiateInitialPayment);
 router.post('/deposit', protect, initiateDepositPayment);
 router.post('/rent', protect, initiateRentPayment);
 router.post('/service-charge', protect, initiateServiceChargePayment);

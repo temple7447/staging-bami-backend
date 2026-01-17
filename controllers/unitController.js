@@ -18,6 +18,16 @@ const createUnit = async (req, res) => {
       serviceChargeMonthly,
       cautionFee,
       legalFee,
+      category,
+      listingType,
+      securityDeposit,
+      availableDate,
+      bedrooms,
+      bathrooms,
+      area,
+      amenities,
+      streetAddress,
+      images,
     } = req.body;
     const adminId = req.user?._id;
 
@@ -41,8 +51,8 @@ const createUnit = async (req, res) => {
     const lf = legalFee != null ? Number(legalFee) : undefined;
 
     if ((sc != null && (Number.isNaN(sc) || sc < 0)) ||
-        (cf != null && (Number.isNaN(cf) || cf < 0)) ||
-        (lf != null && (Number.isNaN(lf) || lf < 0))) {
+      (cf != null && (Number.isNaN(cf) || cf < 0)) ||
+      (lf != null && (Number.isNaN(lf) || lf < 0))) {
       return res.status(400).json({
         success: false,
         message: 'Service charge, caution fee and legal fee must be non-negative numbers when provided'
@@ -80,6 +90,16 @@ const createUnit = async (req, res) => {
       serviceChargeMonthly: sc != null ? sc : undefined,
       cautionFee: cf != null ? cf : undefined,
       legalFee: lf != null ? lf : undefined,
+      category,
+      listingType,
+      securityDeposit,
+      availableDate,
+      bedrooms,
+      bathrooms,
+      area,
+      amenities,
+      streetAddress,
+      images,
       createdBy: adminId
     });
 
@@ -98,6 +118,16 @@ const createUnit = async (req, res) => {
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
         status: unit.status,
+        category: unit.category,
+        listingType: unit.listingType,
+        securityDeposit: unit.securityDeposit,
+        availableDate: unit.availableDate,
+        bedrooms: unit.bedrooms,
+        bathrooms: unit.bathrooms,
+        area: unit.area,
+        amenities: unit.amenities,
+        streetAddress: unit.streetAddress,
+        images: unit.images,
         estate: unit.estate.name
       }
     });
@@ -162,6 +192,16 @@ const getEstateUnits = async (req, res) => {
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
         status: unit.status,
+        category: unit.category,
+        listingType: unit.listingType,
+        securityDeposit: unit.securityDeposit,
+        availableDate: unit.availableDate,
+        bedrooms: unit.bedrooms,
+        bathrooms: unit.bathrooms,
+        area: unit.area,
+        amenities: unit.amenities,
+        streetAddress: unit.streetAddress,
+        images: unit.images,
         occupiedBy: unit.occupiedBy ? {
           tenantId: unit.occupiedBy._id,
           name: unit.occupiedBy.tenantName,
@@ -256,6 +296,16 @@ const getUnitDetails = async (req, res) => {
         cautionFee: unit.cautionFee,
         legalFee: unit.legalFee,
         status: unit.status,
+        category: unit.category,
+        listingType: unit.listingType,
+        securityDeposit: unit.securityDeposit,
+        availableDate: unit.availableDate,
+        bedrooms: unit.bedrooms,
+        bathrooms: unit.bathrooms,
+        area: unit.area,
+        amenities: unit.amenities,
+        streetAddress: unit.streetAddress,
+        images: unit.images,
         estate: unit.estate ? { id: unit.estate._id, name: unit.estate.name } : null,
         occupiedBy: unit.occupiedBy,
         occupiedSince: unit.occupiedSince,
@@ -290,6 +340,16 @@ const updateUnit = async (req, res) => {
       cautionFee,
       legalFee,
       status,
+      category,
+      listingType,
+      securityDeposit,
+      availableDate,
+      bedrooms,
+      bathrooms,
+      area,
+      amenities,
+      streetAddress,
+      images,
     } = req.body;
 
     // If label is changing, enforce uniqueness within estate for active units
@@ -319,8 +379,8 @@ const updateUnit = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Monthly price must be a positive number' });
     }
     if ((sc != null && (Number.isNaN(sc) || sc < 0)) ||
-        (cf != null && (Number.isNaN(cf) || cf < 0)) ||
-        (lf != null && (Number.isNaN(lf) || lf < 0))) {
+      (cf != null && (Number.isNaN(cf) || cf < 0)) ||
+      (lf != null && (Number.isNaN(lf) || lf < 0))) {
       return res.status(400).json({
         success: false,
         message: 'Service charge, caution fee and legal fee must be non-negative numbers when provided',
@@ -336,6 +396,16 @@ const updateUnit = async (req, res) => {
     if (description !== undefined) unit.description = description;
     if (features !== undefined) unit.features = features;
     if (status !== undefined) unit.status = status;
+    if (category !== undefined) unit.category = category;
+    if (listingType !== undefined) unit.listingType = listingType;
+    if (securityDeposit !== undefined) unit.securityDeposit = securityDeposit;
+    if (availableDate !== undefined) unit.availableDate = availableDate;
+    if (bedrooms !== undefined) unit.bedrooms = bedrooms;
+    if (bathrooms !== undefined) unit.bathrooms = bathrooms;
+    if (area !== undefined) unit.area = area;
+    if (amenities !== undefined) unit.amenities = amenities;
+    if (streetAddress !== undefined) unit.streetAddress = streetAddress;
+    if (images !== undefined) unit.images = images;
 
     unit.updatedBy = req.user?._id;
     await unit.save();
@@ -498,6 +568,106 @@ const removeTenantFromUnit = async (req, res) => {
   }
 };
 
+/**
+ * Get all vacant properties for the general public (no auth)
+ */
+const getPublicListings = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      category,
+      listingType,
+      minPrice,
+      maxPrice,
+      bedrooms,
+      bathrooms,
+      search,
+    } = req.query;
+
+    const filter = {
+      isActive: true,
+      status: 'vacant'
+    };
+
+    if (category) filter.category = category;
+    if (listingType) filter.listingType = listingType;
+    if (bedrooms) filter.bedrooms = { $gte: parseInt(bedrooms) };
+    if (bathrooms) filter.bathrooms = { $gte: parseInt(bathrooms) };
+
+    if (minPrice || maxPrice) {
+      filter.monthlyPrice = {};
+      if (minPrice) filter.monthlyPrice.$gte = parseFloat(minPrice);
+      if (maxPrice) filter.monthlyPrice.$lte = parseFloat(maxPrice);
+    }
+
+    if (search) {
+      filter.$or = [
+        { label: new RegExp(search, 'i') },
+        { streetAddress: new RegExp(search, 'i') },
+        { description: new RegExp(search, 'i') }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [units, total] = await Promise.all([
+      Unit.find(filter)
+        .populate('estate', 'name')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Unit.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: units.length,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total
+      },
+      data: units
+    });
+  } catch (error) {
+    logError('GET /api/public/listings', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching properties',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get single property detail for the general public (no auth)
+ */
+const getPublicListingDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const unit = await Unit.findOne({ _id: id, isActive: true, status: 'vacant' })
+      .populate('estate', 'name');
+
+    if (!unit) {
+      return res.status(404).json({
+        success: false,
+        message: 'Property not found or no longer available'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: unit
+    });
+  } catch (error) {
+    logError('GET /api/public/listings/:id', error, { id });
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching property details'
+    });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
@@ -506,4 +676,6 @@ module.exports = {
   updateUnit,
   assignTenantToUnit,
   removeTenantFromUnit,
+  getPublicListings,
+  getPublicListingDetail,
 };

@@ -18,7 +18,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   paymentType: {
     type: String,
-    enum: ['deposit', 'rent', 'service_charge', 'security_charge', 'caution_fee', 'legal_fee', 'utilities', 'maintenance', 'other'],
+    enum: ['deposit', 'rent', 'service_charge', 'security_charge', 'caution_fee', 'legal_fee', 'utilities', 'maintenance', 'initial', 'other'],
     required: true
   },
   amount: {
@@ -154,12 +154,12 @@ PaymentSchema.index({ paymentDate: -1 });
 PaymentSchema.index({ isDeposit: 1, depositRefundable: 1 });
 
 // Calculate refund status
-PaymentSchema.virtual('canRefund').get(function() {
+PaymentSchema.virtual('canRefund').get(function () {
   return this.isDeposit && this.depositRefundable && !this.depositRefundedDate;
 });
 
 // Format currency display
-PaymentSchema.methods.getFormattedAmount = function() {
+PaymentSchema.methods.getFormattedAmount = function () {
   const formatter = new Intl.NumberFormat('en-NG', {
     style: 'currency',
     currency: this.currency
@@ -168,7 +168,7 @@ PaymentSchema.methods.getFormattedAmount = function() {
 };
 
 // Get payment status badge
-PaymentSchema.methods.getStatusBadge = function() {
+PaymentSchema.methods.getStatusBadge = function () {
   const badges = {
     'pending': '⏳ Pending',
     'initiated': '🔄 Processing',

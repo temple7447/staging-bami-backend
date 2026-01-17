@@ -12,9 +12,15 @@ const {
   updateUnit,
   assignTenantToUnit,
   removeTenantFromUnit,
+  getPublicListings,
+  getPublicListingDetail,
 } = require('../controllers/unitController');
 
 const router = express.Router();
+
+// Public routes (no auth)
+router.get('/public/listings', getPublicListings);
+router.get('/public/listings/:id', getPublicListingDetail);
 
 // Create unit for an estate
 router.post('/:estateId/units', protect, validateObjectId('estateId'), handleValidationErrors, createUnit);

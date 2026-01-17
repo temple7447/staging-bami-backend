@@ -713,9 +713,13 @@ const listBillingItems = async (req, res) => {
       if (unit.cautionFee && unit.cautionFee > 0) {
         const paidCaution = await Payment.exists({
           tenant: tenant._id,
-          paymentType: 'caution_fee',
           paymentStatus: 'completed',
           isActive: true,
+          $or: [
+            { paymentType: 'caution_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'caution_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'caution_fee' }
+          ]
         });
         if (!paidCaution) {
           items.push({
@@ -731,9 +735,13 @@ const listBillingItems = async (req, res) => {
       if (unit.legalFee && unit.legalFee > 0) {
         const paidLegal = await Payment.exists({
           tenant: tenant._id,
-          paymentType: 'legal_fee',
           paymentStatus: 'completed',
           isActive: true,
+          $or: [
+            { paymentType: 'legal_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'legal_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'legal_fee' }
+          ]
         });
         if (!paidLegal) {
           items.push({
@@ -970,9 +978,13 @@ async function getMyBillingItems(req, res) {
       if (unit.cautionFee && unit.cautionFee > 0) {
         const paidCaution = await Payment.exists({
           tenant: tenant._id,
-          paymentType: 'caution_fee',
           paymentStatus: 'completed',
           isActive: true,
+          $or: [
+            { paymentType: 'caution_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'caution_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'caution_fee' }
+          ]
         });
         if (!paidCaution) {
           oneTime.push({
@@ -989,9 +1001,13 @@ async function getMyBillingItems(req, res) {
       if (unit.legalFee && unit.legalFee > 0) {
         const paidLegal = await Payment.exists({
           tenant: tenant._id,
-          paymentType: 'legal_fee',
           paymentStatus: 'completed',
           isActive: true,
+          $or: [
+            { paymentType: 'legal_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'legal_fee' },
+            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'legal_fee' }
+          ]
         });
         if (!paidLegal) {
           oneTime.push({

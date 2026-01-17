@@ -13,7 +13,7 @@ class PaystackService {
     this.secretKey = process.env.PAYSTACK_SECRET_KEY;
     this.publicKey = process.env.PAYSTACK_PUBLIC_KEY;
     this.sandbox = process.env.PAYSTACK_SANDBOX === 'true';
-    
+
     // API Endpoints
     this.baseUrl = 'https://api.paystack.co';
   }
@@ -24,7 +24,7 @@ class PaystackService {
   isConfigured() {
     const required = ['secretKey', 'publicKey'];
     const missing = required.filter(key => !this[key]);
-    
+
     if (missing.length > 0) {
       console.warn(`[PaystackService] Missing configuration: ${missing.join(', ')}`);
       return false;
@@ -56,7 +56,7 @@ class PaystackService {
       // Points to backend verify endpoint which will redirect to frontend dashboard.
       const backendBaseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
       const callbackUrl = paymentData.callbackUrl || `${backendBaseUrl}/api/payments/verify/${reference}?redirect=true&redirectUrl=http://localhost:8081/dashboard/payment/success`;
-      
+
       const payload = {
         email: paymentData.customerEmail,
         amount: paymentData.amount * 100, // Paystack uses kobo (1 Naira = 100 kobo)
@@ -68,7 +68,8 @@ class PaystackService {
           customerId: paymentData.customerId,
           description: paymentData.description,
           customerName: paymentData.customerName,
-          customerPhone: paymentData.customerPhone
+          customerPhone: paymentData.customerPhone,
+          ...paymentData.metadata // Include any custom metadata
         }
       };
 

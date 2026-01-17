@@ -311,6 +311,14 @@ exports.createAdmin = async (req, res, next) => {
     // Generate random password if not provided
     const adminPassword = password || crypto.randomBytes(8).toString('hex');
 
+    // Log admin password in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Admin credentials for ${email}:`);
+      console.log(`Password: ${adminPassword}`);
+      console.log('-----------------------------------------');
+    }
+
     const admin = await User.create({
       name,
       email,
@@ -594,6 +602,14 @@ exports.forgotPasswordOtp = async (req, res) => {
 
     // Generate 6-digit code
     const code = (Math.floor(100000 + Math.random() * 900000)).toString();
+
+    // Log OTP in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] OTP Code for ${email}: ${code}`);
+      console.log('-----------------------------------------');
+    }
+
     const hash = require('crypto').createHash('sha256').update(code).digest('hex');
 
     user.passwordResetOtpHash = hash;
@@ -838,6 +854,14 @@ exports.onboardBusinessOwner = async (req, res) => {
     // Generate secure password
     const temporaryPassword = generateSecurePassword(12);
 
+    // Log temporary password in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Business Owner credentials for ${email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
+
     // Create business owner user
     const businessOwner = await User.create({
       name,
@@ -953,6 +977,14 @@ exports.onboardVendor = async (req, res) => {
 
     // Generate secure password
     const temporaryPassword = generateSecurePassword(12);
+
+    // Log temporary password in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Vendor credentials for ${email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
 
     // Create vendor user
     const vendor = await User.create({
@@ -1204,6 +1236,14 @@ exports.onboardManager = async (req, res) => {
 
     // Generate secure password
     const temporaryPassword = generateSecurePassword(12);
+
+    // Log temporary password in development
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Manager credentials for ${email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
 
     // Create manager user
     const manager = await User.create({

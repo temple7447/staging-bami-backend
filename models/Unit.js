@@ -40,8 +40,60 @@ const UnitSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    maxlength: [500, 'Description cannot be more than 500 characters']
+    maxlength: [1000, 'Description cannot be more than 1000 characters']
   },
+  category: {
+    type: String,
+    enum: ['Apartment', 'House', 'Villa', 'Office', 'Studio', 'Penthouse', 'Other'],
+    default: 'Apartment'
+  },
+  listingType: {
+    type: String,
+    enum: ['Rent', 'Sale'],
+    default: 'Rent'
+  },
+  securityDeposit: {
+    type: Number,
+    default: 0,
+    min: [0, 'Security deposit cannot be negative']
+  },
+  availableDate: {
+    type: Date
+  },
+  bedrooms: {
+    type: Number,
+    default: 0,
+    min: [0, 'Bedrooms cannot be negative']
+  },
+  bathrooms: {
+    type: Number,
+    default: 0,
+    min: [0, 'Bathrooms cannot be negative']
+  },
+  area: {
+    type: Number,
+    default: 0,
+    min: [0, 'Area cannot be negative']
+  },
+  amenities: {
+    wifi: { type: Boolean, default: false },
+    pool: { type: Boolean, default: false },
+    gym: { type: Boolean, default: false },
+    parking: { type: Boolean, default: false },
+    ac: { type: Boolean, default: false },
+    security: { type: Boolean, default: false },
+    petFriendly: { type: Boolean, default: false },
+    balcony: { type: Boolean, default: false },
+    laundry: { type: Boolean, default: false }
+  },
+  streetAddress: {
+    type: String,
+    trim: true,
+    maxlength: [200, 'Street address cannot be more than 200 characters']
+  },
+  images: [{
+    type: String
+  }],
   status: {
     type: String,
     enum: ['vacant', 'occupied', 'maintenance', 'reserved'],

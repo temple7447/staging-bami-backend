@@ -67,6 +67,8 @@ Authorization: Bearer YOUR_JWT_TOKEN
 - **GET** `/api/estates/{estateId}/units` - List all units for estate
 - **POST** `/api/estates/{estateId}/units` - Create new unit
 - **GET** `/api/estates/{estateId}/units/vacant` - Get vacant units only
+- **GET** `/api/estates/public/listings` - List all vacant properties (Public, No Auth)
+- **GET** `/api/estates/public/listings/{id}` - Get property details (Public, No Auth)
 
 ### 👥 Tenants
 - **GET** `/api/estates/{estateId}/tenants` - List tenants for estate
@@ -121,16 +123,32 @@ Authorization: Bearer {token}
   "label": "Unit 1",
   "monthlyPrice": 40000,
   "meterNumber": "EN-12232323",
-  "description": "A short HOUSE",
-  "features": [
-    {
-      "name": "Bedroom",
-      "value": "1"
-    },
-    {
-      "name": "Sitting room",
-      "value": "1"
-    }
+  "description": "Modern Penthouse with ocean view",
+  "category": "Penthouse",
+  "listingType": "Rent",
+  "securityDeposit": 200000,
+  "serviceChargeMonthly": 5000,
+  "cautionFee": 50000,
+  "legalFee": 30000,
+  "availableDate": "2026-02-01",
+  "bedrooms": 3,
+  "bathrooms": 3,
+  "area": 2500,
+  "streetAddress": "123 Luxury Lane, Victoria Island",
+  "amenities": {
+    "wifi": true,
+    "pool": true,
+    "gym": true,
+    "parking": true,
+    "ac": true,
+    "security": true,
+    "petFriendly": false,
+    "balcony": true,
+    "laundry": true
+  },
+  "images": [
+    "https://res.cloudinary.com/.../image1.jpg",
+    "https://res.cloudinary.com/.../image2.jpg"
   ]
 }
 ```
