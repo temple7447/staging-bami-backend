@@ -43,12 +43,16 @@ const corsOptions = {
       'http://localhost:8080',
       'http://localhost:8081',
       'http://127.0.0.1:8080',
+      'https://www.bamihost.com',
+      'https://bamihost.com'
     ];
 
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Return null, false instead of null, Error to avoid 500 error on server
+      // Browser will still block the request on the frontend as a CORS error
+      callback(null, false);
     }
   },
   credentials: true,
