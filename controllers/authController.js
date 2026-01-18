@@ -938,6 +938,16 @@ exports.onboardVendor = async (req, res) => {
       businessTypeId,
       businessName,
       specialization,
+      cacNumber,
+      govId,
+      certification,
+      businessAddress,
+      portfolio,
+      bio,
+      location,
+      operationalHours,
+      isVerifiedPro,
+      services,
       sendCredentials = true
     } = req.body;
 
@@ -993,6 +1003,19 @@ exports.onboardVendor = async (req, res) => {
       phone,
       password: temporaryPassword,
       role: 'vendor',
+      businessName,
+      businessTypeId,
+      specialization,
+      cacNumber,
+      govId,
+      certification,
+      businessAddress,
+      portfolio,
+      bio,
+      location,
+      operationalHours,
+      isVerifiedPro,
+      services,
       createdBy: req.user.id,
       emailVerified: false
     });
@@ -1046,7 +1069,11 @@ exports.onboardVendor = async (req, res) => {
 // @access  Private (Admin/Super Admin)
 exports.updateVendor = async (req, res) => {
   try {
-    const { name, email, phone, businessTypeId, businessName, specialization } = req.body;
+    const {
+      name, email, phone, businessTypeId, businessName, specialization,
+      cacNumber, govId, certification, businessAddress, portfolio,
+      bio, location, operationalHours, isVerifiedPro, services
+    } = req.body;
 
     const vendor = await User.findById(req.params.id);
 
@@ -1078,6 +1105,21 @@ exports.updateVendor = async (req, res) => {
     if (name) vendor.name = name;
     if (email) vendor.email = email.toLowerCase();
     if (phone !== undefined) vendor.phone = phone;
+
+    // Update vendor specific fields
+    if (businessName !== undefined) vendor.businessName = businessName;
+    if (businessTypeId !== undefined) vendor.businessTypeId = businessTypeId;
+    if (specialization !== undefined) vendor.specialization = specialization;
+    if (cacNumber !== undefined) vendor.cacNumber = cacNumber;
+    if (govId !== undefined) vendor.govId = govId;
+    if (certification !== undefined) vendor.certification = certification;
+    if (businessAddress !== undefined) vendor.businessAddress = businessAddress;
+    if (portfolio !== undefined) vendor.portfolio = portfolio;
+    if (bio !== undefined) vendor.bio = bio;
+    if (location !== undefined) vendor.location = location;
+    if (operationalHours !== undefined) vendor.operationalHours = operationalHours;
+    if (isVerifiedPro !== undefined) vendor.isVerifiedPro = isVerifiedPro;
+    if (services !== undefined) vendor.services = services;
 
     await vendor.save();
 
@@ -1444,6 +1486,102 @@ exports.deleteManager = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error'
+    });
+  }
+};
+
+/**
+ * @desc    Get all public vendors
+ * @route   GET /api/auth/public/vendors
+ * @access  Public
+ */
+exports.getPublicVendors = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, specialization, businessType } = req.query;
+    const query = { role: 'vendor', isActive: true };
+
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { businessName: { $regex: search, $options: 'i' } },
+        { specialization: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (specialization) {
+      query.specialization = { $regex: specialization, $options: 'i' };
+    }
+
+    if (businessType) {
+      query.businessTypeId = businessType;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [vendors, total] = await Promise.all([
+      User.find(query)
+        .select('name businessName specialization businessAddress portfolio businessTypeId email phone')
+        .populate('businessTypeId', 'name')
+        .sort({ businessName: 1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      User.countDocuments(query)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: vendors.length,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total
+      },
+      data: vendors
+    });
+  } catch (error) {
+    console.error('getPublicVendors error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * @desc    Get public vendor detail
+ * @route   GET /api/auth/public/vendors/:id
+ * @access  Public
+ */
+exports.getPublicVendorDetail = async (req, res) => {
+  try {
+    const vendor = await User.findOne({
+      _id: req.params.id,
+      role: 'vendor',
+      isActive: true
+    })
+      .select('name businessName specialization businessAddress portfolio businessTypeId email phone cacNumber certification bio location operationalHours isVerifiedPro services rating reviewCount')
+      .populate('businessTypeId', 'name')
+      .lean();
+
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: vendor
+    });
+  } catch (error) {
+    console.error('getPublicVendorDetail error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

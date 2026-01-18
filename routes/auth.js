@@ -31,7 +31,9 @@ const {
   getManagers,
   updateManager,
   updateManagerStatus,
-  deleteManager
+  deleteManager,
+  getPublicVendors,
+  getPublicVendorDetail
 } = require('../controllers/authController');
 
 const { protect, superAdminOnly, adminOrSuperAdmin } = require('../middleware/auth');
@@ -238,7 +240,60 @@ const validateOnboardVendor = [
     .optional()
     .trim()
     .isString()
-    .withMessage('Specialization must be a string')
+    .withMessage('Specialization must be a string'),
+  body('cacNumber')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('CAC Number must be a string'),
+  body('govId')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Government ID must be a valid URL string'),
+  body('certification')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Certification must be a valid URL string'),
+  body('businessAddress')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Business address must be a string'),
+  body('portfolio')
+    .optional()
+    .isArray({ max: 5 })
+    .withMessage('Portfolio must be an array with a maximum of 5 images'),
+  body('bio')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Bio cannot exceed 1000 characters'),
+  body('location')
+    .optional()
+    .isObject()
+    .withMessage('Location must be an object'),
+  body('operationalHours')
+    .optional()
+    .isObject()
+    .withMessage('Operational hours must be an object'),
+  body('isVerifiedPro')
+    .optional()
+    .isBoolean()
+    .withMessage('isVerifiedPro must be a boolean'),
+  body('services')
+    .optional()
+    .isArray()
+    .withMessage('Services must be an array'),
+  body('services.*.name')
+    .if(body('services').exists())
+    .notEmpty()
+    .withMessage('Service name is required'),
+  body('services.*.price')
+    .if(body('services').exists())
+    .isNumeric()
+    .withMessage('Service price must be a number')
 ];
 
 router.post('/onboard-vendor', protect, validateOnboardVendor, handleValidationErrors, onboardVendor);
@@ -271,7 +326,60 @@ router.put('/vendor/:id', protect, [
     .optional()
     .trim()
     .isString()
-    .withMessage('Specialization must be a string')
+    .withMessage('Specialization must be a string'),
+  body('cacNumber')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('CAC Number must be a string'),
+  body('govId')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Government ID must be a valid URL string'),
+  body('certification')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Certification must be a valid URL string'),
+  body('businessAddress')
+    .optional()
+    .trim()
+    .isString()
+    .withMessage('Business address must be a string'),
+  body('portfolio')
+    .optional()
+    .isArray({ max: 5 })
+    .withMessage('Portfolio must be an array with a maximum of 5 images'),
+  body('bio')
+    .optional()
+    .trim()
+    .isLength({ max: 1000 })
+    .withMessage('Bio cannot exceed 1000 characters'),
+  body('location')
+    .optional()
+    .isObject()
+    .withMessage('Location must be an object'),
+  body('operationalHours')
+    .optional()
+    .isObject()
+    .withMessage('Operational hours must be an object'),
+  body('isVerifiedPro')
+    .optional()
+    .isBoolean()
+    .withMessage('isVerifiedPro must be a boolean'),
+  body('services')
+    .optional()
+    .isArray()
+    .withMessage('Services must be an array'),
+  body('services.*.name')
+    .if(body('services').exists())
+    .notEmpty()
+    .withMessage('Service name is required'),
+  body('services.*.price')
+    .if(body('services').exists())
+    .isNumeric()
+    .withMessage('Service price must be a number')
 ], handleValidationErrors, updateVendor);
 router.put('/vendor/:id/status', protect, updateVendorStatus);
 router.delete('/vendor/:id', protect, deleteVendor);
@@ -320,5 +428,9 @@ router.put('/manager/:id', protect, adminOrSuperAdmin, [
 ], handleValidationErrors, updateManager);
 router.put('/manager/:id/status', protect, adminOrSuperAdmin, updateManagerStatus);
 router.delete('/manager/:id', protect, adminOrSuperAdmin, deleteManager);
+
+// Public Vendor Routes
+router.get('/public/vendors', getPublicVendors);
+router.get('/public/vendors/:id', getPublicVendorDetail);
 
 module.exports = router;

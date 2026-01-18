@@ -68,7 +68,74 @@ const UserSchema = new mongoose.Schema({
   passwordResetExpire: Date,
   // OTP-based password reset (6-digit) storage
   passwordResetOtpHash: String,
-  passwordResetOtpExpire: Date
+  passwordResetOtpExpire: Date,
+  // Vendor specific fields
+  businessName: {
+    type: String,
+    trim: true
+  },
+  businessTypeId: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'BusinessType'
+  },
+  specialization: {
+    type: String,
+    trim: true
+  },
+  cacNumber: {
+    type: String,
+    trim: true
+  },
+  govId: {
+    type: String // URL to uploaded ID
+  },
+  certification: {
+    type: String // URL to uploaded certificate
+  },
+  businessAddress: {
+    type: String,
+    trim: true
+  },
+  portfolio: [{
+    type: String // URLs to work images
+  }],
+  bio: {
+    type: String,
+    trim: true,
+    maxlength: [1000, 'Bio cannot be more than 1000 characters']
+  },
+  rating: {
+    type: Number,
+    default: 0,
+    min: [0, 'Rating cannot be less than 0'],
+    max: [5, 'Rating cannot be more than 5']
+  },
+  reviewCount: {
+    type: Number,
+    default: 0
+  },
+  location: {
+    city: String,
+    state: String
+  },
+  operationalHours: {
+    start: { type: String, default: '9:00 AM' },
+    end: { type: String, default: '6:00 PM' }
+  },
+  isVerifiedPro: {
+    type: Boolean,
+    default: false
+  },
+  services: [{
+    name: { type: String, required: true },
+    description: String,
+    price: { type: Number, required: true },
+    rateType: {
+      type: String,
+      enum: ['fixed', 'hourly'],
+      default: 'fixed'
+    }
+  }]
 }, {
   timestamps: true
 });

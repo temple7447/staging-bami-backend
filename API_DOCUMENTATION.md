@@ -54,6 +54,8 @@ Authorization: Bearer YOUR_JWT_TOKEN
 - **GET** `/api/auth/admins` - List all admins (Super Admin only)
 - **PUT** `/api/auth/admin/{id}/status` - Update admin status (Super Admin only)
 - **DELETE** `/api/auth/admin/{id}` - Delete admin (Super Admin only)
+- **GET** `/api/auth/public/vendors` - List all vendors (Public, No Auth)
+- **GET** `/api/auth/public/vendors/{id}` - Get vendor details (Public, No Auth)
 
 ### 🏢 Estates
 - **GET** `/api/estates` - List all estates (paginated)
