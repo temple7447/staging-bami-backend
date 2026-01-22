@@ -118,7 +118,7 @@ const createTenant = async (req, res) => {
           name: fullName || 'Tenant',
           email: emailAddr,
           password: generatedPassword,
-          role: 'user',
+          role: 'tenant',
           createdBy: req.user?._id,
           emailVerified: true
         });
@@ -876,35 +876,7 @@ async function uploadTenantAvatar(req, res) {
   }
 }
 
-async function uploadMyAvatar(req, res) {
-  try {
-    // Find tenant record linked to this user
-    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true });
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
-    }
-    req.params.id = tenant._id.toString();
-    return uploadTenantAvatar(req, res);
-  } catch (err) {
-    console.error('Upload my avatar error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
-}
 
-// Get the logged-in user's tenant record (supports expand like getTenant)
-async function getMyTenant(req, res) {
-  try {
-    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true });
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
-    }
-    req.params.id = tenant._id.toString();
-    return getTenant(req, res);
-  } catch (err) {
-    console.error('Get my tenant error:', err);
-    return res.status(500).json({ success: false, message: 'Server error' });
-  }
-}
 
 // List history for the logged-in tenant
 async function listMyHistory(req, res) {
@@ -926,112 +898,18 @@ async function listMyHistory(req, res) {
 // @access  Private (Tenant)
 async function getMyBillingItems(req, res) {
   try {
-    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true })
-      .populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
-
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
-    }
-
-    const unit = tenant.unit;
-    if (!unit) {
-      return res.status(400).json({ success: false, message: 'You are not assigned to any unit' });
-    }
-
-    const tenantType = tenant.tenantType || 'new';
-    const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
-
-    // Recurring items (always visible)
-    const recurring = [];
-
-    // Rent is always applicable
-    if (tenant.rentAmount && tenant.rentAmount > 0) {
-      recurring.push({
-        code: 'rent',
-        label: 'Rent',
-        amount: tenant.rentAmount,
-        dueDate: tenant.nextDueDate,
-        type: 'recurring',
-        category: 'rent',
-        frequency: 'monthly'
-      });
-    }
-
-    // Service charge (monthly)
-    if (unit.serviceChargeMonthly && unit.serviceChargeMonthly > 0) {
-      recurring.push({
-        code: 'service_charge',
-        label: 'Service Charge',
-        amount: unit.serviceChargeMonthly,
-        dueDate: tenant.nextDueDate,
-        type: 'recurring',
-        category: 'service',
-        frequency: 'monthly'
-      });
-    }
-
-    // One-time items (hidden after payment)
-    const oneTime = [];
-
-    // For "new" tenants, check caution and legal fees
-    if (!isExistingLike) {
-      if (unit.cautionFee && unit.cautionFee > 0) {
-        const paidCaution = await Payment.exists({
-          tenant: tenant._id,
-          paymentStatus: 'completed',
-          isActive: true,
-          $or: [
-            { paymentType: 'caution_fee' },
-            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'caution_fee' },
-            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'caution_fee' }
-          ]
-        });
-        if (!paidCaution) {
-          oneTime.push({
-            code: 'caution_fee',
-            label: 'Caution Fee',
-            amount: unit.cautionFee,
-            type: 'one_time',
-            category: 'fees',
-            frequency: 'once'
-          });
-        }
-      }
-
-      if (unit.legalFee && unit.legalFee > 0) {
-        const paidLegal = await Payment.exists({
-          tenant: tenant._id,
-          paymentStatus: 'completed',
-          isActive: true,
-          $or: [
-            { paymentType: 'legal_fee' },
-            { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'legal_fee' },
-            { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'legal_fee' }
-          ]
-        });
-        if (!paidLegal) {
-          oneTime.push({
-            code: 'legal_fee',
-            label: 'Legal Fee',
-            amount: unit.legalFee,
-            type: 'one_time',
-            category: 'fees',
-            frequency: 'once'
-          });
-        }
-      }
-    }
-
-    // Get unpaid BillingItems
+    // 1. Fetch direct BillingItems for this user (universal)
     const billingItems = await BillingItem.find({
-      tenant: tenant._id,
+      user: req.user.id,
       isActive: true,
       isPaid: false
     }).sort({ dueDate: 1 });
 
-    // Categorize billing items
+    const recurring = [];
+    const oneTime = [];
     const optional = [];
 
+    // Categorize direct billing items
     billingItems.forEach(item => {
       const itemData = {
         id: item._id,
@@ -1045,18 +923,100 @@ async function getMyBillingItems(req, res) {
         frequency: item.frequency
       };
 
-      // Recurring billing items go to recurring list
       if (item.isRecurring) {
         recurring.push(itemData);
+      } else if (item.category === 'service') {
+        optional.push(itemData);
       } else {
-        // One-time items go to oneTime or optional based on category
-        if (item.category === 'service') {
-          optional.push(itemData);
-        } else {
-          oneTime.push(itemData);
-        }
+        oneTime.push(itemData);
       }
     });
+
+    // 2. Fallback to Tenant-specific logic if the user is a tenant
+    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true })
+      .populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
+
+    if (tenant) {
+      const unit = tenant.unit;
+      if (unit) {
+        const tenantType = tenant.tenantType || 'new';
+        const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
+
+        // Predefined recurring items (Rent & Service Charge)
+        if (tenant.rentAmount > 0) {
+          recurring.unshift({
+            code: 'rent',
+            label: 'Rent',
+            amount: tenant.rentAmount,
+            dueDate: tenant.nextDueDate,
+            type: 'recurring',
+            category: 'rent',
+            frequency: 'monthly'
+          });
+        }
+
+        if (unit.serviceChargeMonthly > 0) {
+          recurring.push({
+            code: 'service_charge',
+            label: 'Service Charge',
+            amount: unit.serviceChargeMonthly,
+            dueDate: tenant.nextDueDate,
+            type: 'recurring',
+            category: 'service',
+            frequency: 'monthly'
+          });
+        }
+
+        // Predefined one-time items (Fees)
+        if (!isExistingLike) {
+          if (unit.cautionFee > 0) {
+            const paidCaution = await Payment.exists({
+              tenant: tenant._id,
+              paymentStatus: 'completed',
+              isActive: true,
+              $or: [
+                { paymentType: 'caution_fee' },
+                { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'caution_fee' },
+                { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'caution_fee' }
+              ]
+            });
+            if (!paidCaution) {
+              oneTime.push({
+                code: 'caution_fee',
+                label: 'Caution Fee',
+                amount: unit.cautionFee,
+                type: 'one_time',
+                category: 'fees',
+                frequency: 'once'
+              });
+            }
+          }
+
+          if (unit.legalFee > 0) {
+            const paidLegal = await Payment.exists({
+              tenant: tenant._id,
+              paymentStatus: 'completed',
+              isActive: true,
+              $or: [
+                { paymentType: 'legal_fee' },
+                { 'paystackResponse.data.metadata.payment_type': 'initial', 'paystackResponse.data.metadata.billing_items.type': 'legal_fee' },
+                { 'paystackResponse.data.metadata.payment_type': 'multiple_billing_items', 'paystackResponse.data.metadata.billing_items.code': 'legal_fee' }
+              ]
+            });
+            if (!paidLegal) {
+              oneTime.push({
+                code: 'legal_fee',
+                label: 'Legal Fee',
+                amount: unit.legalFee,
+                type: 'one_time',
+                category: 'fees',
+                frequency: 'once'
+              });
+            }
+          }
+        }
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -1087,20 +1047,16 @@ async function paySelectedBillingItems(req, res) {
       .populate('estate', 'name')
       .populate('unit', 'label monthlyPrice serviceChargeMonthly cautionFee legalFee');
 
-    if (!tenant) {
-      return res.status(404).json({ success: false, message: 'Tenant record not found for this user' });
-    }
-
     // Validate all item IDs and calculate total
     let totalAmount = 0;
     const itemsToProcess = [];
 
     for (const itemId of itemIds) {
-      // Check if it's a BillingItem ID
+      // 1. Check if it's a BillingItem ID (Works for ALL users)
       if (mongoose.Types.ObjectId.isValid(itemId)) {
         const billingItem = await BillingItem.findOne({
           _id: itemId,
-          tenant: tenant._id,
+          user: req.user.id, // Match by user ID instead of just tenant
           isActive: true,
           isPaid: false
         });
@@ -1118,54 +1074,56 @@ async function paySelectedBillingItems(req, res) {
         }
       }
 
-      // Check if it's a predefined code (rent, service_charge, etc.)
-      if (itemId === 'rent' && tenant.rentAmount > 0) {
-        totalAmount += tenant.rentAmount;
-        itemsToProcess.push({
-          type: 'predefined',
-          code: 'rent',
-          label: 'Rent',
-          amount: tenant.rentAmount
-        });
-      } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
-        totalAmount += tenant.unit.serviceChargeMonthly;
-        itemsToProcess.push({
-          type: 'predefined',
-          code: 'service_charge',
-          label: 'Service Charge',
-          amount: tenant.unit.serviceChargeMonthly
-        });
-      } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
-        const paidCaution = await Payment.exists({
-          tenant: tenant._id,
-          paymentType: 'caution_fee',
-          paymentStatus: 'completed',
-          isActive: true,
-        });
-        if (!paidCaution) {
-          totalAmount += tenant.unit.cautionFee;
+      // 2. Check predefined codes (Only if user has a Tenant record)
+      if (tenant) {
+        if (itemId === 'rent' && tenant.rentAmount > 0) {
+          totalAmount += tenant.rentAmount;
           itemsToProcess.push({
             type: 'predefined',
-            code: 'caution_fee',
-            label: 'Caution Fee',
-            amount: tenant.unit.cautionFee
+            code: 'rent',
+            label: 'Rent',
+            amount: tenant.rentAmount
           });
-        }
-      } else if (itemId === 'legal_fee' && tenant.unit?.legalFee > 0) {
-        const paidLegal = await Payment.exists({
-          tenant: tenant._id,
-          paymentType: 'legal_fee',
-          paymentStatus: 'completed',
-          isActive: true,
-        });
-        if (!paidLegal) {
-          totalAmount += tenant.unit.legalFee;
+        } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
+          totalAmount += tenant.unit.serviceChargeMonthly;
           itemsToProcess.push({
             type: 'predefined',
-            code: 'legal_fee',
-            label: 'Legal Fee',
-            amount: tenant.unit.legalFee
+            code: 'service_charge',
+            label: 'Service Charge',
+            amount: tenant.unit.serviceChargeMonthly
           });
+        } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
+          const paidCaution = await Payment.exists({
+            tenant: tenant._id,
+            paymentType: 'caution_fee',
+            paymentStatus: 'completed',
+            isActive: true,
+          });
+          if (!paidCaution) {
+            totalAmount += tenant.unit.cautionFee;
+            itemsToProcess.push({
+              type: 'predefined',
+              code: 'caution_fee',
+              label: 'Caution Fee',
+              amount: tenant.unit.cautionFee
+            });
+          }
+        } else if (itemId === 'legal_fee' && tenant.unit?.legalFee > 0) {
+          const paidLegal = await Payment.exists({
+            tenant: tenant._id,
+            paymentType: 'legal_fee',
+            paymentStatus: 'completed',
+            isActive: true,
+          });
+          if (!paidLegal) {
+            totalAmount += tenant.unit.legalFee;
+            itemsToProcess.push({
+              type: 'predefined',
+              code: 'legal_fee',
+              label: 'Legal Fee',
+              amount: tenant.unit.legalFee
+            });
+          }
         }
       }
     }
@@ -1180,23 +1138,29 @@ async function paySelectedBillingItems(req, res) {
 
     // Initialize Paystack payment
     const paystack = require('../config/paystack');
-    const reference = `billing_${tenant._id}_${Date.now()}`;
+    const reference = `billing_${req.user.id}_${Date.now()}`;
 
     const description = itemsToProcess.map(item => item.label).join(', ');
 
+    const metadata = {
+      user_id: req.user.id,
+      payment_type: 'multiple_billing_items',
+      billing_items: itemsToProcess
+    };
+
+    if (tenant) {
+      metadata.tenant_id = tenant._id.toString();
+      metadata.tenant_name = tenant.tenantName;
+      metadata.estate_id = tenant.estate?._id.toString();
+      metadata.estate_name = tenant.estate?.name;
+      metadata.unit_label = tenant.unit?.label;
+    }
+
     const paystackResponse = await paystack.transaction.initialize({
-      email: tenant.tenantEmail || req.user.email,
+      email: (tenant && tenant.tenantEmail) || req.user.email,
       amount: Math.round(totalAmount * 100), // Convert to kobo
       reference,
-      metadata: {
-        tenant_id: tenant._id.toString(),
-        tenant_name: tenant.tenantName,
-        estate_id: tenant.estate._id.toString(),
-        estate_name: tenant.estate.name,
-        unit_label: tenant.unit?.label,
-        billing_items: itemsToProcess,
-        payment_type: 'multiple_billing_items'
-      }
+      metadata
     });
 
     if (!paystackResponse.status) {
@@ -1205,9 +1169,10 @@ async function paySelectedBillingItems(req, res) {
 
     // Create pending payment record
     await Payment.create({
-      tenant: tenant._id,
-      estate: tenant.estate._id,
-      admin: req.user.id,
+      user: req.user.id,
+      tenant: tenant?._id,
+      estate: tenant?.estate?._id,
+      admin: req.user.id, // For self-paid, admin is the user
       paymentType: 'other',
       amount: totalAmount,
       description,
@@ -1350,8 +1315,6 @@ module.exports = {
   listTransactions,
   listBillingItems,
   uploadTenantAvatar,
-  uploadMyAvatar,
-  getMyTenant,
   listMyHistory,
   getMyBillingItems,
   paySelectedBillingItems,

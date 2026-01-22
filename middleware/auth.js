@@ -79,10 +79,10 @@ exports.superAdminOnly = (req, res, next) => {
 
 // Admin or Super admin middleware
 exports.adminOrSuperAdmin = (req, res, next) => {
-  if (!['admin', 'super_admin'].includes(req.user.role)) {
+  if (!['admin', 'super_admin', 'super_manager'].includes(req.user.role)) {
     return res.status(403).json({
       success: false,
-      message: 'Administrator privileges required to access this resource'
+      message: 'Administrator or Super Manager privileges required to access this resource'
     });
   }
   next();
@@ -105,12 +105,16 @@ exports.filterByOwnership = async (req, res, next) => {
       };
       req.canAccessAll = false;
       req.ownedEstates = req.user.assignedEstates || [];
-    } else if (req.user.role === 'admin') {
-      // Admin can only see estates they manage
+    } else if (['admin', 'super_manager'].includes(req.user.role)) {
+      // Admin/Super Manager can only see estates they manage or are assigned to
       req.dataFilter = {
         managers: req.user.id
       };
       req.canAccessAll = false;
+    } else if (req.user.role === 'super_vendor') {
+      // Super vendor might have global or specific management needs (placeholder logic)
+      req.dataFilter = {};
+      req.canAccessAll = true;
     } else {
       // Other roles have no access by default
       req.dataFilter = { _id: null }; // Will match nothing
@@ -148,8 +152,12 @@ exports.checkEstateAccess = async (req, res, next) => {
 
     // Check ownership/management access
     const hasAccess =
-      req.user.role === 'business_owner' && estate.owner && estate.owner.toString() === req.user.id ||
-      req.user.role === 'admin' && estate.managers && estate.managers.some(m => m.toString() === req.user.id);
+      req.user.role === 'super_admin' ||
+      req.user.role === 'super_manager' ||
+      req.user.role === 'super_vendor' ||
+      (req.user.role === 'business_owner' && estate.owner && estate.owner.toString() === req.user.id) ||
+      (req.user.role === 'admin' && estate.managers && estate.managers.some(m => m.toString() === req.user.id)) ||
+      (req.user.role === 'manager' && estate.managers && estate.managers.some(m => m.toString() === req.user.id));
 
     if (!hasAccess) {
       return res.status(403).json({

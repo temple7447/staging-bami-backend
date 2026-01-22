@@ -18,6 +18,7 @@ exports.createBillingItem = async (req, res) => {
 
         // Create billing item
         const billingItem = await BillingItem.create({
+            user: tenant.user, // Link to user
             tenant: tenantId,
             estate: tenant.estate._id,
             itemType,

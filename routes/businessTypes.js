@@ -6,6 +6,7 @@ const {
     createBusinessType,
     getBusinessTypes,
     getBusinessType,
+    getFeaturedBusinessTypes,
     updateBusinessType,
     deleteBusinessType
 } = require('../controllers/businessTypeController');
@@ -26,6 +27,7 @@ const validateBusinessType = [
 ];
 
 // Routes
+router.get('/featured', getFeaturedBusinessTypes);
 router.post('/', protect, validateBusinessType, handleValidationErrors, createBusinessType);
 router.get('/', protect, getBusinessTypes);
 router.get('/:id', protect, getBusinessType);

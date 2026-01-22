@@ -1,15 +1,18 @@
 const mongoose = require('mongoose');
 
 const PaymentSchema = new mongoose.Schema({
+  user: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User',
+    required: true
+  },
   tenant: {
     type: mongoose.Schema.ObjectId,
-    ref: 'Tenant',
-    required: true
+    ref: 'Tenant'
   },
   estate: {
     type: mongoose.Schema.ObjectId,
-    ref: 'Estate',
-    required: true
+    ref: 'Estate'
   },
   admin: {
     type: mongoose.Schema.ObjectId,
@@ -148,6 +151,7 @@ const PaymentSchema = new mongoose.Schema({
 });
 
 // Indexes for efficient querying
+PaymentSchema.index({ user: 1, paymentStatus: 1 });
 PaymentSchema.index({ tenant: 1, estate: 1, paymentStatus: 1 });
 PaymentSchema.index({ createdAt: -1 });
 PaymentSchema.index({ paymentDate: -1 });

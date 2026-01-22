@@ -33,7 +33,8 @@ const {
   updateManagerStatus,
   deleteManager,
   getPublicVendors,
-  getPublicVendorDetail
+  getPublicVendorDetail,
+  uploadAvatar
 } = require('../controllers/authController');
 
 const { protect, superAdminOnly, adminOrSuperAdmin } = require('../middleware/auth');
@@ -145,9 +146,20 @@ router.post('/verify-otp', [
     .withMessage('OTP code is required')
 ], handleValidationErrors, verifyPasswordOtp);
 
+const multer = require('multer');
+const imageStorage = multer.memoryStorage();
+const imageOnly = (req, file, cb) => {
+  const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+  if (allowed.includes(file.mimetype)) return cb(null, true);
+  cb(new Error('Only image files are allowed'));
+};
+const imageUpload = multer({ storage: imageStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageOnly });
+
 // Protected routes (require authentication)
 router.get('/logout', logout);
 router.get('/me', protect, getMe);
+router.put('/me/avatar', protect, imageUpload.single('file'), uploadAvatar);
+router.post('/me/avatar', protect, imageUpload.single('file'), uploadAvatar);
 router.put('/updatedetails', protect, updateDetails);
 router.put('/updatepassword', protect, validateUpdatePassword, handleValidationErrors, updatePassword);
 

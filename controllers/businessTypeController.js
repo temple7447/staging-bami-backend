@@ -6,7 +6,7 @@ const { logError } = require('../utils/logger');
 // @access  Private (Admin/Super Admin)
 exports.createBusinessType = async (req, res) => {
     try {
-        const { name, description } = req.body;
+        const { name, description, icon, isFeatured } = req.body;
 
         // Check if business type already exists
         const existingType = await BusinessType.findOne({
@@ -24,6 +24,8 @@ exports.createBusinessType = async (req, res) => {
         const businessType = await BusinessType.create({
             name,
             description,
+            icon,
+            isFeatured,
             createdBy: req.user.id
         });
 
@@ -54,7 +56,7 @@ exports.getBusinessTypes = async (req, res) => {
 
         const [businessTypes, total] = await Promise.all([
             BusinessType.find(filter)
-                .select('name description isActive createdAt')
+                .select('name description icon isFeatured isActive createdAt')
                 .sort({ name: 1 })
                 .skip(skip)
                 .limit(parseInt(limit))
@@ -117,7 +119,7 @@ exports.getBusinessType = async (req, res) => {
 // @access  Private (Admin/Super Admin)
 exports.updateBusinessType = async (req, res) => {
     try {
-        const { name, description } = req.body;
+        const { name, description, icon, isFeatured } = req.body;
 
         const businessType = await BusinessType.findById(req.params.id);
 
@@ -146,6 +148,8 @@ exports.updateBusinessType = async (req, res) => {
 
         if (name) businessType.name = name;
         if (description !== undefined) businessType.description = description;
+        if (icon !== undefined) businessType.icon = icon;
+        if (isFeatured !== undefined) businessType.isFeatured = isFeatured;
         businessType.updatedBy = req.user.id;
 
         await businessType.save();
@@ -192,6 +196,49 @@ exports.deleteBusinessType = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error deleting business type',
+            error: error.message
+        });
+    }
+};
+
+// @desc    Get featured business types (max 4)
+// @route   GET /api/business-types/featured
+// @access  Public
+exports.getFeaturedBusinessTypes = async (req, res) => {
+    try {
+        const featured = await BusinessType.find({
+            isActive: true,
+            isFeatured: true
+        })
+            .select('name description icon isFeatured')
+            .limit(4)
+            .sort({ updatedAt: -1 });
+
+        // If no featured services, fallback to any 4 services
+        if (featured.length === 0) {
+            const fallback = await BusinessType.find({ isActive: true })
+                .select('name description icon isFeatured')
+                .limit(4)
+                .sort({ name: 1 });
+
+            return res.status(200).json({
+                success: true,
+                count: fallback.length,
+                data: fallback,
+                note: 'Showing fallback items (priority: alphabetical)'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            count: featured.length,
+            data: featured
+        });
+    } catch (error) {
+        logError('getFeaturedBusinessTypes error', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching featured services',
             error: error.message
         });
     }

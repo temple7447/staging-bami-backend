@@ -1,15 +1,18 @@
 const mongoose = require('mongoose');
 
 const BillingItemSchema = new mongoose.Schema({
+    user: {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User',
+        required: true
+    },
     tenant: {
         type: mongoose.Schema.ObjectId,
-        ref: 'Tenant',
-        required: true
+        ref: 'Tenant'
     },
     estate: {
         type: mongoose.Schema.ObjectId,
-        ref: 'Estate',
-        required: true
+        ref: 'Estate'
     },
     itemType: {
         type: String,
@@ -77,6 +80,7 @@ const BillingItemSchema = new mongoose.Schema({
 });
 
 // Indexes for efficient querying
+BillingItemSchema.index({ user: 1, isPaid: 1, isActive: 1 });
 BillingItemSchema.index({ tenant: 1, isPaid: 1, isActive: 1 });
 BillingItemSchema.index({ estate: 1, isPaid: 1, isActive: 1 });
 BillingItemSchema.index({ dueDate: 1 });

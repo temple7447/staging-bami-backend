@@ -12,6 +12,14 @@ const BusinessTypeSchema = new mongoose.Schema({
         type: String,
         maxlength: [500, 'Description cannot be more than 500 characters']
     },
+    icon: {
+        type: String,
+        default: 'briefcase' // Default icon name
+    },
+    isFeatured: {
+        type: Boolean,
+        default: false
+    },
     isActive: {
         type: Boolean,
         default: true

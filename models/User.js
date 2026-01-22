@@ -27,7 +27,7 @@ const UserSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super_admin', 'admin', 'business_owner', 'manager', 'vendor', 'user'],
+    enum: ['super_admin', 'admin', 'business_owner', 'manager', 'super_manager', 'vendor', 'super_vendor', 'tenant', 'user'],
     default: 'admin'
   },
   // For business_owner role - estates they own
@@ -69,6 +69,9 @@ const UserSchema = new mongoose.Schema({
   // OTP-based password reset (6-digit) storage
   passwordResetOtpHash: String,
   passwordResetOtpExpire: Date,
+  // Profile image (Cloudinary)
+  profileImageUrl: { type: String },
+  profileImagePublicId: { type: String },
   // Vendor specific fields
   businessName: {
     type: String,
@@ -135,7 +138,13 @@ const UserSchema = new mongoose.Schema({
       enum: ['fixed', 'hourly'],
       default: 'fixed'
     }
-  }]
+  }],
+  bankDetails: {
+    accountName: { type: String, trim: true },
+    accountNumber: { type: String, trim: true },
+    bankName: { type: String, trim: true },
+    bankCode: { type: String, trim: true }
+  }
 }, {
   timestamps: true
 });

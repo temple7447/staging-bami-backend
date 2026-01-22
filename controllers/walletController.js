@@ -1,27 +1,39 @@
 const Wallet = require('../models/Wallet');
 const User = require('../models/User');
+const Transaction = require('../models/Transaction');
 const { validationResult } = require('express-validator');
 
 // Get wallet balance
 const getWallet = async (req, res) => {
   try {
-    const wallet = await Wallet.findOne({ userId: req.user.id }).populate('userId', 'name email');
-    
+    let wallet = await Wallet.findOne({ userId: req.user.id }).populate('userId', 'name email');
+
     if (!wallet) {
-      return res.status(404).json({ success: false, message: 'Wallet not found' });
+      // Lazy creation
+      wallet = await Wallet.create({
+        userId: req.user.id,
+        currency: 'NGN'
+      });
+      // Populate for consistency
+      await wallet.populate('userId', 'name email');
     }
-    
-    res.status(200).json({ 
-      success: true, 
+
+    console.log(`[getWallet] User: ${req.user.email}, Balance: ${wallet.balance}`);
+
+    // Set cache-control to prevent stale balance
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    res.status(200).json({
+      success: true,
       data: {
-        ...wallet.toObject(),
+        ...wallet.toObject({ getters: true, virtuals: true }),
         currencySymbol: '₦',
         currency: 'NGN'
       }
     });
   } catch (err) {
     console.error('Get wallet error:', err);
-    res.status(500).json({ success: false, message: 'Server error occurred while fetching wallet' });
+    res.status(500).json({ success: false, message: 'Server error occurred while fetching/creating wallet' });
   }
 };
 
@@ -79,9 +91,9 @@ const addFunds = async (req, res) => {
     wallet.lastUpdated = new Date();
     await wallet.save();
 
-    res.status(200).json({ 
-      success: true, 
-      message: 'Funds added successfully', 
+    res.status(200).json({
+      success: true,
+      message: 'Funds added successfully',
       data: {
         ...wallet.toObject(),
         currencySymbol: '₦',
@@ -118,9 +130,9 @@ const deductFunds = async (req, res) => {
     wallet.lastUpdated = new Date();
     await wallet.save();
 
-    res.status(200).json({ 
-      success: true, 
-      message: 'Funds deducted successfully', 
+    res.status(200).json({
+      success: true,
+      message: 'Funds deducted successfully',
       data: {
         ...wallet.toObject(),
         currencySymbol: '₦',
@@ -133,9 +145,31 @@ const deductFunds = async (req, res) => {
   }
 };
 
+// @desc    Get user's transaction history
+// @route   GET /api/wallet/transactions
+// @access  Private
+const getTransactionHistory = async (req, res) => {
+  try {
+    const transactions = await Transaction.find({
+      user: req.user.id,
+      isActive: true
+    }).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: transactions.length,
+      data: transactions
+    });
+  } catch (err) {
+    console.error('Get transaction history error:', err);
+    res.status(500).json({ success: false, message: 'Server error occurred while fetching transaction history' });
+  }
+};
+
 module.exports = {
   getWallet,
   createWallet,
   addFunds,
-  deductFunds
+  deductFunds,
+  getTransactionHistory
 };

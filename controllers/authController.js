@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const User = require('../models/User');
+const Tenant = require('../models/Tenant');
+const Wallet = require('../models/Wallet');
 const {
   sendEmail,
   sendWelcomeEmail,
@@ -8,6 +10,8 @@ const {
   sendBusinessOwnerWelcomeEmail
 } = require('../utils/emailService');
 const { sendPasswordResetOtpEmail } = require('../utils/emailService');
+const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
+const { logError, logInfo } = require('../utils/logger');
 
 // Generate JWT Token
 const sendTokenResponse = (user, statusCode, res) => {
@@ -149,17 +153,144 @@ exports.login = async (req, res, next) => {
 // @access  Private
 exports.getMe = async (req, res, next) => {
   try {
-    const user = await User.findById(req.user.id);
+    let user = await User.findById(req.user.id);
+    let profile = null;
 
-    res.status(200).json({
+    // Handle role-specific logic
+    if (user.role === 'tenant') {
+      // 1. Try to find active tenant record
+      profile = await Tenant.findOne({ user: user._id, isActive: true })
+        .populate('unit', 'label monthlyPrice serviceChargeMonthly')
+        .populate('estate', 'name address');
+
+      // 2. Fallback to most recent record if none active
+      if (!profile) {
+        profile = await Tenant.findOne({ user: user._id })
+          .sort({ createdAt: -1 })
+          .populate('unit', 'label monthlyPrice serviceChargeMonthly')
+          .populate('estate', 'name address');
+      }
+
+      // 3. Fallback to default object if no record exists at all
+      if (!profile) {
+        profile = {
+          status: 'N/A',
+          tenantPhone: null,
+          electricMeterNumber: null,
+          nextDueDate: null,
+          rentAmount: 0,
+          unit: null,
+          estate: null
+        };
+      }
+    } else if (['business_owner', 'manager', 'super_manager'].includes(user.role)) {
+      // Re-query to populate assignedEstates
+      user = await User.findById(req.user.id).populate('assignedEstates', 'name address');
+    }
+
+    // Generic logic for all users: Wallet & Balance
+    let wallet = await Wallet.findOne({ userId: user._id });
+    if (!wallet) {
+      console.log(`[getMe] Wallet NOT found for user ${user._id}, creating one...`);
+      wallet = await Wallet.create({ userId: user._id, currency: 'NGN' });
+    }
+
+    console.log(`[getMe] User: ${user.email}, Role: ${user.role}, Balance: ${wallet ? wallet.balance : 0}`);
+
+    // Set cache-control to prevent stale balance (304 issues)
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+    const responseData = {
       success: true,
-      data: user
-    });
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        profileImageUrl: user.profileImageUrl,
+        bankDetails: user.bankDetails,
+        assignedEstates: user.assignedEstates,
+        isActive: user.isActive
+      },
+      profile: profile,
+      wallet: {
+        balance: wallet ? wallet.balance : 0,
+        currency: wallet ? wallet.currency : 'NGN',
+        currencySymbol: '₦'
+      }
+    };
+
+    return res.status(200).json(responseData);
   } catch (error) {
+    console.error('getMe error:', error);
     res.status(500).json({
       success: false,
-      message: 'Server error'
+      message: 'Server error retrieving profile'
     });
+  }
+};
+
+// @desc    Upload profile avatar
+// @route   PUT /api/auth/me/avatar
+// @access  Private
+exports.uploadAvatar = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Please upload a file' });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Ensure cloudinary is ready
+    try { ensureCloudinaryConfigured(); } catch (e) {
+      return res.status(500).json({ success: false, message: 'Cloudinary configuration error: ' + e.message });
+    }
+
+    // Destroy previous image if exists
+    if (user.profileImagePublicId) {
+      try { await cloudinary.uploader.destroy(user.profileImagePublicId, { resource_type: 'image' }); } catch (_) { }
+    }
+
+    const folder = (process.env.CLOUDINARY_FOLDER || 'uploads') + '/avatars/users';
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({ folder, resource_type: 'image' }, (err, resu) => {
+        if (err) return reject(err);
+        resolve(resu);
+      });
+      stream.end(req.file.buffer);
+    });
+
+    user.profileImageUrl = result.secure_url;
+    user.profileImagePublicId = result.public_id;
+    await user.save();
+
+    // If the user is also a tenant, update the tenant record as well for data consistency
+    if (user.role === 'tenant') {
+      await Tenant.findOneAndUpdate(
+        { user: user._id, isActive: true },
+        {
+          profileImageUrl: result.secure_url,
+          profileImagePublicId: result.public_id
+        },
+        { new: true }
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile image updated',
+      data: {
+        url: user.profileImageUrl,
+        public_id: user.profileImagePublicId
+      }
+    });
+  } catch (err) {
+    console.error('Upload user avatar error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to upload profile image' });
   }
 };
 
@@ -170,7 +301,9 @@ exports.updateDetails = async (req, res, next) => {
   try {
     const fieldsToUpdate = {
       name: req.body.name,
-      email: req.body.email
+      email: req.body.email,
+      phone: req.body.phone,
+      bankDetails: req.body.bankDetails
     };
 
     const user = await User.findByIdAndUpdate(req.user.id, fieldsToUpdate, {
