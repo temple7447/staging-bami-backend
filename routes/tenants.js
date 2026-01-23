@@ -40,9 +40,6 @@ router.get('/', protect, getTenants);
 router.get('/:quarter(Q[1-4])', protect, getTenants); // Path param for quarters
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
 
-// Summary/reporting routes (must be before /:id routes)
-router.get('/summary/quarters', protect, getQuarterlyRentByDueMonth);
-
 // Special routes (must be before /:id routes)
 router.get('/me/history', protect, listMyHistory);
 router.get('/me/billing', protect, getMyBillingItems);
