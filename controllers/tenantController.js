@@ -329,6 +329,44 @@ const getTenant = async (req, res) => {
 
     console.log('[getTenant] Tenant found:', tenant._id);
 
+    // Calculate financial summary from payments
+    const Payment = require('../models/Payment');
+    const paymentAggregation = await Payment.aggregate([
+      {
+        $match: {
+          tenant: new mongoose.Types.ObjectId(tenant._id),
+          paymentStatus: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: '$paymentType',
+          total: { $sum: '$amount' },
+          count: { $sum: 1 },
+          lastPayment: { $max: '$paymentDate' }
+        }
+      }
+    ]);
+
+    // Process payment breakdown
+    const paymentBreakdown = {};
+    let totalPaid = 0;
+    paymentAggregation.forEach(item => {
+      paymentBreakdown[item._id] = {
+        total: item.total,
+        count: item.count,
+        lastPayment: item.lastPayment
+      };
+      totalPaid += item.total;
+    });
+
+    // Get total payments (all statuses for transparency)
+    const allPayments = await Payment.countDocuments({ tenant: tenant._id });
+    const pendingPayments = await Payment.countDocuments({
+      tenant: tenant._id,
+      paymentStatus: 'pending'
+    });
+
     const overview = {
       name: tenant.tenantName,
       unit: tenant.unit ? tenant.unit.label : 'N/A',
@@ -349,7 +387,32 @@ const getTenant = async (req, res) => {
       status: tenant.status
     };
 
-    const response = { success: true, data: { tenant, overview } };
+    // Add financial summary
+    const financialSummary = {
+      totalPaid,
+      totalPayments: allPayments,
+      completedPayments: paymentAggregation.reduce((sum, p) => sum + p.count, 0),
+      pendingPayments,
+      paymentBreakdown: {
+        rent: paymentBreakdown.rent || { total: 0, count: 0, lastPayment: null },
+        serviceCharge: paymentBreakdown.service_charge || { total: 0, count: 0, lastPayment: null },
+        deposit: paymentBreakdown.deposit || { total: 0, count: 0, lastPayment: null },
+        cautionFee: paymentBreakdown.caution_fee || { total: 0, count: 0, lastPayment: null },
+        legalFee: paymentBreakdown.legal_fee || { total: 0, count: 0, lastPayment: null },
+        utilities: paymentBreakdown.utilities || { total: 0, count: 0, lastPayment: null },
+        maintenance: paymentBreakdown.maintenance || { total: 0, count: 0, lastPayment: null },
+        other: paymentBreakdown.other || { total: 0, count: 0, lastPayment: null }
+      }
+    };
+
+    const response = {
+      success: true,
+      data: {
+        tenant,
+        overview,
+        financialSummary
+      }
+    };
 
     if (includeHistory) {
       response.data.history = tenant.history?.slice(-parseInt(limit)).reverse() || [];
