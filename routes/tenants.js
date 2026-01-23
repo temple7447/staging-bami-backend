@@ -35,8 +35,9 @@ const {
   shiftNextDueDate,
 } = require('../controllers/tenantController');
 
-// Nested: /api/estates/:estateId/tenants (list/create for a given estate)
+// List tenants (optionally filter by estateId)
 router.get('/', protect, getTenants);
+router.get('/:quarter(Q[1-4])', protect, getTenants); // Path param for quarters
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
 
 // Summary/reporting routes (must be before /:id routes)

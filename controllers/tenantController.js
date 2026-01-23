@@ -189,7 +189,10 @@ const createTenant = async (req, res) => {
 const getTenants = async (req, res) => {
   try {
     const { estateId } = req.params;
-    const { page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 20, search, view, year: yearParam } = req.query;
+
+    // Prioritize quarter from params (structural info) then query
+    const quarter = req.params.quarter || req.query.quarter;
 
     const filter = { isActive: true };
     if (estateId) filter.estate = estateId;
@@ -199,6 +202,84 @@ const getTenants = async (req, res) => {
       { tenantPhone: new RegExp(search, 'i') },
     ];
 
+    // If quarterly view OR specific quarter is requested, return the grouped breakdown
+    const requestedQuarter = quarter ? quarter.toUpperCase() : null;
+    const isQuarterlyView = view === 'quarterly';
+    const isValidQuarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(requestedQuarter);
+
+    if (isQuarterlyView || isValidQuarter) {
+      const now = new Date();
+      const year = yearParam ? parseInt(yearParam, 10) : now.getFullYear();
+
+      if (!Number.isInteger(year)) {
+        return res.status(400).json({ success: false, message: 'Invalid year parameter' });
+      }
+
+      let startDate, endDate;
+      if (isValidQuarter) {
+        // Filter by specific quarter
+        const qIndex = parseInt(requestedQuarter.substring(1)) - 1;
+        startDate = new Date(year, qIndex * 3, 1);
+        endDate = new Date(year, (qIndex + 1) * 3, 1);
+      } else {
+        // Default to whole year for view=quarterly
+        startDate = new Date(year, 0, 1);
+        endDate = new Date(year + 1, 0, 1);
+      }
+
+      // Add date range to filter
+      filter.nextDueDate = { $gte: startDate, $lt: endDate };
+      filter.status = { $in: ['occupied', 'pending'] };
+
+      const tenants = await Tenant.find(filter)
+        .select('tenantName tenantEmail tenantPhone rentAmount nextDueDate status unitLabel')
+        .populate('unit', 'label')
+        .sort({ nextDueDate: 1 });
+
+      const quarters = {
+        Q1: { Jan: [], Feb: [], Mar: [] },
+        Q2: { Apr: [], May: [], Jun: [] },
+        Q3: { Jul: [], Aug: [], Sep: [] },
+        Q4: { Oct: [], Nov: [], Dec: [] },
+      };
+
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let totalMonthlyRent = 0;
+
+      tenants.forEach(tenant => {
+        const date = new Date(tenant.nextDueDate);
+        const monthIndex = date.getMonth();
+        const monthName = monthNames[monthIndex];
+        const quarterNum = Math.floor(monthIndex / 3) + 1;
+        const qKey = `Q${quarterNum}`;
+
+        if (quarters[qKey] && quarters[qKey][monthName]) {
+          quarters[qKey][monthName].push(tenant);
+          totalMonthlyRent += tenant.rentAmount || 0;
+        }
+      });
+
+      const responseData = isValidQuarter ? quarters[requestedQuarter] : quarters;
+
+      return res.status(200).json({
+        success: true,
+        data: responseData,
+        meta: {
+          year,
+          quarter: requestedQuarter || 'ALL',
+          estateId: estateId || null,
+          view: isValidQuarter ? 'single_quarter' : 'quarterly'
+        },
+        summary: {
+          tenantCount: tenants.length,
+          totalMonthlyRent,
+          totalQuarterRent: totalMonthlyRent * 3, // Estimated total for the 3-month window
+          currency: 'NGN' // Default currency
+        }
+      });
+    }
+
+    // Default: Paginated list
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [items, total] = await Promise.all([
       Tenant.find(filter)
@@ -208,7 +289,7 @@ const getTenants = async (req, res) => {
         .sort({ nextDueDate: 1, createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .lean(), // Returns plain JS objects (faster than Mongoose documents)
+        .lean(),
       Tenant.countDocuments(filter)
     ]);
 

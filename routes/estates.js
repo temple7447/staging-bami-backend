@@ -16,7 +16,6 @@ const {
   getEstateOverview,
   getOverallEstateOverview,
 } = require('../controllers/estateController');
-const { getThreeMonthRent } = require('../controllers/tenantController');
 
 const router = express.Router();
 
@@ -241,37 +240,6 @@ router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErr
  */
 router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, cache(180), getEstate); // Cache for 3 minutes
 
-/**
- * @swagger
- * /api/estates/{id}/three-month-rent:
- *   get:
- *     summary: Get total rent for a 3-month window based on tenant nextDueDate
- *     tags: [Tenants]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *       - in: query
- *         name: year
- *         schema:
- *           type: integer
- *         description: Year to evaluate (defaults to current year)
- *       - in: query
- *         name: startMonth
- *         schema:
- *           type: integer
- *         description: "First month of the 3‑month window (1=Jan ... 12=Dec)"
- *     responses:
- *       200:
- *         description: 3-month rent summary for the estate
- *       404:
- *         description: Estate not found
- */
-router.get('/:id/three-month-rent', protect, validateObjectId('id'), handleValidationErrors, cache(120), getThreeMonthRent);
 
 /**
  * @swagger
