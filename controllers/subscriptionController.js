@@ -2,11 +2,41 @@ const Subscription = require('../models/Subscription');
 const { logError, logInfo } = require('../utils/logger');
 
 /**
+ * Calculate expiration date based on billing period
+ */
+const calculateExpirationDate = (startDate, billingPeriod) => {
+    const start = new Date(startDate);
+    const expiration = new Date(start);
+
+    switch (billingPeriod) {
+        case 'year':
+            expiration.setFullYear(expiration.getFullYear() + 1);
+            break;
+        case 'month':
+            expiration.setMonth(expiration.getMonth() + 1);
+            break;
+        case 'week':
+            expiration.setDate(expiration.getDate() + 7);
+            break;
+        case 'day':
+            expiration.setDate(expiration.getDate() + 1);
+            break;
+        case 'one-time':
+            // One-time subscriptions don't expire
+            return null;
+        default:
+            return null;
+    }
+
+    return expiration;
+};
+
+/**
  * Create a new subscription
  */
 const createSubscription = async (req, res) => {
     try {
-        const { name, price, billingPeriod, description, icon, status, features } = req.body;
+        const { name, price, billingPeriod, description, icon, status, features, startDate } = req.body;
         const adminId = req.user?.id;
 
         // Validate required fields
@@ -26,6 +56,10 @@ const createSubscription = async (req, res) => {
                 .filter(f => f.length > 0);
         }
 
+        // Calculate expiration date
+        const subStartDate = startDate ? new Date(startDate) : new Date();
+        const expiresAt = calculateExpirationDate(subStartDate, billingPeriod);
+
         // Create subscription
         const subscription = new Subscription({
             name,
@@ -35,6 +69,8 @@ const createSubscription = async (req, res) => {
             icon,
             status: status || 'Active',
             features: featuresArray || [],
+            startDate: subStartDate,
+            expiresAt,
             createdBy: adminId
         });
 
@@ -165,6 +201,15 @@ const updateSubscription = async (req, res) => {
         if (icon !== undefined) subscription.icon = icon;
         if (status !== undefined) subscription.status = status;
         if (featuresArray !== undefined) subscription.features = featuresArray;
+
+        // Recalculate expiration if billing period or start date changed
+        if (billingPeriod !== undefined || req.body.startDate !== undefined) {
+            const effectiveStartDate = req.body.startDate ? new Date(req.body.startDate) : subscription.startDate;
+            const effectiveBillingPeriod = billingPeriod !== undefined ? billingPeriod : subscription.billingPeriod;
+            subscription.startDate = effectiveStartDate;
+            subscription.expiresAt = calculateExpirationDate(effectiveStartDate, effectiveBillingPeriod);
+        }
+
         subscription.updatedBy = adminId;
 
         await subscription.save();

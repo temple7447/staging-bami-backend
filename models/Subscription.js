@@ -50,6 +50,13 @@ const SubscriptionSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    startDate: {
+        type: Date,
+        default: Date.now
+    },
+    expiresAt: {
+        type: Date
+    },
     createdBy: {
         type: mongoose.Schema.ObjectId,
         ref: 'User',
