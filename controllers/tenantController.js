@@ -145,15 +145,18 @@ const createTenant = async (req, res) => {
       tenantEmail: emailAddr || undefined,
       tenantPhone: phone || undefined,
       rentAmount: unit.monthlyPrice,
-      baseRent2024: unit.monthlyPrice, // Baseline price
+      baseRent2024: unit.monthlyPrice,
       lastRentIncreaseDate: startForIncrease,
+      serviceChargeAmount: unit.serviceChargeMonthly || 0, // Initial service charge
+      baseServiceCharge2024: unit.serviceChargeMonthly || 0,
+      lastServiceIncreaseDate: startForIncrease,
       tenantType,
       electricMeterNumber: unit.meterNumber,
       entryDate: parsedEntryDate || new Date(),
       nextDueDate: effectiveNextDueDate,
       status: 'occupied',
       user: userId,
-      history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice }, createdBy: req.user?._id }],
+      history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice, serviceCharge: unit.serviceChargeMonthly }, createdBy: req.user?._id }],
       createdBy: req.user?._id,
     });
 
@@ -307,10 +310,18 @@ const getTenants = async (req, res) => {
         false // Occupied
       );
 
+      const currentService = getCurrentRent(
+        tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+        tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false // Occupied
+      );
+
       return {
         ...tenant,
         currentEffectiveRent: currentPrice,
-        isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount)
+        isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount),
+        currentEffectiveService: currentService,
+        isServiceIncreased: currentService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0)
       };
     });
 
@@ -352,6 +363,12 @@ const getTenant = async (req, res) => {
     const currentCalculatedRent = getCurrentRent(
       tenant.baseRent2024 || tenant.rentAmount,
       tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+      false // Occupied
+    );
+
+    const currentCalculatedService = getCurrentRent(
+      tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+      tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
 
@@ -405,6 +422,11 @@ const getTenant = async (req, res) => {
       rent: currentCalculatedRent, // Dynamic rent based on rule
       storedRent: tenant.rentAmount, // What is currently in database
       rentIncreased: currentCalculatedRent > (tenant.baseRent2024 || tenant.rentAmount),
+
+      serviceCharge: currentCalculatedService,
+      storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
+      serviceChargeIncreased: currentCalculatedService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
+
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
       cautionFee: tenant.unit ? tenant.unit.cautionFee : null,

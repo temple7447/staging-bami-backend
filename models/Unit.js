@@ -127,6 +127,13 @@ const UnitSchema = new mongoose.Schema({
     type: Number,
     description: 'Price as of Jan 1, 2024 or creation date'
   },
+  lastServiceIncreaseDate: {
+    type: Date
+  },
+  baseServiceCharge2024: {
+    type: Number,
+    description: 'Service Charge as of Jan 1, 2024 or creation date'
+  },
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'

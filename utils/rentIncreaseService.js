@@ -9,60 +9,95 @@ const { logInfo, logError } = require('./logger');
  */
 const processPeriodicRentIncreases = async () => {
     try {
-        logInfo('🚀 Starting Periodic Rent Increase Processor');
+        logInfo('🚀 Starting Periodic Rent/Service Increase Processor');
 
         // 1. Process Vacant Units (26% every 1 year)
         const vacantUnits = await Unit.find({ status: 'vacant', isActive: true });
         let unitsUpdated = 0;
 
         for (const unit of vacantUnits) {
-            const origin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
-            const currentPrice = getCurrentRent(unit.basePrice2024 || unit.monthlyPrice, origin, true);
+            let updated = false;
+            const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+            const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
 
+            // Rent Increase
+            const currentPrice = getCurrentRent(unit.basePrice2024 || unit.monthlyPrice, effectiveOriginRent, true);
             if (currentPrice > unit.monthlyPrice) {
-                const oldPrice = unit.monthlyPrice;
                 unit.monthlyPrice = currentPrice;
-                unit.lastRentIncreaseDate = new Date(); // Reset cycle to today
+                unit.lastRentIncreaseDate = new Date();
+                updated = true;
+            }
+
+            // Service Charge Increase
+            const currentService = getCurrentRent(unit.baseServiceCharge2024 || unit.serviceChargeMonthly, effectiveOriginService, true);
+            if (currentService > unit.serviceChargeMonthly) {
+                unit.serviceChargeMonthly = currentService;
+                unit.lastServiceIncreaseDate = new Date();
+                updated = true;
+            }
+
+            if (updated) {
                 await unit.save();
                 unitsUpdated++;
-                logInfo(`📈 Vacant Unit ${unit.label} rent increased from ${oldPrice} to ${currentPrice}`);
             }
         }
 
         // 2. Process Occupied Tenants (26% every 2 years)
-        // This handles cases where rent might increase between payments
         const activeTenants = await Tenant.find({ isActive: true, status: 'occupied' });
         let tenantsUpdated = 0;
 
         for (const tenant of activeTenants) {
-            const origin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
-            const currentPrice = getCurrentRent(tenant.baseRent2024 || tenant.rentAmount, origin, false);
+            let updated = false;
+            const effectiveOriginRent = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
+            const effectiveOriginService = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
 
+            // Rent Increase
+            const currentPrice = getCurrentRent(tenant.baseRent2024 || tenant.rentAmount, effectiveOriginRent, false);
             if (currentPrice > tenant.rentAmount) {
                 const oldPrice = tenant.rentAmount;
                 tenant.rentAmount = currentPrice;
                 tenant.lastRentIncreaseDate = new Date();
 
-                if (!tenant.history) tenant.history = [];
                 tenant.history.push({
                     event: 'rent_update',
                     note: `Automated biennial 26% rent increase applied (Rule 2024). Increased from NGN ${oldPrice} to NGN ${currentPrice}.`,
-                    meta: { oldPrice, newPrice: currentPrice },
-                    createdBy: null // System
+                    meta: { oldPrice, newPrice: currentPrice, type: 'rent' },
+                    createdBy: null
                 });
+                updated = true;
+            }
 
+            // Service Charge Increase
+            const currentService = getCurrentRent(tenant.baseServiceCharge2024 || tenant.serviceChargeAmount, effectiveOriginService, false);
+            if (currentService > tenant.serviceChargeAmount) {
+                const oldService = tenant.serviceChargeAmount;
+                tenant.serviceChargeAmount = currentService;
+                tenant.lastServiceIncreaseDate = new Date();
+
+                tenant.history.push({
+                    event: 'rent_update',
+                    note: `Automated biennial 26% service charge increase applied (Rule 2024). Increased from NGN ${oldService} to NGN ${currentService}.`,
+                    meta: { oldPrice: oldService, newPrice: currentService, type: 'service_charge' },
+                    createdBy: null
+                });
+                updated = true;
+            }
+
+            if (updated) {
                 await tenant.save({ validateBeforeSave: false });
                 tenantsUpdated++;
-                logInfo(`📈 Tenant ${tenant.tenantName} rent increased from ${oldPrice} to ${currentPrice}`);
 
-                // Also update the unit's price to keep in sync if unit is associated
+                // Keep unit prices in sync
                 if (tenant.unit) {
-                    await Unit.findByIdAndUpdate(tenant.unit, { monthlyPrice: currentPrice });
+                    await Unit.findByIdAndUpdate(tenant.unit, {
+                        monthlyPrice: tenant.rentAmount,
+                        serviceChargeMonthly: tenant.serviceChargeAmount
+                    });
                 }
             }
         }
 
-        logInfo(`✅ Rent Increase Processor Completed: ${unitsUpdated} units and ${tenantsUpdated} tenants updated.`);
+        logInfo(`✅ Rent/Service Increase Processor Completed: ${unitsUpdated} units and ${tenantsUpdated} tenants updated.`);
 
         return {
             success: true,

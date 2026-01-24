@@ -44,9 +44,9 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         });
       }
 
-      // If this is a rent payment, allow amount to be derived from unit/tenant rent and duration
+      // If this is a rent or service charge payment, allow amount to be derived from unit/tenant rent and duration
       let appliedDurationMonths = null;
-      if (paymentType === 'rent') {
+      if (paymentType === 'rent' || paymentType === 'service_charge') {
         // Normalise duration inputs
         if (durationMonths != null) {
           const parsed = parseInt(durationMonths, 10);
@@ -58,21 +58,32 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
           if (presetMonths) appliedDurationMonths = presetMonths;
         }
 
-        // If we have a valid duration, compute amount from tenant's monthly rent
+        // If we have a valid duration, compute amount from tenant's monthly rent/service
         if (appliedDurationMonths) {
           const { calculateEffectiveRent } = require('../utils/rentCalculator');
+          const isRent = paymentType === 'rent';
+
+          const baseAmount = isRent ? (tenant.rentAmount || 0) : (tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0);
+          const originDate = isRent
+            ? (tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt)
+            : (tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt);
+
           const result = calculateEffectiveRent(
-            tenant.rentAmount || 0,
+            baseAmount,
             tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date(),
             appliedDurationMonths,
             false, // Occupied
-            tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt
+            originDate
           );
 
           amount = result.totalAmount;
 
-          // Store final rent in metadata so we can update tenant later
-          req.body._finalRentAmount = result.finalRent;
+          // Store final value in metadata so we can update tenant later
+          if (isRent) {
+            req.body._finalRentAmount = result.finalRent;
+          } else {
+            req.body._finalServiceAmount = result.finalRent;
+          }
         }
       }
 
@@ -80,8 +91,8 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
       if (!amount) {
         return res.status(400).json({
           success: false,
-          message: paymentType === 'rent'
-            ? 'Amount or a valid rent duration is required'
+          message: ['rent', 'service_charge'].includes(paymentType)
+            ? 'Amount or a valid duration is required'
             : 'Tenant ID and amount are required'
         });
       }
@@ -114,7 +125,7 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         amount,
         currency: 'NGN',
         description: description ||
-          (paymentType === 'rent' && appliedDurationMonths
+          (['rent', 'service_charge'].includes(paymentType) && appliedDurationMonths
             ? `${paymentTypeName} for ${tenant.tenantName} (${appliedDurationMonths} month${appliedDurationMonths > 1 ? 's' : ''})`
             : `${paymentTypeName} for ${tenant.tenantName}`),
         isDeposit,
@@ -132,7 +143,7 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         customerName: tenant.tenantName,
         customerEmail: tenant.tenantEmail || 'noemail@bamihustle.com',
         customerPhone: tenant.tenantPhone,
-        description: paymentType === 'rent' && appliedDurationMonths
+        description: ['rent', 'service_charge'].includes(paymentType) && appliedDurationMonths
           ? `${paymentTypeName}: ${tenant.tenantName} - Unit ${tenant.unitLabel} (${appliedDurationMonths} month${appliedDurationMonths > 1 ? 's' : ''})`
           : `${paymentTypeName}: ${tenant.tenantName} - Unit ${tenant.unitLabel}`,
         customerId: tenant._id.toString(),
@@ -143,7 +154,8 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
           duration_months: appliedDurationMonths,
           tenant_id: tenant._id.toString(),
           estate_id: tenant.estate._id.toString(),
-          final_rent_amount: req.body._finalRentAmount
+          final_rent_amount: req.body._finalRentAmount,
+          final_service_amount: req.body._finalServiceAmount
         }
       };
 
@@ -270,22 +282,23 @@ const initiateInitialPayment = async (req, res) => {
 
       // Apply duration multiplier for recurring items
       if (['rent', 'service_charge'].includes(item.type) && duration > 1) {
-        if (item.type === 'rent') {
-          const { calculateEffectiveRent } = require('../utils/rentCalculator');
-          // For initial payment, entryDate is usually today or slightly in past
-          const originDate = tenant.entryDate || new Date();
-          const result = calculateEffectiveRent(
-            itemAmount,
-            originDate,
-            duration,
-            false, // Occupied
-            originDate
-          );
-          itemAmount = result.totalAmount;
-          item._finalRentAmount = result.finalRent; // Track for verification
-        } else {
-          itemAmount = itemAmount * duration;
-        }
+        const { calculateEffectiveRent } = require('../utils/rentCalculator');
+        const isRent = item.type === 'rent';
+
+        // For initial payment, entryDate is usually today or slightly in past
+        const originDate = (isRent
+          ? (tenant.lastRentIncreaseDate || tenant.entryDate)
+          : (tenant.lastServiceIncreaseDate || tenant.entryDate)) || new Date();
+
+        const result = calculateEffectiveRent(
+          itemAmount,
+          tenant.entryDate || new Date(),
+          duration,
+          false, // Occupied
+          originDate
+        );
+        itemAmount = result.totalAmount;
+        item._finalValue = result.finalRent; // Track for verification
       }
 
       totalAmount += itemAmount;
@@ -296,7 +309,7 @@ const initiateInitialPayment = async (req, res) => {
         baseAmount: parseFloat(item.amount),
         duration: duration,
         totalAmount: itemAmount,
-        finalRentAmount: item._finalRentAmount
+        finalValue: item._finalValue
       });
     }
 
@@ -702,19 +715,31 @@ const verifyPayment = async (req, res) => {
             if (metadata.final_rent_amount && metadata.payment_type === 'rent') {
               tenant.rentAmount = metadata.final_rent_amount;
               tenant.lastRentIncreaseDate = new Date(); // Reset cycle to today
+            } else if (metadata.final_service_amount && metadata.payment_type === 'service_charge') {
+              tenant.serviceChargeAmount = metadata.final_service_amount;
+              tenant.lastServiceIncreaseDate = new Date();
             } else if (metadata.payment_type === 'initial' && metadata.billing_items) {
-              const rentItem = metadata.billing_items.find(i => i.type === 'rent' && i.finalRentAmount);
+              const rentItem = metadata.billing_items.find(i => i.type === 'rent' && i.finalValue);
               if (rentItem) {
-                tenant.rentAmount = rentItem.finalRentAmount;
+                tenant.rentAmount = rentItem.finalValue;
                 tenant.lastRentIncreaseDate = new Date();
+              }
+              const serviceItem = metadata.billing_items.find(i => i.type === 'service_charge' && i.finalValue);
+              if (serviceItem) {
+                tenant.serviceChargeAmount = serviceItem.finalValue;
+                tenant.lastServiceIncreaseDate = new Date();
               }
             }
 
             // Record in history
+            const historyNote = `Auto-Shift: Payment for ${rentMonths}m rent / ${serviceMonths}m service. Due date shifted to ${newDueDate.toISOString().split('T')[0]}. ` +
+              (metadata.final_rent_amount ? `Rent updated to ${tenant.rentAmount}. ` : '') +
+              (metadata.final_service_amount ? `Service charge updated to ${tenant.serviceChargeAmount}.` : '');
+
             tenant.history.push({
               event: 'payment',
-              note: `Auto-Shift: Payment for ${rentMonths}m rent / ${serviceMonths}m service. Due date shifted to ${newDueDate.toISOString().split('T')[0]}. ${metadata.final_rent_amount ? 'Rent updated to ' + metadata.final_rent_amount : ''}`,
-              meta: { rentMonths, serviceMonths, oldDueDate, newDueDate, paymentId: payment._id, finalRent: tenant.rentAmount },
+              note: historyNote.trim(),
+              meta: { rentMonths, serviceMonths, oldDueDate, newDueDate, paymentId: payment._id, finalRent: tenant.rentAmount, finalService: tenant.serviceChargeAmount },
               createdBy: payment.admin?._id || payment.tenant?._id || payment.createdBy
             });
 

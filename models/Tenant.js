@@ -48,6 +48,11 @@ const TenantSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Rent amount cannot be negative']
   },
+  serviceChargeAmount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Service charge amount cannot be negative']
+  },
   tenantType: {
     type: String,
     enum: ['new', 'existing', 'renewal', 'transfer'],
@@ -90,6 +95,13 @@ const TenantSchema = new mongoose.Schema({
   baseRent2024: {
     type: Number,
     description: 'Rent as of Jan 1, 2024 or entry date'
+  },
+  lastServiceIncreaseDate: {
+    type: Date
+  },
+  baseServiceCharge2024: {
+    type: Number,
+    description: 'Service Charge as of Jan 1, 2024 or entry date'
   },
   updatedBy: {
     type: mongoose.Schema.ObjectId,

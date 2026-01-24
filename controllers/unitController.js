@@ -189,7 +189,13 @@ const getEstateUnits = async (req, res) => {
 
         const currentPrice = getCurrentRent(
           unit.basePrice2024 || unit.monthlyPrice,
-          effectiveOrigin,
+          effectiveOriginRent,
+          isVacant
+        );
+
+        const currentService = getCurrentRent(
+          unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
+          unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01'),
           isVacant
         );
 
@@ -199,9 +205,11 @@ const getEstateUnits = async (req, res) => {
           monthlyPrice: unit.monthlyPrice,
           currentEffectivePrice: currentPrice,
           isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          serviceChargeMonthly: unit.serviceChargeMonthly,
+          currentEffectiveService: currentService,
+          isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
           meterNumber: unit.meterNumber,
           description: unit.description,
-          serviceChargeMonthly: unit.serviceChargeMonthly,
           cautionFee: unit.cautionFee,
           legalFee: unit.legalFee,
           status: unit.status,
@@ -266,11 +274,18 @@ const getVacantUnits = async (req, res) => {
       success: true,
       data: vacantUnits.map(unit => {
         const { getCurrentRent } = require('../utils/rentCalculator');
-        const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+        const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+        const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
 
         const currentPrice = getCurrentRent(
           unit.basePrice2024 || unit.monthlyPrice,
-          effectiveOrigin,
+          effectiveOriginRent,
+          true // Vacant cycle
+        );
+
+        const currentService = getCurrentRent(
+          unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
+          effectiveOriginService,
           true // Vacant cycle
         );
 
@@ -280,10 +295,12 @@ const getVacantUnits = async (req, res) => {
           monthlyPrice: unit.monthlyPrice,
           currentEffectivePrice: currentPrice,
           isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          serviceChargeMonthly: unit.serviceChargeMonthly,
+          currentEffectiveService: currentService,
+          isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
           meterNumber: unit.meterNumber,
           status: unit.status,
           description: unit.description,
-          serviceChargeMonthly: unit.serviceChargeMonthly,
           cautionFee: unit.cautionFee,
           legalFee: unit.legalFee,
         };
@@ -313,11 +330,18 @@ const getUnitDetails = async (req, res) => {
 
     const { getCurrentRent } = require('../utils/rentCalculator');
     const isVacant = unit.status === 'vacant';
-    const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+    const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+    const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
 
     const currentPrice = getCurrentRent(
       unit.basePrice2024 || unit.monthlyPrice,
-      effectiveOrigin,
+      effectiveOriginRent,
+      isVacant
+    );
+
+    const currentService = getCurrentRent(
+      unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
+      effectiveOriginService,
       isVacant
     );
 
@@ -329,6 +353,9 @@ const getUnitDetails = async (req, res) => {
         monthlyPrice: unit.monthlyPrice,
         currentEffectivePrice: currentPrice,
         isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+        serviceChargeMonthly: unit.serviceChargeMonthly,
+        currentEffectiveService: currentService,
+        isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
         meterNumber: unit.meterNumber,
         description: unit.description,
         serviceChargeMonthly: unit.serviceChargeMonthly,
