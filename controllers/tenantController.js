@@ -133,6 +133,10 @@ const createTenant = async (req, res) => {
       { $set: { isActive: false, status: 'vacant', updatedBy: req.user?._id } }
     );
 
+    // Automated Rent Increase Logic initialization
+    const { RULE_START_DATE } = require('../utils/rentCalculator');
+    const startForIncrease = parsedEntryDate > RULE_START_DATE ? parsedEntryDate : RULE_START_DATE;
+
     const tenant = await Tenant.create({
       estate: estateId,
       unit: unitId,
@@ -141,6 +145,8 @@ const createTenant = async (req, res) => {
       tenantEmail: emailAddr || undefined,
       tenantPhone: phone || undefined,
       rentAmount: unit.monthlyPrice,
+      baseRent2024: unit.monthlyPrice, // Baseline price
+      lastRentIncreaseDate: startForIncrease,
       tenantType,
       electricMeterNumber: unit.meterNumber,
       entryDate: parsedEntryDate || new Date(),
@@ -293,8 +299,23 @@ const getTenants = async (req, res) => {
       Tenant.countDocuments(filter)
     ]);
 
+    const { getCurrentRent } = require('../utils/rentCalculator');
+    const processedItems = items.map(tenant => {
+      const currentPrice = getCurrentRent(
+        tenant.baseRent2024 || tenant.rentAmount,
+        tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false // Occupied
+      );
+
+      return {
+        ...tenant,
+        currentEffectiveRent: currentPrice,
+        isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount)
+      };
+    });
+
     res.status(200).json({
-      success: true, data: items, pagination: {
+      success: true, data: processedItems, pagination: {
         currentPage: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), totalItems: total, itemsPerPage: parseInt(limit)
       }
     });
@@ -326,6 +347,13 @@ const getTenant = async (req, res) => {
       console.log('[getTenant] Tenant not found or inactive:', req.params.id);
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
+
+    const { getCurrentRent } = require('../utils/rentCalculator');
+    const currentCalculatedRent = getCurrentRent(
+      tenant.baseRent2024 || tenant.rentAmount,
+      tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+      false // Occupied
+    );
 
     console.log('[getTenant] Tenant found:', tenant._id);
 
@@ -374,7 +402,9 @@ const getTenant = async (req, res) => {
       phone: tenant.tenantPhone,
 
       // Pricing breakdown
-      rent: tenant.rentAmount, // current rent amount stored on tenant
+      rent: currentCalculatedRent, // Dynamic rent based on rule
+      storedRent: tenant.rentAmount, // What is currently in database
+      rentIncreased: currentCalculatedRent > (tenant.baseRent2024 || tenant.rentAmount),
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
       cautionFee: tenant.unit ? tenant.unit.cautionFee : null,

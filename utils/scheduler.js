@@ -1,8 +1,10 @@
 const schedule = require('node-schedule');
 const { checkAndSendReminders, checkAndSendOverdueReminders } = require('./reminderService');
+const { processPeriodicRentIncreases } = require('./rentIncreaseService');
 
 let reminderJob = null;
 let overdueReminderJob = null;
+let rentIncreaseJob = null;
 
 /**
  * Initialize the reminder scheduler
@@ -35,11 +37,22 @@ const initializeScheduler = () => {
       console.log('═'.repeat(60));
     });
 
+    // Schedule periodic rent increases to run daily at 8 AM
+    rentIncreaseJob = schedule.scheduleJob('0 8 * * *', async () => {
+      console.log('═'.repeat(60));
+      console.log('📈 PERIODIC RENT INCREASE PROCESS STARTED');
+      console.log('═'.repeat(60));
+      await processPeriodicRentIncreases();
+      console.log('═'.repeat(60));
+      console.log('📈 PERIODIC RENT INCREASE PROCESS COMPLETED');
+      console.log('═'.repeat(60));
+    });
+
     console.log('✅ Reminder scheduler initialized successfully');
-    console.log('⏰ Full reminders checked daily at 08:00 AM');
+    console.log('⏰ Full reminders and Rent Increases checked daily at 08:00 AM');
     console.log('⚠️  Overdue reminders checked every 12 hours at 08:00 AM and 08:00 PM');
 
-    return { reminderJob, overdueReminderJob };
+    return { reminderJob, overdueReminderJob, rentIncreaseJob };
   } catch (error) {
     console.error('❌ Error initializing reminder scheduler:', error.message);
     throw error;
@@ -59,6 +72,10 @@ const stopScheduler = () => {
       overdueReminderJob.cancel();
       overdueReminderJob = null;
     }
+    if (rentIncreaseJob) {
+      rentIncreaseJob.cancel();
+      rentIncreaseJob = null;
+    }
     console.log('✅ All reminder schedulers stopped');
   } catch (error) {
     console.error('Error stopping scheduler:', error.message);
@@ -72,6 +89,8 @@ const triggerReminderCheck = async () => {
   try {
     console.log('⚙️  Manually triggering reminder check...');
     await checkAndSendReminders();
+    // Also trigger rent increase check when manually triggered
+    await processPeriodicRentIncreases();
     console.log('✅ Manual reminder check completed');
   } catch (error) {
     console.error('❌ Error during manual reminder check:', error.message);
@@ -93,6 +112,11 @@ const getSchedulerStatus = () => {
       isRunning: overdueReminderJob !== null,
       nextInvocation: overdueReminderJob ? overdueReminderJob.nextInvocation() : null,
       schedule: '0 8,20 * * * (08:00 AM and 08:00 PM daily)'
+    },
+    rentIncreases: {
+      isRunning: rentIncreaseJob !== null,
+      nextInvocation: rentIncreaseJob ? rentIncreaseJob.nextInvocation() : null,
+      schedule: '0 8 * * * (08:00 AM daily)'
     }
   };
 };

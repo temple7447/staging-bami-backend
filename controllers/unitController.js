@@ -182,34 +182,48 @@ const getEstateUnits = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: units.map(unit => ({
-        unitId: unit._id,
-        label: unit.label,
-        monthlyPrice: unit.monthlyPrice,
-        meterNumber: unit.meterNumber,
-        description: unit.description,
-        serviceChargeMonthly: unit.serviceChargeMonthly,
-        cautionFee: unit.cautionFee,
-        legalFee: unit.legalFee,
-        status: unit.status,
-        category: unit.category,
-        listingType: unit.listingType,
-        securityDeposit: unit.securityDeposit,
-        availableDate: unit.availableDate,
-        bedrooms: unit.bedrooms,
-        bathrooms: unit.bathrooms,
-        area: unit.area,
-        amenities: unit.amenities,
-        streetAddress: unit.streetAddress,
-        images: unit.images,
-        occupiedBy: unit.occupiedBy ? {
-          tenantId: unit.occupiedBy._id,
-          name: unit.occupiedBy.tenantName,
-          email: unit.occupiedBy.tenantEmail
-        } : null,
-        occupiedSince: unit.occupiedSince,
-        createdAt: unit.createdAt
-      })),
+      data: units.map(unit => {
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const isVacant = unit.status === 'vacant';
+        const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+
+        const currentPrice = getCurrentRent(
+          unit.basePrice2024 || unit.monthlyPrice,
+          effectiveOrigin,
+          isVacant
+        );
+
+        return {
+          unitId: unit._id,
+          label: unit.label,
+          monthlyPrice: unit.monthlyPrice,
+          currentEffectivePrice: currentPrice,
+          isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          meterNumber: unit.meterNumber,
+          description: unit.description,
+          serviceChargeMonthly: unit.serviceChargeMonthly,
+          cautionFee: unit.cautionFee,
+          legalFee: unit.legalFee,
+          status: unit.status,
+          category: unit.category,
+          listingType: unit.listingType,
+          securityDeposit: unit.securityDeposit,
+          availableDate: unit.availableDate,
+          bedrooms: unit.bedrooms,
+          bathrooms: unit.bathrooms,
+          area: unit.area,
+          amenities: unit.amenities,
+          streetAddress: unit.streetAddress,
+          images: unit.images,
+          occupiedBy: unit.occupiedBy ? {
+            tenantId: unit.occupiedBy._id,
+            name: unit.occupiedBy.tenantName,
+            email: unit.occupiedBy.tenantEmail
+          } : null,
+          occupiedSince: unit.occupiedSince,
+          createdAt: unit.createdAt
+        };
+      }),
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / parseInt(limit)),
@@ -250,17 +264,30 @@ const getVacantUnits = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: vacantUnits.map(unit => ({
-        unitId: unit._id,
-        label: unit.label,
-        monthlyPrice: unit.monthlyPrice,
-        meterNumber: unit.meterNumber,
-        status: unit.status,
-        description: unit.description,
-        serviceChargeMonthly: unit.serviceChargeMonthly,
-        cautionFee: unit.cautionFee,
-        legalFee: unit.legalFee,
-      })),
+      data: vacantUnits.map(unit => {
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+
+        const currentPrice = getCurrentRent(
+          unit.basePrice2024 || unit.monthlyPrice,
+          effectiveOrigin,
+          true // Vacant cycle
+        );
+
+        return {
+          unitId: unit._id,
+          label: unit.label,
+          monthlyPrice: unit.monthlyPrice,
+          currentEffectivePrice: currentPrice,
+          isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          meterNumber: unit.meterNumber,
+          status: unit.status,
+          description: unit.description,
+          serviceChargeMonthly: unit.serviceChargeMonthly,
+          cautionFee: unit.cautionFee,
+          legalFee: unit.legalFee,
+        };
+      }),
       total: vacantUnits.length
     });
   } catch (error) {
@@ -284,12 +311,24 @@ const getUnitDetails = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Unit not found' });
     }
 
+    const { getCurrentRent } = require('../utils/rentCalculator');
+    const isVacant = unit.status === 'vacant';
+    const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+
+    const currentPrice = getCurrentRent(
+      unit.basePrice2024 || unit.monthlyPrice,
+      effectiveOrigin,
+      isVacant
+    );
+
     return res.status(200).json({
       success: true,
       data: {
         unitId: unit._id,
         label: unit.label,
         monthlyPrice: unit.monthlyPrice,
+        currentEffectivePrice: currentPrice,
+        isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
         meterNumber: unit.meterNumber,
         description: unit.description,
         serviceChargeMonthly: unit.serviceChargeMonthly,

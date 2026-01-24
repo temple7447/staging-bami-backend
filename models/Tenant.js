@@ -84,6 +84,13 @@ const TenantSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
+  lastRentIncreaseDate: {
+    type: Date
+  },
+  baseRent2024: {
+    type: Number,
+    description: 'Rent as of Jan 1, 2024 or entry date'
+  },
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'
