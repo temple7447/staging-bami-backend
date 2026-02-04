@@ -68,12 +68,23 @@ exports.sendEmail = async (options) => {
     console.log('[EMAIL DEBUG] Subject:', options.subject);
 
     const client = getClient();
+
+    // Support multiple recipients (comma separated string or array)
+    let recipients = [];
+    if (Array.isArray(options.email)) {
+      recipients = options.email.map(email => ({ email }));
+    } else if (typeof options.email === 'string') {
+      recipients = options.email.split(',').map(email => ({ email: email.trim() }));
+    } else {
+      recipients = [{ email: options.email }];
+    }
+
     const payload = {
       from: {
         email: options.from || FROM.email,
         name: options.fromName || FROM.name
       },
-      to: [{ email: options.email }],
+      to: recipients,
       subject: options.subject,
       text: options.message,
       html: options.html || options.message,
@@ -498,9 +509,72 @@ exports.sendManagerWelcomeEmail = async (user, temporaryPassword, assignedEstate
 };
 
 // Helper to generate PDF Receipt
-const generateReceiptPdf = (payment, tenant, estate, wallet, data) => {
-  return new Promise((resolve, reject) => {
+exports.generateReceiptPdf = (payment, tenant, estate, wallet) => {
+  return new Promise(async (resolve, reject) => {
     try {
+      const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+
+      // Calculate dates
+      const moveInDate = tenant.entryDate ? formatDate(tenant.entryDate) : '-';
+      const expiryDate = tenant.nextDueDate ? formatDate(tenant.nextDueDate) : '-';
+      const paymentDate = payment.paymentDate ? formatDate(payment.paymentDate) : formatDate(new Date());
+
+      // Calculate durations and years
+      const currentYear = new Date().getFullYear();
+      const nextYear = currentYear + 1;
+      const yearDuration = `${currentYear} - ${nextYear}`;
+
+      // Calculate financial figures
+      const rentAmount = tenant.rentAmount || 0;
+      const serviceCharge = tenant.unit?.serviceChargeMonthly ? tenant.unit.serviceChargeMonthly * 12 : 0;
+      const cautionFee = tenant.unit?.cautionFee || 0;
+      const legalFee = tenant.unit?.legalFee || 0;
+
+      const rentOutstanding = 0;
+      const serviceChargeOutstanding = 0;
+      const walletBalance = wallet?.balance || 0;
+      const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
+
+      // Totals
+      const currentTotalTenancyRate = rentAmount + serviceCharge;
+
+      // Future projections (26% increase)
+      const increaseRate = 1.26;
+      const nextRentPrice = rentAmount * increaseRate;
+      const nextServiceChargePrice = serviceCharge * increaseRate;
+
+      const nextRentIncreaseAmount = nextRentPrice;
+      const nextServiceChargeIncreaseAmount = nextServiceChargePrice;
+      const totalTenancyRateIncreaseAmount = nextRentPrice + nextServiceChargePrice;
+      const nextTotalTenancyRate = nextRentPrice + nextServiceChargePrice;
+
+      const nextIncreaseDate = tenant.nextDueDate
+        ? new Date(new Date(tenant.nextDueDate).setFullYear(new Date(tenant.nextDueDate).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
+        : 'July 15th, 2027';
+
+      // Prepare data object for PDF
+      const data = {
+        paymentDate,
+        moveInDate,
+        expiryDate,
+        currentYear,
+        nextYear,
+        yearDuration,
+        rentAmount: formatCurrencyForPDF(rentAmount),
+        rentOutstanding: formatCurrencyForPDF(rentOutstanding),
+        serviceCharge: formatCurrencyForPDF(serviceCharge),
+        serviceChargeOutstanding: formatCurrencyForPDF(serviceChargeOutstanding),
+        cautionFee: formatCurrencyForPDF(cautionFee),
+        legalFee: formatCurrencyForPDF(legalFee),
+        outstandingBalance: formatCurrencyForPDF(outstandingBalance),
+        currentTotalTenancyRate: formatCurrencyForPDF(currentTotalTenancyRate),
+        nextTotalTenancyRate: formatCurrencyForPDF(nextTotalTenancyRate),
+        nextIncreaseDate,
+        nextRentIncrease: formatCurrencyForPDF(nextRentIncreaseAmount),
+        nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncreaseAmount),
+        totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncreaseAmount)
+      };
+
       const doc = new PDFDocument({ size: 'A4', margin: 30 });
       const buffers = [];
 
@@ -510,234 +584,75 @@ const generateReceiptPdf = (payment, tenant, estate, wallet, data) => {
         resolve(pdfData);
       });
 
-      // --- Compact PDF Content for Single Page ---
-
-      const pageWidth = 595.28; // A4 width in points
+      const pageWidth = 595.28;
       const leftMargin = 30;
       const rightMargin = 30;
       const contentWidth = pageWidth - leftMargin - rightMargin;
 
-      // Compact Header Section
+      // Header Section
       doc.save();
+      doc.font('Helvetica-Bold').fontSize(22).fillColor('#4472c4').text('SAMFRED', leftMargin, 35);
+      doc.fontSize(16).text('GLOBAL RESOURCES LTD', leftMargin, 58, { underline: true });
+      doc.font('Helvetica').fontSize(12).fillColor('#000000').text('BALADO ESTATE MASON IFIE OFF MATRIX DEPOT', leftMargin, 85);
+      doc.text(`Tel: 07052258160, 0905665358`, leftMargin, 105);
 
-      // Company Name - Left aligned (smaller)
-      doc.font('Helvetica-Bold')
-        .fontSize(16)
-        .fillColor('#2c5aa0')
-        .text('SAMFRED GLOBAL RESOURCES LTD', leftMargin, 35);
+      // Logo Placeholder (Matching style in image)
+      const logoX = pageWidth - rightMargin - 80;
+      doc.rect(logoX, 35, 80, 80).lineWidth(2).strokeColor('#2c5aa0').fill('#0056b3');
+      doc.fillColor('white').fontSize(10).font('Helvetica-Bold').text('SAM FRED', logoX, 60, { width: 80, align: 'center' }).text('LOGO', logoX, 72, { width: 80, align: 'center' });
 
-      // Company Details (compact)
-      doc.font('Helvetica')
-        .fontSize(7)
-        .fillColor('#333333')
-        .text('BALADO ESTATE MASON IFIE OFF MATRIX DEPOT | Tel: 07052258160, 0905665358', leftMargin, 52);
-
-      // Logo - Right aligned with actual image
-      const logoX = pageWidth - rightMargin - 60;
-      const logoPath = require('path').join(__dirname, '../uploads/samfred-logo.png');
-
-      try {
-        // Add the logo image
-        doc.image(logoPath, logoX, 35, {
-          width: 60,
-          height: 60,
-          fit: [60, 60],
-          align: 'center'
-        });
-      } catch (logoError) {
-        // Fallback to placeholder if logo image not found
-        console.warn('Logo image not found, using placeholder:', logoError.message);
-        doc.roundedRect(logoX, 35, 60, 60, 3)
-          .lineWidth(1.5)
-          .strokeColor('#2c5aa0')
-          .fillAndStroke('#2c5aa0', '#2c5aa0');
-
-        doc.fillColor('white')
-          .fontSize(7)
-          .font('Helvetica-Bold')
-          .text('SAMFRED', logoX, 50, { width: 60, align: 'center' })
-          .fontSize(6)
-          .text('GLOBAL', logoX, 60, { width: 60, align: 'center' })
-          .text('RESOURCES', logoX, 68, { width: 60, align: 'center' });
-      }
-
-      doc.fillColor('#666666')
-        .fontSize(6)
-        .font('Helvetica')
-        .text('1-3 BED ROOMS', logoX, 100, { width: 60, align: 'center' });
-
+      doc.fillColor('#000000').fontSize(10).font('Helvetica').text('1 BED ROOM', logoX, 125, { width: 80, align: 'right' }).text('2 BED ROOMS', logoX, 137, { width: 80, align: 'right' }).text('3 BED ROOMS', logoX, 149, { width: 80, align: 'right' });
       doc.restore();
 
-      // Divider line
-      doc.moveTo(leftMargin, 105)
-        .lineTo(pageWidth - rightMargin, 105)
-        .lineWidth(1.5)
-        .strokeColor('#2c5aa0')
-        .stroke();
+      // Receipt Title and Date
+      doc.rect(leftMargin, 175, 100, 25).fill('#e7e6e6');
+      doc.font('Helvetica-Bold').fontSize(14).fillColor('#000000').text('RECEIPT', leftMargin + 5, 180);
+      doc.text(`DATE: ${data.paymentDate}`, pageWidth - rightMargin - 200, 180, { width: 200, align: 'right' });
 
-      // Receipt Title and Date (compact)
-      doc.font('Helvetica-Bold')
-        .fontSize(12)
-        .fillColor('#2c5aa0')
-        .text('PAYMENT RECEIPT', leftMargin, 112);
+      doc.moveTo(leftMargin, 205).lineTo(pageWidth - rightMargin, 205).lineWidth(2).strokeColor('#000000').stroke();
 
-      doc.font('Helvetica')
-        .fontSize(7)
-        .fillColor('#666666')
-        .text(`Date: ${data.paymentDate} | Receipt #: ${payment._id?.toString().slice(-8).toUpperCase() || 'N/A'}`, leftMargin, 128);
+      let currentY = 215;
+      const col1Width = 260;
+      const col2Width = contentWidth - col1Width;
+      const rowHeight = 22;
 
-      // Start table at Y position
-      let currentY = 145;
-      const col1X = leftMargin;
-      const col2X = leftMargin + 260;
-      const rowHeight = 16; // Reduced from 28
-      const labelWidth = 250;
-      const valueWidth = 245;
+      const drawReceiptRow = (label, value, options = {}) => {
+        const { labelColor = '#4472c4', valueColor = '#4472c4', bold = true } = options;
 
-      // Compact row drawing function
-      const drawRow = (label, value, options = {}) => {
-        const {
-          color = '#333333',
-          bold = false,
-          fontSize = 7, // Reduced from 9
-          section = false
-        } = options;
+        doc.rect(leftMargin, currentY, col1Width, rowHeight).strokeColor('#999999').lineWidth(0.5).stroke();
+        doc.rect(leftMargin + col1Width, currentY, col2Width, rowHeight).strokeColor('#999999').lineWidth(0.5).stroke();
 
-        // Section header styling
-        if (section) {
-          doc.rect(col1X, currentY, contentWidth, rowHeight)
-            .fill('#f0f4f8');
-
-          doc.font('Helvetica-Bold')
-            .fontSize(8)
-            .fillColor('#2c5aa0')
-            .text(label, col1X + 6, currentY + 4, { width: contentWidth - 12 });
-
-          currentY += rowHeight;
-          return;
-        }
-
-        // Draw cell borders
-        doc.rect(col1X, currentY, labelWidth, rowHeight)
-          .strokeColor('#d0d0d0')
-          .lineWidth(0.5)
-          .stroke();
-
-        doc.rect(col2X, currentY, valueWidth, rowHeight)
-          .strokeColor('#d0d0d0')
-          .lineWidth(0.5)
-          .stroke();
-
-        // Label
-        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
-          .fontSize(fontSize)
-          .fillColor(color)
-          .text(label, col1X + 5, currentY + 4, { width: labelWidth - 10 });
-
-        // Value
-        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica')
-          .fontSize(fontSize)
-          .fillColor(color)
-          .text(value, col2X + 5, currentY + 4, { width: valueWidth - 10 });
+        doc.font('Helvetica-Bold').fontSize(11).fillColor(labelColor).text(label, leftMargin + 8, currentY + 6);
+        doc.font(bold ? 'Helvetica-Bold' : 'Helvetica').fillColor(valueColor).text(value || '', leftMargin + col1Width + 8, currentY + 6);
 
         currentY += rowHeight;
       };
 
-      // Tenant Information Section
-      drawRow('TENANT INFORMATION', '', { section: true });
-      drawRow('Tenant Full Name:', tenant.tenantName, { bold: true });
-      drawRow('Bedroom Type:', tenant.unitLabel || 'Standard');
-      drawRow('Flat/Unit:', tenant.unitLabel);
-      drawRow('Move In Date:', data.moveInDate);
-      drawRow('Lease Expiry Date:', data.expiryDate);
+      drawReceiptRow('TENANT FULL NAME:', tenant.tenantName);
+      drawReceiptRow('BEDROOM TYPE:', tenant.unitLabel || 'Standard');
+      drawReceiptRow('FLAT TYPE:', tenant.unitLabel);
+      drawReceiptRow('MOVE IN DATE:', data.moveInDate);
+      drawReceiptRow('EXPIRY DATE:', data.expiryDate);
+      drawReceiptRow('RENT:', data.rentAmount);
+      drawReceiptRow('RENT OUTSTANDING:', data.rentOutstanding, { valueColor: '#ff0000' });
+      drawReceiptRow('SERVICE CHARGE:', data.serviceCharge);
+      drawReceiptRow('SERVICE CHARGE OUTSTANDING:', data.serviceChargeOutstanding, { valueColor: '#ff0000' });
+      drawReceiptRow('1 TIME CAUTION FEE:', data.cautionFee);
+      drawReceiptRow('1 TIME LEGAL FEE:', data.legalFee);
+      drawReceiptRow('OUTSTANDING BALANCE:', data.outstandingBalance, { valueColor: '#ff0000' });
+      drawReceiptRow(`CURRENT TOTAL TENANCY RATE: ${data.currentYear}`, data.currentTotalTenancyRate, { labelColor: '#70ad47', valueColor: '#70ad47' });
+      drawReceiptRow(`NEXT TOTAL TENANCY RATE ${data.nextYear}:`, data.nextTotalTenancyRate, { labelColor: '#ffc000', valueColor: '#ffc000' });
+      drawReceiptRow('TENANCY DURATION:', '1 YEAR');
+      drawReceiptRow('TENANT TOTAL STAY:', '1st YEAR');
+      drawReceiptRow('YEAR DURATION', data.yearDuration);
+      drawReceiptRow(`NEXT RENTAL INCREASE BY (26%) ON ${data.nextIncreaseDate}:`, data.nextRentIncrease, { labelColor: '#ff0000', valueColor: '#ff0000' });
+      drawReceiptRow(`NEXT SERVICE CHARGE INCREASE BY (26%) ${data.nextIncreaseDate}:`, data.nextServiceChargeIncrease, { labelColor: '#ff0000', valueColor: '#ff0000' });
+      drawReceiptRow(`TOTAL TENANCY RATE INCREASE BY (26%) ON ${data.nextIncreaseDate}:`, data.totalTenancyRateIncrease, { labelColor: '#ff0000', valueColor: '#ff0000' });
 
-      currentY += 2; // Reduced section spacing
-
-      // Payment Details Section
-      drawRow('PAYMENT DETAILS', '', { section: true });
-      drawRow('Monthly Rent:', data.rentAmount, { bold: true });
-      drawRow('Rent Outstanding:', data.rentOutstanding, {
-        color: data.rentOutstanding !== 'N 0' ? '#d32f2f' : '#333333'
-      });
-      drawRow('Service Charge (Annual):', data.serviceCharge);
-      drawRow('Service Charge Outstanding:', data.serviceChargeOutstanding, {
-        color: data.serviceChargeOutstanding !== 'N 0' ? '#d32f2f' : '#333333'
-      });
-      drawRow('Caution Fee (One-time):', data.cautionFee);
-      drawRow('Total Outstanding Balance:', data.outstandingBalance, {
-        bold: true,
-        color: data.outstandingBalance !== 'N 0' ? '#d32f2f' : '#2e7d32'
-      });
-
-      currentY += 2;
-
-      // Tenancy Summary Section
-      drawRow('TENANCY SUMMARY', '', { section: true });
-      drawRow(`Current Total Tenancy Rate (${data.currentYear}):`, data.currentTotalTenancyRate, {
-        bold: true,
-        color: '#2e7d32',
-        fontSize: 8
-      });
-      drawRow(`Next Total Tenancy Rate (${data.nextYear}):`, data.nextTotalTenancyRate, {
-        bold: true,
-        color: '#f57c00',
-        fontSize: 8
-      });
-      drawRow('Tenancy Duration:', '1 YEAR');
-      drawRow('Current Stay Period:', '1st YEAR');
-      drawRow('Year Duration:', data.yearDuration);
-
-      currentY += 2;
-
-      // Future Projections Section
-      drawRow('FUTURE RENT ADJUSTMENTS', '', { section: true });
-      drawRow(`Next Rental Increase (26%) - ${data.nextIncreaseDate}:`, data.nextRentIncrease, {
-        color: '#d32f2f',
-        bold: true
-      });
-      drawRow(`Next Service Charge Increase (26%) - ${data.nextIncreaseDate}:`, data.nextServiceChargeIncrease, {
-        color: '#d32f2f',
-        bold: true
-      });
-      drawRow(`Total Rate Increase (26%) - ${data.nextIncreaseDate}:`, data.totalTenancyRateIncrease, {
-        color: '#d32f2f',
-        bold: true,
-        fontSize: 8
-      });
-
-      // Footer Notice with compact styling
-      currentY += 8;
-
-      doc.roundedRect(leftMargin, currentY, contentWidth, 40, 3)
-        .fillAndStroke('#fff3cd', '#ffc107');
-
-      doc.font('Helvetica-Bold')
-        .fontSize(8)
-        .fillColor('#d32f2f')
-        .text('⚠ Important Notice Regarding Rent Adjustment', leftMargin + 8, currentY + 6, {
-          width: contentWidth - 16
-        });
-
-      doc.font('Helvetica')
-        .fontSize(6.5)
-        .fillColor('#333333')
-        .text(
-          'Please be advised that there will be a 26% increase in the combined Rent and Service Charge applicable every two (2) years of continuous tenancy. We appreciate your understanding and continued residency.',
-          leftMargin + 8,
-          currentY + 18,
-          { width: contentWidth - 16, align: 'justify' }
-        );
-
-      // Footer
-      currentY += 48;
-      doc.fontSize(6)
-        .fillColor('#999999')
-        .text(
-          'This is a computer-generated receipt. For any queries, please contact our office.',
-          leftMargin,
-          currentY,
-          { width: contentWidth, align: 'center' }
-        );
+      // Footer Notice
+      currentY += 20;
+      doc.font('Helvetica-Bold').fontSize(12).fillColor('#ff0000').text('Important Notice Regarding Rent Adjustment', leftMargin, currentY);
+      doc.fontSize(10).text(`Please be advised that there will be a 26% increase in the combined Rent and Service Charge applicable every two (2) years of continuous tenancy. We appreciate your understanding and continued residency.`, leftMargin, currentY + 18, { width: contentWidth, align: 'justify' });
 
       doc.end();
     } catch (error) {
@@ -765,26 +680,31 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
   const rentAmount = tenant.rentAmount || 0;
   const serviceCharge = tenant.unit?.serviceChargeMonthly ? tenant.unit.serviceChargeMonthly * 12 : 0;
   const cautionFee = tenant.unit?.cautionFee || 0;
+  const legalFee = tenant.unit?.legalFee || 0;
 
   const rentOutstanding = 0;
   const serviceChargeOutstanding = 0;
-  const outstandingBalance = wallet?.balance ? (wallet.balance < 0 ? Math.abs(wallet.balance) : 0) : 0;
+  const walletBalance = wallet?.balance || 0;
+  const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
 
   // Totals
   const currentTotalTenancyRate = rentAmount + serviceCharge;
 
-  // Future projections
-  const increaseRate = 0.26;
-  const nextRentIncrease = rentAmount * increaseRate;
-  const nextServiceChargeIncrease = serviceCharge * increaseRate;
-  const totalTenancyRateIncrease = nextRentIncrease + nextServiceChargeIncrease;
-  const nextTotalTenancyRate = currentTotalTenancyRate + totalTenancyRateIncrease;
+  // Future projections (26% increase)
+  const increaseRate = 1.26;
+  const nextRentPrice = rentAmount * increaseRate;
+  const nextServiceChargePrice = serviceCharge * increaseRate;
+
+  const nextRentIncreaseAmount = nextRentPrice;
+  const nextServiceChargeIncreaseAmount = nextServiceChargePrice;
+  const totalTenancyRateIncreaseAmount = nextRentPrice + nextServiceChargePrice;
+  const nextTotalTenancyRate = nextRentPrice + nextServiceChargePrice;
 
   const nextIncreaseDate = tenant.nextDueDate
     ? new Date(new Date(tenant.nextDueDate).setFullYear(new Date(tenant.nextDueDate).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
-    : 'July 3rd, 2026';
+    : 'July 15th, 2027';
 
-  // Prepare data object for PDF (using PDF-compatible currency formatting)
+  // Prepare data object for PDF
   const data = {
     paymentDate,
     moveInDate,
@@ -797,138 +717,145 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
     serviceCharge: formatCurrencyForPDF(serviceCharge),
     serviceChargeOutstanding: formatCurrencyForPDF(serviceChargeOutstanding),
     cautionFee: formatCurrencyForPDF(cautionFee),
+    legalFee: formatCurrencyForPDF(legalFee),
     outstandingBalance: formatCurrencyForPDF(outstandingBalance),
     currentTotalTenancyRate: formatCurrencyForPDF(currentTotalTenancyRate),
     nextTotalTenancyRate: formatCurrencyForPDF(nextTotalTenancyRate),
     nextIncreaseDate,
-    nextRentIncrease: formatCurrencyForPDF(nextRentIncrease),
-    nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncrease),
-    totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncrease)
+    nextRentIncrease: formatCurrencyForPDF(nextRentIncreaseAmount),
+    nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncreaseAmount),
+    totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncreaseAmount)
   };
 
   // Generate PDF
   let pdfBuffer = null;
   try {
-    pdfBuffer = await generateReceiptPdf(payment, tenant, estate, wallet, data);
+    pdfBuffer = await exports.generateReceiptPdf(payment, tenant, estate, wallet);
   } catch (pdfError) {
     console.error('Error generating PDF receipt:', pdfError);
-    // Continue without PDF if generation fails
   }
 
   const message = `
     <div style="font-family: 'Times New Roman', Times, serif; max-width: 800px; margin: 0 auto; color: #333; background: #fff; padding: 20px;">
       
       <!-- Header -->
-      <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
-        <div>
-          <h1 style="color: #4472c4; margin: 0; font-size: 24px; font-weight: bold;">SAMFRED</h1>
-          <h2 style="color: #4472c4; margin: 5px 0; font-size: 18px; font-weight: bold; text-decoration: underline;">GLOBAL RESOURCES LTD</h2>
-          <p style="margin: 5px 0; font-size: 14px;">BALADO ESTATE MASON IFIE OFF MATRIX DEPOT</p>
-          <p style="margin: 10px 0; font-size: 14px;">Tel: 07052258160, 0905665358</p>
-        </div>
-        <div style="text-align: right;">
-           <!-- Logo Placeholder -->
-           <div style="width: 80px; height: 80px; border: 2px solid #0056b3; display: inline-flex; align-items: center; justify-content: center; background: #0056b3; color: white;">
-             <span style="font-size: 10px; text-align: center;">SAM FRED<br>LOGO</span>
-           </div>
-           <div style="font-size: 10px; margin-top: 5px; text-align: right;">
-             1 BED ROOM<br>
-             2 BED ROOMS<br>
-             3 BED ROOMS
-           </div>
-        </div>
-      </div>
+      <table style="width: 100%; margin-bottom: 20px;">
+        <tr>
+          <td style="vertical-align: top;">
+            <h1 style="color: #4472c4; margin: 0; font-size: 28px; font-weight: bold;">SAMFRED</h1>
+            <h2 style="color: #4472c4; margin: 5px 0; font-size: 20px; font-weight: bold; text-decoration: underline;">GLOBAL RESOURCES LTD</h2>
+            <p style="margin: 5px 0; font-size: 16px; font-weight: bold; color: #000;">BALADO ESTATE MASON IFIE OFF MATRIX DEPOT</p>
+            <p style="margin: 10px 0; font-size: 16px; color: #000;">Tel: 07052258160, 0905665358</p>
+          </td>
+          <td style="text-align: right; vertical-align: top; width: 100px;">
+             <div style="width: 80px; height: 80px; border: 2px solid #2c5aa0; display: inline-block; background: #0056b3; color: white; text-align: center; line-height: 1.2; padding-top: 20px;">
+               <span style="font-size: 12px; font-weight: bold;">SAM FRED<br>LOGO</span>
+             </div>
+             <div style="font-size: 11px; margin-top: 5px; text-align: right; color: #000; font-weight: bold;">
+               1 BED ROOM<br>
+               2 BED ROOMS<br>
+               3 BED ROOMS
+             </div>
+          </td>
+        </tr>
+      </table>
 
       <!-- Title & Date -->
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 5px;">
-        <h3 style="margin: 0; background: #e7e6e6; padding: 2px 5px; font-weight: bold;">RECEIPT</h3>
-        <h3 style="margin: 0; font-weight: bold;">DATE: ${paymentDate}</h3>
-      </div>
+      <table style="width: 100%; margin-bottom: 5px; border-bottom: 2px solid #000;">
+        <tr>
+          <td style="width: 120px;"><h3 style="margin: 0; background: #e7e6e6; padding: 5px 15px; font-weight: bold; display: inline-block;">RECEIPT</h3></td>
+          <td style="text-align: right;"><h3 style="margin: 0; font-weight: bold;">DATE: ${paymentDate}</h3></td>
+        </tr>
+      </table>
 
       <!-- Table -->
-      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 16px;">
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold; width: 50%;">TENANT FULL NAME:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.tenantName}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold; width: 60%;">TENANT FULL NAME:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${tenant.tenantName}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">BEDROOM TYPE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.unitLabel || 'Standard'}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">BEDROOM TYPE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${tenant.unitLabel || 'Standard'}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">FLAT TYPE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${tenant.unitLabel}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">FLAT TYPE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${tenant.unitLabel}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">MOVE IN DATE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${moveInDate}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">MOVE IN DATE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${moveInDate}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">EXPIRY DATE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${expiryDate}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">EXPIRY DATE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${expiryDate}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">RENT:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(rentAmount)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">RENT:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${formatMoney(rentAmount)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">RENT OUTSTANDING:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(rentOutstanding)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">RENT OUTSTANDING:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(rentOutstanding)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">SERVICE CHARGE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(serviceCharge)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">SERVICE CHARGE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${formatMoney(serviceCharge)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">SERVICE CHARGE OUTSTANDING:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(serviceChargeOutstanding)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">SERVICE CHARGE OUTSTANDING:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(serviceChargeOutstanding)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1 TIME CAUTION FEE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(cautionFee)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1 TIME CAUTION FEE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${formatMoney(cautionFee)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">OUTSTANDING BALANCE:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4;">${formatMoney(outstandingBalance)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1 TIME LEGAL FEE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${formatMoney(legalFee)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #70ad47; font-weight: bold;">CURRENT TOTAL TENANCY RATE: ${currentYear}</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #70ad47; font-weight: bold;">${formatMoney(currentTotalTenancyRate)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">OUTSTANDING BALANCE:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(outstandingBalance)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #ffc000; font-weight: bold;">NEXT TOTAL TENANCY RATE ${nextYear}:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #ffc000; font-weight: bold;">${formatMoney(nextTotalTenancyRate)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #70ad47; font-weight: bold;">CURRENT TOTAL TENANCY RATE: ${currentYear}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #70ad47; font-weight: bold;">${formatMoney(currentTotalTenancyRate)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">TENANCY DURATION:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1 YEAR</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ffc000; font-weight: bold;">NEXT TOTAL TENANCY RATE ${nextYear}:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ffc000; font-weight: bold;">${formatMoney(nextTotalTenancyRate)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">TENANT TOTAL STAY:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">1st YEAR</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">TENANCY DURATION:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1 YEAR</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">YEAR DURATION</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #4472c4; font-weight: bold;">${yearDuration}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">TENANT TOTAL STAY:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1st YEAR</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">NEXT RENTAL INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(nextRentIncrease)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">YEAR DURATION</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${yearDuration}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">NEXT SERVICE CHARGE INCREASE BY (26%) ${nextIncreaseDate}:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(nextServiceChargeIncrease)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">NEXT RENTAL INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(nextRentIncreaseAmount)}</td>
         </tr>
         <tr>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">TOTAL TENANCY RATE INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
-          <td style="border: 1px solid #999; padding: 5px; color: #ff0000; font-weight: bold;">${formatMoney(totalTenancyRateIncrease)}</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">NEXT SERVICE CHARGE INCREASE BY (26%) ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(nextServiceChargeIncreaseAmount)}</td>
+        </tr>
+        <tr>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">TOTAL TENANCY RATE INCREASE BY (26%) ON ${nextIncreaseDate}:</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #ff0000; font-weight: bold;">${formatMoney(totalTenancyRateIncreaseAmount)}</td>
         </tr>
       </table>
 
       <!-- Footer Notice -->
-      <div style="margin-top: 20px;">
-        <h4 style="color: #ff0000; margin-bottom: 5px;">Important Notice Regarding Rent Adjustment</h4>
-        <p style="color: #ff0000; font-size: 12px; margin: 0;">
+      <div style="margin-top: 25px;">
+        <h4 style="color: #ff0000; margin-bottom: 5px; font-weight: bold; font-size: 18px;">Important Notice Regarding Rent Adjustment</h4>
+        <p style="color: #ff0000; font-size: 16px; margin: 0; line-height: 1.4;">
           Please be advised that there will be a <strong>26% increase in the combined Rent and Service Charge</strong> applicable <strong>every two (2) years</strong> of continuous tenancy. We appreciate your understanding and continued residency.
         </p>
       </div>
@@ -936,9 +863,17 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
     </div>
   `;
 
+  // Determine recipients: Tenant email + Admin email
+  const adminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@bamihustle.com';
+  const recipientEmails = [tenant.tenantEmail];
+
+  if (adminEmail && adminEmail !== tenant.tenantEmail) {
+    recipientEmails.push(adminEmail);
+  }
+
   const emailOptions = {
-    email: tenant.tenantEmail,
-    subject: `Payment Receipt - ${paymentDate}`,
+    email: recipientEmails,
+    subject: `Payment Receipt - ${paymentDate} - ${tenant.tenantName}`,
     html: message,
   };
 
@@ -954,3 +889,4 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
 
   return await exports.sendEmail(emailOptions);
 };
+

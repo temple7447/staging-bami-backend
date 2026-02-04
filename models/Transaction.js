@@ -6,7 +6,7 @@ const TransactionSchema = new mongoose.Schema({
   tenant: { type: mongoose.Schema.ObjectId, ref: 'Tenant' },
   estate: { type: mongoose.Schema.ObjectId, ref: 'Estate' },
   amount: { type: Number, required: true, min: 0 },
-  type: { type: String, enum: ['rent', 'utility', 'deposit', 'withdrawal', 'other'], required: true },
+  type: { type: String, enum: ['rent', 'utility', 'deposit', 'withdrawal', 'service_charge', 'security_charge', 'caution_fee', 'legal_fee', 'maintenance', 'initial', 'bundle', 'other'], required: true },
   method: { type: String, enum: ['cash', 'transfer', 'card', 'bank', 'paystack', 'other'], default: 'transfer' },
   status: { type: String, enum: ['paid', 'pending', 'failed', 'completed'], default: 'paid' },
   reference: { type: String },

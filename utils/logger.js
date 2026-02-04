@@ -5,43 +5,44 @@
 
 const logError = (endpoint, error, context = {}) => {
   const timestamp = new Date().toISOString();
+  const safeError = error || {};
   const errorDetails = {
     timestamp,
     endpoint,
     context,
     error: {
-      message: error.message,
-      code: error.code,
-      name: error.name,
-      path: error.path,
-      value: error.value,
-      kind: error.kind,
-      status: error.status,
-      statusCode: error.statusCode
+      message: safeError.message || 'No message provided',
+      code: safeError.code,
+      name: safeError.name,
+      path: safeError.path,
+      value: safeError.value,
+      kind: safeError.kind,
+      status: safeError.status,
+      statusCode: safeError.statusCode
     }
   };
 
   if (process.env.NODE_ENV === 'development') {
     console.error(`\n❌ [${timestamp}] ERROR ON ${endpoint}`);
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    
+
     if (Object.keys(context).length > 0) {
       console.error('📋 Context:', context);
     }
-    
-    console.error('📌 Error Type:', error.name || 'Unknown');
-    console.error('💬 Message:', error.message);
-    
-    if (error.code) console.error('🔢 Code:', error.code);
-    if (error.path) console.error('📍 Path:', error.path);
-    if (error.kind) console.error('🏷️  Kind:', error.kind);
-    if (error.value) console.error('📦 Value:', error.value);
-    
-    if (error.stack) {
+
+    console.error('📌 Error Type:', safeError.name || 'Unknown');
+    console.error('💬 Message:', safeError.message || 'No message provided');
+
+    if (safeError.code) console.error('🔢 Code:', safeError.code);
+    if (safeError.path) console.error('📍 Path:', safeError.path);
+    if (safeError.kind) console.error('🏷️  Kind:', safeError.kind);
+    if (safeError.value) console.error('📦 Value:', safeError.value);
+
+    if (safeError.stack) {
       console.error('\n📚 Stack Trace:');
-      console.error(error.stack);
+      console.error(safeError.stack);
     }
-    
+
     console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
   }
 

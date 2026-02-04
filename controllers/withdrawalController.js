@@ -1,6 +1,7 @@
 const Withdrawal = require('../models/Withdrawal');
 const Wallet = require('../models/Wallet');
 const User = require('../models/User');
+const Transaction = require('../models/Transaction');
 const crypto = require('crypto');
 const { logError } = require('../utils/logger');
 const { createNotification } = require('../utils/notificationService');
@@ -128,6 +129,25 @@ exports.updateWithdrawalStatus = async (req, res) => {
         withdrawal.processedBy = req.user.id;
 
         await withdrawal.save();
+
+        // Record as a Transaction for central history
+        if (status === 'completed') {
+            try {
+                await Transaction.create({
+                    user: withdrawal.user,
+                    amount: withdrawal.amount,
+                    type: 'withdrawal',
+                    method: 'bank',
+                    status: 'completed',
+                    reference: withdrawal.reference,
+                    description: `Withdrawal to ${withdrawal.bankDetails?.bankName} (${withdrawal.bankDetails?.accountNumber})`,
+                    metadata: { withdrawalId: withdrawal._id, bankDetails: withdrawal.bankDetails },
+                    createdBy: req.user.id
+                });
+            } catch (txError) {
+                console.error('[Withdrawal] Failed to create Transaction record:', txError.message);
+            }
+        }
 
         // Notify user about status change
         const notificationTitle = status === 'completed' ? 'Withdrawal Approved' : 'Withdrawal Rejected';

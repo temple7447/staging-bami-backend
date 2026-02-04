@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Payment = require('../models/Payment');
 const Tenant = require('../models/Tenant');
 const BillingItem = require('../models/BillingItem');
@@ -5,6 +6,7 @@ const Estate = require('../models/Estate');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
 const WalletAccount = require('../models/WalletAccount');
+const Transaction = require('../models/Transaction');
 const paystackService = require('../utils/paystackService');
 const { distributePayment } = require('../utils/distributionService');
 const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
@@ -61,28 +63,48 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         // If we have a valid duration, compute amount from tenant's monthly rent/service
         if (appliedDurationMonths) {
           const { calculateEffectiveRent } = require('../utils/rentCalculator');
-          const isRent = paymentType === 'rent';
+          const isRentHeader = paymentType === 'rent';
 
-          const baseAmount = isRent ? (tenant.rentAmount || 0) : (tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0);
-          const originDate = isRent
-            ? (tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt)
-            : (tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt);
+          // 1. Calculate Rent Component
+          const rentBase = tenant.rentAmount || 0;
+          const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
 
-          const result = calculateEffectiveRent(
-            baseAmount,
+          const rentResult = calculateEffectiveRent(
+            rentBase,
             tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date(),
             appliedDurationMonths,
-            false, // Occupied
-            originDate
+            false,
+            rentOrigin
           );
 
-          amount = result.totalAmount;
+          // 2. Calculate Service Charge Component (if type is rent or service_charge)
+          // NEW RULE: Rent payments always include Service Charge for the same period
+          let serviceTotal = 0;
+          let serviceFinal = 0;
 
-          // Store final value in metadata so we can update tenant later
-          if (isRent) {
-            req.body._finalRentAmount = result.finalRent;
+          if (paymentType === 'rent' || paymentType === 'service_charge') {
+            const serviceBase = tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0;
+            const serviceOrigin = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt;
+
+            const serviceResult = calculateEffectiveRent(
+              serviceBase,
+              tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date(),
+              appliedDurationMonths,
+              false,
+              serviceOrigin
+            );
+            serviceTotal = serviceResult.totalAmount;
+            serviceFinal = serviceResult.finalRent;
+          }
+
+          // Total amount for initiation
+          if (paymentType === 'rent') {
+            amount = rentResult.totalAmount + serviceTotal;
+            req.body._finalRentAmount = rentResult.finalRent;
+            req.body._finalServiceAmount = serviceFinal;
           } else {
-            req.body._finalServiceAmount = result.finalRent;
+            amount = serviceTotal;
+            req.body._finalServiceAmount = serviceFinal;
           }
         }
       }
@@ -118,6 +140,7 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
 
       // Create payment record
       const payment = new Payment({
+        user: tenant.user || adminId,
         tenant: tenantId,
         estate: tenant.estate._id,
         admin: adminId,
@@ -322,6 +345,7 @@ const initiateInitialPayment = async (req, res) => {
 
     // Create payment record
     const payment = new Payment({
+      user: tenant.user || userId,
       tenant: tenant._id,
       estate: tenant.estate._id,
       admin: userId,
@@ -454,7 +478,11 @@ const getPaymentStatus = async (req, res) => {
   try {
     const { paymentId } = req.params;
 
-    const payment = await Payment.findById(paymentId).populate('tenant estate admin');
+    const query = mongoose.Types.ObjectId.isValid(paymentId)
+      ? { _id: paymentId }
+      : { paystackReference: paymentId };
+
+    const payment = await Payment.findOne(query).populate('tenant estate admin');
     if (!payment) {
       return res.status(404).json({
         success: false,
@@ -691,6 +719,7 @@ const verifyPayment = async (req, res) => {
       // 3. Handle Single Item Payments
       if (payment.paymentType === 'rent') {
         rentMonths = Math.max(rentMonths, metadata.duration_months || 1);
+        serviceMonths = Math.max(serviceMonths, metadata.duration_months || 1); // BUNDLED
       } else if (payment.paymentType === 'service_charge') {
         serviceMonths = Math.max(serviceMonths, metadata.duration_months || 1);
       }
@@ -711,10 +740,16 @@ const verifyPayment = async (req, res) => {
             const oldDueDate = tenant.nextDueDate;
             tenant.nextDueDate = newDueDate;
 
-            // Apply Rent Increase if included in payment metadata
-            if (metadata.final_rent_amount && metadata.payment_type === 'rent') {
-              tenant.rentAmount = metadata.final_rent_amount;
-              tenant.lastRentIncreaseDate = new Date(); // Reset cycle to today
+            // Apply Rent/Service Increase if included in payment metadata
+            if (metadata.payment_type === 'rent') {
+              if (metadata.final_rent_amount) {
+                tenant.rentAmount = metadata.final_rent_amount;
+                tenant.lastRentIncreaseDate = new Date();
+              }
+              if (metadata.final_service_amount) {
+                tenant.serviceChargeAmount = metadata.final_service_amount;
+                tenant.lastServiceIncreaseDate = new Date();
+              }
             } else if (metadata.final_service_amount && metadata.payment_type === 'service_charge') {
               tenant.serviceChargeAmount = metadata.final_service_amount;
               tenant.lastServiceIncreaseDate = new Date();
@@ -778,6 +813,26 @@ const verifyPayment = async (req, res) => {
       }
 
       logInfo(`✅ Payment ${reference} verified as successful`, { paymentId: payment._id, amount: payment.amount, type: payment.paymentType });
+
+      // 4. Record as a Transaction for central history
+      try {
+        await Transaction.create({
+          user: payment.tenant.user || payment.admin?._id || payment.createdBy,
+          tenant: payment.tenant._id || payment.tenant,
+          estate: payment.estate._id || payment.estate,
+          amount: payment.amount,
+          type: payment.paymentType,
+          method: 'paystack',
+          status: 'completed',
+          reference: reference,
+          description: payment.description || `${payment.paymentType} Payment`,
+          metadata: verificationResult,
+          createdBy: payment.admin?._id || payment.tenant?._id || payment.createdBy
+        });
+        logInfo(`📝 Transaction record created for payment ${reference}`);
+      } catch (txError) {
+        logError('Failed to create Transaction record in verifyPayment', txError, { paymentId: payment._id });
+      }
 
       // If browser redirect requested, redirect to dashboard success page
       if (redirect) {
@@ -844,7 +899,11 @@ const refundDeposit = async (req, res) => {
   try {
     const { paymentId } = req.params;
 
-    const payment = await Payment.findById(paymentId);
+    const query = mongoose.Types.ObjectId.isValid(paymentId)
+      ? { _id: paymentId }
+      : { paystackReference: paymentId };
+
+    const payment = await Payment.findOne(query);
     if (!payment || !payment.isDeposit) {
       return res.status(404).json({
         success: false,
@@ -904,7 +963,11 @@ const sendPaymentReceipt = async (req, res) => {
   try {
     const { paymentId } = req.params;
 
-    const payment = await Payment.findById(paymentId)
+    const query = mongoose.Types.ObjectId.isValid(paymentId)
+      ? { _id: paymentId }
+      : { paystackReference: paymentId };
+
+    const payment = await Payment.findOne(query)
       .populate({
         path: 'tenant',
         populate: { path: 'unit' }
@@ -946,6 +1009,62 @@ const sendPaymentReceipt = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error processing receipt request',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Download payment receipt as PDF
+ * Generates and streams PDF directly to the browser
+ */
+const downloadPaymentReceipt = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+
+    const query = mongoose.Types.ObjectId.isValid(paymentId)
+      ? { _id: paymentId }
+      : { paystackReference: paymentId };
+
+    const payment = await Payment.findOne(query)
+      .populate({
+        path: 'tenant',
+        populate: [
+          { path: 'unit' },
+          { path: 'estate' }
+        ]
+      })
+      .populate('estate');
+
+    if (!payment) {
+      return res.status(404).json({ success: false, message: 'Payment not found' });
+    }
+
+    // Find wallet for the tenant (if they have a user account)
+    let wallet = null;
+    if (payment.tenant && payment.tenant.user) {
+      wallet = await Wallet.findOne({ userId: payment.tenant.user });
+    }
+
+    // Generate PDF
+    const { generateReceiptPdf } = require('../utils/emailService');
+    const pdfBuffer = await generateReceiptPdf(
+      payment,
+      payment.tenant,
+      payment.estate || payment.tenant.estate,
+      wallet
+    );
+
+    // Set headers for download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Receipt-${payment.paystackReference || paymentId}.pdf`);
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    console.error('Error downloading receipt:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error downloading receipt',
       error: error.message
     });
   }
@@ -1062,6 +1181,127 @@ const sendTenantReceipt = async (req, res) => {
   }
 };
 
+/**
+ * Record manual payment (admin-initiated offline payment)
+ * Bypasses Paystack but performs all other post-payment operations
+ */
+const recordManualPayment = async (req, res) => {
+  try {
+    const { tenantId, paymentType, amount, paymentMethod, paymentDate, description, durationMonths, duration, notes } = req.body;
+    const adminId = req.user.id;
+
+    if (!tenantId || !paymentType || !amount || !paymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID, payment type, amount, and payment method are required'
+      });
+    }
+
+    const tenant = await Tenant.findById(tenantId).populate('estate');
+    if (!tenant || !tenant.isActive) {
+      return res.status(404).json({ success: false, message: 'Active tenant not found' });
+    }
+
+    // Determine duration for due date shifting
+    let appliedDurationMonths = 0;
+    if (durationMonths != null) {
+      appliedDurationMonths = parseInt(durationMonths, 10);
+    } else if (duration) {
+      appliedDurationMonths = RENT_DURATION_PRESETS[duration] || 0;
+    }
+
+    // Create payment record (marked as completed immediately)
+    const payment = new Payment({
+      user: tenant.user || adminId,
+      tenant: tenantId,
+      estate: tenant.estate._id,
+      admin: adminId,
+      paymentType,
+      amount,
+      currency: 'NGN',
+      description: description || `Manual ${paymentType} via ${paymentMethod}`,
+      notes,
+      paymentMethod,
+      paymentStatus: 'completed',
+      paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
+      isDeposit: paymentType === 'deposit',
+      createdBy: adminId,
+      reconciled: true,
+      reconciledDate: new Date(),
+      reconciledBy: adminId
+    });
+
+    await payment.save();
+
+    // 1. Shift Due Date & Update Rent (if applicable)
+    if (appliedDurationMonths > 0 && (paymentType === 'rent' || paymentType === 'service_charge' || paymentType === 'initial' || paymentType === 'bundle')) {
+      const baseDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : (tenant.entryDate || new Date());
+      const newDueDate = new Date(baseDate);
+      newDueDate.setMonth(newDueDate.getMonth() + appliedDurationMonths);
+
+      const oldDueDate = tenant.nextDueDate;
+      tenant.nextDueDate = newDueDate;
+
+      // Logic for rent/service charge updates could be added here if needed
+      // For now, simple shift based on manual entry amount
+
+      tenant.history.push({
+        event: 'payment',
+        note: `Manual Entry: ${paymentType} for ${appliedDurationMonths}m. Due date shifted to ${newDueDate.toISOString().split('T')[0]}`,
+        meta: { duration: appliedDurationMonths, oldDueDate, newDueDate, paymentId: payment._id },
+        createdBy: adminId
+      });
+      await tenant.save({ validateBeforeSave: false });
+    }
+
+    // 2. Distribute funds (50/30/20)
+    try {
+      await distributePayment(tenant.estate._id, amount, payment._id, paymentType);
+    } catch (distError) {
+      logError('Manual payment distribution failure', distError, { paymentId: payment._id });
+    }
+
+    // 3. Create Transaction Record
+    try {
+      await Transaction.create({
+        user: tenant.user || adminId,
+        tenant: tenant._id,
+        estate: tenant.estate._id,
+        amount,
+        type: paymentType,
+        method: paymentMethod,
+        status: 'completed',
+        reference: `MAN-${Date.now()}`,
+        description: payment.description,
+        createdBy: adminId
+      });
+    } catch (txError) {
+      logError('Manual transaction record failure', txError);
+    }
+
+    // 4. Send Receipt (Asynchronously)
+    setImmediate(async () => {
+      try {
+        let wallet = null;
+        if (tenant.user) wallet = await Wallet.findOne({ userId: tenant.user });
+        await sendReceiptEmail(payment, tenant, tenant.estate, wallet);
+      } catch (emailError) {
+        logError('Manual payment receipt failure', emailError);
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Manual payment recorded and processed successfully',
+      data: { paymentId: payment._id }
+    });
+
+  } catch (error) {
+    logError('recordManualPayment error', error);
+    res.status(500).json({ success: false, message: 'Error recording manual payment' });
+  }
+};
+
 module.exports = {
   initiateInitialPayment,
   initiateDepositPayment,
@@ -1074,6 +1314,8 @@ module.exports = {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
+  recordManualPayment,
+  downloadPaymentReceipt,
   refundDeposit,
   sendPaymentReceipt,
   sendTenantReceipt

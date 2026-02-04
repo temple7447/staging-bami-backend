@@ -16,12 +16,19 @@ const {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
+  recordManualPayment,
+  downloadPaymentReceipt,
   refundDeposit,
   sendPaymentReceipt,
   sendTenantReceipt
 } = require('../controllers/paymentController');
 
 const router = express.Router();
+
+// ... existing routes ...
+
+// Download receipt directly
+router.get('/:paymentId/download', protect, handleValidationErrors, downloadPaymentReceipt);
 
 // Payment initiation endpoints
 router.post('/initial', protect, initiateInitialPayment);
@@ -32,8 +39,10 @@ router.post('/security-charge', protect, initiateSecurityChargePayment);
 router.post('/caution-fee', protect, initiateCautionFeePayment);
 router.post('/legal-fee', protect, initiateLegalFeePayment);
 
+// Manual payment recording (Admin only)
+router.post('/manual-record', protect, recordManualPayment);
 // Get payment status
-router.get('/:paymentId', protect, validateObjectId('paymentId'), handleValidationErrors, getPaymentStatus);
+router.get('/:paymentId', protect, handleValidationErrors, getPaymentStatus);
 
 // Get all payments for a tenant
 router.get('/tenant/:tenantId', protect, validateObjectId('tenantId'), handleValidationErrors, getTenantPayments);
@@ -51,12 +60,12 @@ router.post('/callback', (req, res) => {
 router.get('/verify/:reference', verifyPayment);
 
 // Refund deposit
-router.post('/:paymentId/refund', protect, validateObjectId('paymentId'), handleValidationErrors, refundDeposit);
+router.post('/:paymentId/refund', protect, handleValidationErrors, refundDeposit);
 
 // Send receipt email by tenant ID (alternative endpoint) - MUST come before /:paymentId/receipt
 router.post('/tenant/:tenantId/receipt', protect, validateObjectId('tenantId'), handleValidationErrors, sendTenantReceipt);
 
 // Send receipt email by payment ID
-router.post('/:paymentId/receipt', protect, validateObjectId('paymentId'), handleValidationErrors, sendPaymentReceipt);
+router.post('/:paymentId/receipt', protect, handleValidationErrors, sendPaymentReceipt);
 
 module.exports = router;
