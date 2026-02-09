@@ -559,27 +559,6 @@
  *       200:
  *         description: Funds deducted
  *
- * /api/wallet/currency:
- *   put:
- *     summary: Update wallet currency
- *     tags: [Wallet]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - currency
- *             properties:
- *               currency:
- *                 type: string
- *     responses:
- *       200:
- *         description: Currency updated
- *
  * /api/payments/deposit:
  *   post:
  *     summary: Initiate deposit payment

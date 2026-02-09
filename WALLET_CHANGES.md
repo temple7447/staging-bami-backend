@@ -107,13 +107,6 @@ Body: {
 }
 ```
 
-### Update Currency
-```
-PUT /api/wallet/currency
-Headers: Authorization: Bearer {token}
-Body: {
-  "currency": "GBP"  // GBP, USD, or EUR
-}
 ```
 
 ## Currency Support

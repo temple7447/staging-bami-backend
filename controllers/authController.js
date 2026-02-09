@@ -139,6 +139,12 @@ exports.login = async (req, res, next) => {
     // Update last login
     await user.updateLastLogin();
 
+    sendActivityToSlack('User Login Success', {
+      user: user.name || user.email,
+      role: user.role,
+      ip: req.ip || 'N/A'
+    }, '#36a64f', '🔑');
+
     sendTokenResponse(user, 200, res);
   } catch (error) {
     console.error('Login error:', error);

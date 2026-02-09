@@ -9,6 +9,7 @@ const swaggerUi = require('swagger-ui-express');
 
 const connectDatabase = require('./config/database');
 const errorHandler = require('./middleware/error');
+const slackLogger = require('./middleware/slackLogger');
 const { initializeScheduler } = require('./utils/scheduler');
 const { ensureCloudinaryConfigured } = require('./config/cloudinary');
 const { getMailtrapStatus } = require('./utils/emailService');
@@ -103,6 +104,9 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// System-wide Slack activity tracking
+app.use(slackLogger);
 
 // Logging
 if (process.env.NODE_ENV === 'development') {
@@ -271,7 +275,6 @@ const server = app.listen(PORT, () => {
   console.log('   POST   /api/wallet                    - Create wallet');
   console.log('   POST   /api/wallet/add-funds          - Add funds to wallet');
   console.log('   POST   /api/wallet/deduct-funds       - Deduct funds from wallet');
-  console.log('   PUT    /api/wallet/currency           - Update wallet currency');
   console.log('');
   console.log('💳 PAYMENT API ENDPOINTS (Paystack Integration):');
   console.log('   POST   /api/payments/deposit          - Initiate tenant deposit payment');
