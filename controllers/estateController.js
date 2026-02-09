@@ -3,6 +3,7 @@ const Tenant = require('../models/Tenant');
 const Transaction = require('../models/Transaction');
 const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
+const { sendActivityToSlack } = require('../utils/slackService');
 
 // Create estate
 const createEstate = async (req, res) => {
@@ -26,6 +27,12 @@ const createEstate = async (req, res) => {
       totalUnits,
       createdBy: req.user?.id,
     });
+
+    sendActivityToSlack('New Estate Created', {
+      name: estate.name,
+      units: estate.totalUnits,
+      createdBy: req.user.name || req.user.email
+    }, '#439FE0', '🏗️');
 
     res.status(201).json({ success: true, message: 'Estate created successfully', data: estate });
   } catch (err) {
@@ -253,6 +260,11 @@ const deleteEstate = async (req, res) => {
     estate.isActive = false;
     if (req.user?.id) estate.updatedBy = req.user.id;
     await estate.save();
+
+    sendActivityToSlack('Estate Deleted', {
+      name: estate.name,
+      deletedBy: req.user.name || req.user.email
+    }, '#ff0000', '🗑️');
 
     res.status(200).json({ success: true, message: 'Estate deleted successfully' });
   } catch (err) {

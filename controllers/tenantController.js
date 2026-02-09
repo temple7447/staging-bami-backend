@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
+const { sendActivityToSlack } = require('../utils/slackService');
 
 // Generate a random alphanumeric password of given length (at least one letter and one digit)
 function generateTempPassword(len = 6) {
@@ -176,6 +177,14 @@ const createTenant = async (req, res) => {
         console.log('Failed to send tenant welcome email:', e?.message || e);
       }
     }
+
+    sendActivityToSlack('New Tenant Move-In', {
+      tenant: tenant.tenantName,
+      unit: unit.label,
+      estate: estate.name,
+      rent: `₦${tenant.rentAmount.toLocaleString()}`,
+      createdBy: req.user?.name || req.user?.email || 'System'
+    }, '#36a64f', '🏠');
 
     res.status(201).json({ success: true, message: 'Tenant created successfully', data: tenant });
   } catch (err) {

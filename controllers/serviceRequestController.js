@@ -1,6 +1,7 @@
 const ServiceRequest = require('../models/ServiceRequest');
 const Tenant = require('../models/Tenant');
 const { logError } = require('../utils/logger');
+const { sendActivityToSlack } = require('../utils/slackService');
 
 // @desc    Create a service request
 // @route   POST /api/service-requests
@@ -22,6 +23,13 @@ exports.createServiceRequest = async (req, res) => {
             scheduledDate,
             createdBy: req.user.id
         });
+
+        sendActivityToSlack('New Service Request', {
+            requester: req.user.name || req.user.email,
+            type: businessType,
+            description: description,
+            scheduled: scheduledDate ? new Date(scheduledDate).toLocaleDateString() : 'N/A'
+        }, '#439FE0', '🔧');
 
         res.status(201).json({
             success: true,
@@ -122,6 +130,13 @@ exports.updateServiceRequestStatus = async (req, res) => {
         if (vendorNotes && isVendor) request.vendorNotes = vendorNotes;
 
         await request.save();
+
+        sendActivityToSlack('Service Request Updated', {
+            request: request.description.substring(0, 30) + '...',
+            status: status,
+            vendorNotes: vendorNotes || 'None',
+            updatedBy: req.user.name || req.user.email
+        }, status === 'completed' ? '#36a64f' : '#FF9800', '🔄');
 
         res.status(200).json({
             success: true,

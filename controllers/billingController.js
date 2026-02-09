@@ -1,6 +1,7 @@
 const BillingItem = require('../models/BillingItem');
 const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
+const { sendActivityToSlack } = require('../utils/slackService');
 
 // @desc    Create a new billing item for a tenant
 // @route   POST /api/billing/tenants/:tenantId/billing
@@ -30,6 +31,14 @@ exports.createBillingItem = async (req, res) => {
             frequency: frequency || 'once',
             createdBy: req.user.id
         });
+
+        sendActivityToSlack('New Invoice Generated', {
+            tenant: tenant.tenantName,
+            label: billingItem.label,
+            amount: `₦${billingItem.amount.toLocaleString()}`,
+            due: new Date(billingItem.dueDate).toLocaleDateString(),
+            createdBy: req.user.name || req.user.email
+        }, '#FF9800', '📄');
 
         res.status(201).json({
             success: true,

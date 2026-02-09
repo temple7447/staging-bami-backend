@@ -5,6 +5,7 @@ const Transaction = require('../models/Transaction');
 const crypto = require('crypto');
 const { logError } = require('../utils/logger');
 const { createNotification } = require('../utils/notificationService');
+const { sendWithdrawalToSlack } = require('../utils/slackService');
 
 // @desc    Request a withdrawal
 // @route   POST /api/withdrawals/request
@@ -57,6 +58,8 @@ exports.requestWithdrawal = async (req, res) => {
             type: 'withdrawal',
             metadata: { reference, amount }
         });
+
+        sendWithdrawalToSlack(withdrawal, user.email, 'requested');
 
         res.status(201).json({
             success: true,
@@ -162,6 +165,11 @@ exports.updateWithdrawalStatus = async (req, res) => {
             type: 'withdrawal',
             metadata: { reference: withdrawal.reference, status, adminNotes }
         });
+
+        const user = await User.findById(withdrawal.user);
+        if (user) {
+            sendWithdrawalToSlack(withdrawal, user.email, status);
+        }
 
         res.status(200).json({
             success: true,

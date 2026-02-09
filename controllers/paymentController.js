@@ -11,6 +11,7 @@ const paystackService = require('../utils/paystackService');
 const { distributePayment } = require('../utils/distributionService');
 const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
 const { logError, logInfo } = require('../utils/logger');
+const { sendTransactionToSlack } = require('../utils/slackService');
 
 // Supported duration presets for rent payments
 const RENT_DURATION_PRESETS = {
@@ -830,6 +831,7 @@ const verifyPayment = async (req, res) => {
           createdBy: payment.admin?._id || payment.tenant?._id || payment.createdBy
         });
         logInfo(`📝 Transaction record created for payment ${reference}`);
+        sendTransactionToSlack(payment, payment.tenant.tenantName, payment.estate.name);
       } catch (txError) {
         logError('Failed to create Transaction record in verifyPayment', txError, { paymentId: payment._id });
       }
@@ -1289,6 +1291,8 @@ const recordManualPayment = async (req, res) => {
         logError('Manual payment receipt failure', emailError);
       }
     });
+
+    sendTransactionToSlack(payment, tenant.tenantName, tenant.estate ? tenant.estate.name : 'N/A');
 
     res.status(201).json({
       success: true,

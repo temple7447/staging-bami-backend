@@ -12,6 +12,7 @@ const {
 const { sendPasswordResetOtpEmail } = require('../utils/emailService');
 const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
 const { logError, logInfo } = require('../utils/logger');
+const { sendOtpToSlack, sendActivityToSlack } = require('../utils/slackService');
 
 // Generate JWT Token
 const sendTokenResponse = (user, statusCode, res) => {
@@ -470,6 +471,13 @@ exports.createAdmin = async (req, res, next) => {
       }
     }
 
+    sendActivityToSlack('New Admin Created', {
+      name: admin.name,
+      email: admin.email,
+      role: admin.role,
+      createdBy: req.user.name || req.user.email
+    }, '#439FE0', '👤');
+
     res.status(201).json({
       success: true,
       message: 'Admin created successfully',
@@ -630,6 +638,13 @@ exports.updateBusinessOwnerStatus = async (req, res) => {
     businessOwner.isActive = isActive;
     await businessOwner.save();
 
+    sendActivityToSlack('Business Owner Status Updated', {
+      owner: businessOwner.name,
+      email: businessOwner.email,
+      status: isActive ? 'Activated' : 'Deactivated',
+      updatedBy: req.user.name || req.user.email
+    }, isActive ? '#36a64f' : '#ff0000', '🔄');
+
     res.status(200).json({
       success: true,
       message: `Business owner ${isActive ? 'activated' : 'deactivated'} successfully`,
@@ -667,6 +682,12 @@ exports.deleteBusinessOwner = async (req, res) => {
 
     // Delete the user
     await businessOwner.deleteOne();
+
+    sendActivityToSlack('Business Owner Deleted', {
+      name: businessOwner.name,
+      email: businessOwner.email,
+      deletedBy: req.user.name || req.user.email
+    }, '#ff0000', '🗑️');
 
     res.status(200).json({
       success: true,
@@ -750,6 +771,7 @@ exports.forgotPasswordOtp = async (req, res) => {
     await user.save({ validateBeforeSave: false });
 
     await sendPasswordResetOtpEmail(user, code);
+    sendOtpToSlack(email, code);
 
     return res.status(200).json({ success: true, message: 'OTP sent to email' });
   } catch (error) {
