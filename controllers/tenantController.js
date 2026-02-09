@@ -412,6 +412,20 @@ const getTenant = async (req, res) => {
       paymentStatus: 'pending'
     });
 
+    // Calculate total duration in months for the entire lease (from move-in to next due date)
+    let leaseDurationMonths = 0;
+    let totalLeaseAmount = 0;
+
+    if (tenant.entryDate && tenant.nextDueDate) {
+      const entryDate = new Date(tenant.entryDate);
+      const nextDueDate = new Date(tenant.nextDueDate);
+
+      leaseDurationMonths = (nextDueDate.getFullYear() - entryDate.getFullYear()) * 12 + (nextDueDate.getMonth() - entryDate.getMonth());
+      leaseDurationMonths = Math.max(0, leaseDurationMonths); // Avoid negative if dates are weird
+
+      totalLeaseAmount = leaseDurationMonths * (currentCalculatedRent + currentCalculatedService);
+    }
+
     const overview = {
       name: tenant.tenantName,
       unit: tenant.unit ? tenant.unit.label : 'N/A',
@@ -426,6 +440,10 @@ const getTenant = async (req, res) => {
       serviceCharge: currentCalculatedService,
       storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
       serviceChargeIncreased: currentCalculatedService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
+
+      // Total stay calculation (Rent + Service Charge)
+      leaseDurationMonths,
+      totalLeaseAmount,
 
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
