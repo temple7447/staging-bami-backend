@@ -213,7 +213,10 @@ const getTenants = async (req, res) => {
     const quarter = req.params.quarter || req.query.quarter;
 
     const filter = { isActive: true };
-    if (estateId) filter.estate = estateId;
+    if (estateId) {
+      const mongoose = require('mongoose');
+      filter.estate = new mongoose.Types.ObjectId(estateId);
+    }
     if (search) filter.$or = [
       { tenantName: new RegExp(search, 'i') },
       { tenantEmail: new RegExp(search, 'i') },
@@ -225,94 +228,29 @@ const getTenants = async (req, res) => {
     const isQuarterlyView = view === 'quarterly';
     const isValidQuarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(requestedQuarter);
 
-    if (isQuarterlyView || isValidQuarter) {
-      const now = new Date();
-      const year = yearParam ? parseInt(yearParam, 10) : now.getFullYear();
-
-      if (!Number.isInteger(year)) {
-        return res.status(400).json({ success: false, message: 'Invalid year parameter' });
-      }
-
+    // Date range filtering (Year/Quarter)
+    const year = yearParam ? parseInt(yearParam, 10) : null;
+    if (year || isValidQuarter || isQuarterlyView) {
+      const targetYear = year || new Date().getFullYear();
       let startDate, endDate;
+
       if (isValidQuarter) {
-        // Filter by specific quarter
         const qIndex = parseInt(requestedQuarter.substring(1)) - 1;
-        startDate = new Date(year, qIndex * 3, 1);
-        endDate = new Date(year, (qIndex + 1) * 3, 1);
+        startDate = new Date(targetYear, qIndex * 3, 1);
+        endDate = new Date(targetYear, (qIndex + 1) * 3, 1);
       } else {
-        // Default to whole year for view=quarterly
-        startDate = new Date(year, 0, 1);
-        endDate = new Date(year + 1, 0, 1);
+        startDate = new Date(targetYear, 0, 1);
+        endDate = new Date(targetYear + 1, 0, 1);
       }
 
-      // Add date range to filter
       filter.nextDueDate = { $gte: startDate, $lt: endDate };
       filter.status = { $in: ['occupied', 'pending'] };
-
-      const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount nextDueDate status unitLabel')
-        .populate('unit', 'label')
-        .sort({ nextDueDate: 1 });
-
-      const quarters = {
-        Q1: { Jan: [], Feb: [], Mar: [] },
-        Q2: { Apr: [], May: [], Jun: [] },
-        Q3: { Jul: [], Aug: [], Sep: [] },
-        Q4: { Oct: [], Nov: [], Dec: [] },
-      };
-
-      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      let totalMonthlyRent = 0;
-
-      tenants.forEach(tenant => {
-        const date = new Date(tenant.nextDueDate);
-        const monthIndex = date.getMonth();
-        const monthName = monthNames[monthIndex];
-        const quarterNum = Math.floor(monthIndex / 3) + 1;
-        const qKey = `Q${quarterNum}`;
-
-        if (quarters[qKey] && quarters[qKey][monthName]) {
-          quarters[qKey][monthName].push(tenant);
-          totalMonthlyRent += tenant.rentAmount || 0;
-        }
-      });
-
-      const responseData = isValidQuarter ? quarters[requestedQuarter] : quarters;
-
-      return res.status(200).json({
-        success: true,
-        data: responseData,
-        meta: {
-          year,
-          quarter: requestedQuarter || 'ALL',
-          estateId: estateId || null,
-          view: isValidQuarter ? 'single_quarter' : 'quarterly'
-        },
-        summary: {
-          tenantCount: tenants.length,
-          totalMonthlyRent,
-          totalQuarterRent: totalMonthlyRent * 3, // Estimated total for the 3-month window
-          currency: 'NGN' // Default currency
-        }
-      });
     }
 
-    // Default: Paginated list
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [items, total] = await Promise.all([
-      Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount nextDueDate status tenantType unitLabel createdAt')
-        .populate('estate', 'name')
-        .populate('unit', 'label monthlyPrice')
-        .sort({ nextDueDate: 1, createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean(),
-      Tenant.countDocuments(filter)
-    ]);
-
     const { getCurrentRent } = require('../utils/rentCalculator');
-    const processedItems = items.map(tenant => {
+
+    // Helper to process tenant and add fees/metadata
+    const processTenant = (tenant) => {
       const currentPrice = getCurrentRent(
         tenant.baseRent2024 || tenant.rentAmount,
         tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
@@ -325,18 +263,130 @@ const getTenants = async (req, res) => {
         false // Occupied
       );
 
+      const totalMonthlyFees = currentPrice + currentService;
+
+      const dueDate = new Date(tenant.nextDueDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffTime = dueDate - today;
+      const daysUntilDue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      let statusColor = '#4caf50'; // Green (Safe)
+      if (daysUntilDue < 0) {
+        statusColor = '#ff0000'; // Red (Overdue)
+      } else if (daysUntilDue <= 7) {
+        statusColor = '#ff9800'; // Orange (Due Soon)
+      }
+
       return {
         ...tenant,
         currentEffectiveRent: currentPrice,
         isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount),
         currentEffectiveService: currentService,
-        isServiceIncreased: currentService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0)
+        isServiceIncreased: currentService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
+        totalMonthlyFees,
+        daysUntilDue,
+        statusColor,
+        unitReference: tenant.unitLabel || (tenant.unit?.label || 'N/A')
       };
-    });
+    };
+
+    if (isQuarterlyView || isValidQuarter) {
+      const tenants = await Tenant.find(filter)
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate')
+        .populate('unit', 'label serviceChargeMonthly')
+        .sort({ nextDueDate: 1 })
+        .lean();
+
+      const quarters = {
+        Q1: { Jan: [], Feb: [], Mar: [] },
+        Q2: { Apr: [], May: [], Jun: [] },
+        Q3: { Jul: [], Aug: [], Sep: [] },
+        Q4: { Oct: [], Nov: [], Dec: [] },
+      };
+
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let totalMonthlyRent = 0;
+
+      tenants.forEach(tenant => {
+        const processed = processTenant(tenant);
+        const date = new Date(tenant.nextDueDate);
+        const monthIndex = date.getMonth();
+        const monthName = monthNames[monthIndex];
+        const quarterNum = Math.floor(monthIndex / 3) + 1;
+        const qKey = `Q${quarterNum}`;
+
+        if (quarters[qKey] && quarters[qKey][monthName]) {
+          quarters[qKey][monthName].push(processed);
+          totalMonthlyRent += processed.totalMonthlyFees;
+        }
+      });
+
+      const responseData = isValidQuarter ? quarters[requestedQuarter] : quarters;
+
+      return res.status(200).json({
+        success: true,
+        data: responseData,
+        meta: {
+          year: year || new Date().getFullYear(),
+          quarter: requestedQuarter || 'ALL',
+          estateId: estateId || null,
+          view: isValidQuarter ? 'single_quarter' : 'quarterly'
+        },
+        summary: {
+          tenantCount: tenants.length,
+          totalMonthlyRent,
+          totalYearlyRent: totalMonthlyRent * 12,
+          currency: 'NGN'
+        }
+      });
+    }
+
+    // Default: Paginated list
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Add summary calculation for the flat list
+    const [items, total, stats] = await Promise.all([
+      Tenant.find(filter)
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate')
+        .populate('estate', 'name')
+        .populate('unit', 'label monthlyPrice serviceChargeMonthly')
+        .sort({ nextDueDate: 1, createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Tenant.countDocuments(filter),
+      Tenant.aggregate([
+        { $match: filter },
+        {
+          $group: {
+            _id: null,
+            totalRent: { $sum: '$rentAmount' },
+            totalService: { $sum: '$serviceChargeAmount' },
+            count: { $sum: 1 }
+          }
+        }
+      ])
+    ]);
+
+    const processedItems = items.map(tenant => processTenant(tenant));
+    const summaryData = stats[0] || { totalRent: 0, totalService: 0, count: 0 };
+    const totalMonthlyRent = summaryData.totalRent + summaryData.totalService;
 
     res.status(200).json({
-      success: true, data: processedItems, pagination: {
-        currentPage: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)), totalItems: total, itemsPerPage: parseInt(limit)
+      success: true,
+      data: processedItems,
+      summary: {
+        totalItems: summaryData.count,
+        totalMonthlyRent: totalMonthlyRent,
+        totalYearlyRent: totalMonthlyRent * 12,
+        currency: 'NGN'
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total,
+        itemsPerPage: parseInt(limit)
       }
     });
   } catch (err) {

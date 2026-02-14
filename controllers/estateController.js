@@ -216,28 +216,88 @@ const getEstateOverview = async (req, res) => {
     }
     // Super admin has access to all estates
 
-    const [occupiedCount, tenantsDueSoon, last30RevenueAgg] = await Promise.all([
+    const { getWalletBalance } = require('../utils/distributionService');
+    const { getCurrentRent } = require('../utils/rentCalculator');
+
+    // Get basic stats and wallet balance
+    const [occupiedCount, tenantsDueSoon, last30RevenueAgg, walletBalance, allActiveTenants] = await Promise.all([
       Tenant.countDocuments({ estate: estate._id, isActive: true, status: { $in: ['occupied', 'pending'] } }),
       Tenant.countDocuments({ estate: estate._id, isActive: true, nextDueDate: { $gte: new Date(), $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } }),
       Transaction.aggregate([
         { $match: { estate: estate._id, isActive: true, status: 'paid', createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } },
-        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
-      ])
+        { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]),
+      getWalletBalance(estate._id),
+      Tenant.find({ estate: estate._id, isActive: true, status: { $in: ['occupied', 'pending'] } })
+        .select('rentAmount serviceChargeAmount baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate unit')
+        .populate('unit', 'serviceChargeMonthly')
     ]);
+
+    // Calculate Potential Revenue (Projections)
+    let potentialMonthlyRevenue = 0;
+    allActiveTenants.forEach(tenant => {
+      const currentPrice = getCurrentRent(
+        tenant.baseRent2024 || tenant.rentAmount,
+        tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false
+      );
+      const currentService = getCurrentRent(
+        tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+        tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false
+      );
+      potentialMonthlyRevenue += (currentPrice + currentService);
+    });
+
+    // Breakdown income by category
+    const incomeByCategory = {};
+    let total30dRevenue = 0;
+    let total30dTxCount = 0;
+
+    last30RevenueAgg.forEach(item => {
+      incomeByCategory[item._id] = item.total;
+      total30dRevenue += item.total;
+      total30dTxCount += item.count;
+    });
 
     const totalUnits = estate.totalUnits || 0;
     const occupiedUnits = occupiedCount;
     const vacantUnits = Math.max(totalUnits - occupiedUnits, 0);
 
-    const revenue30 = last30RevenueAgg[0]?.total || 0;
-    const txCount30 = last30RevenueAgg[0]?.count || 0;
-
     return res.status(200).json({
       success: true,
       data: {
-        estate: { _id: estate._id, name: estate.name, totalUnits, createdAt: estate.createdAt },
-        occupancy: { totalUnits, occupiedUnits, vacantUnits, occupancyRate: totalUnits > 0 ? occupiedUnits / totalUnits : 0 },
-        billing: { upcomingDueCount: tenantsDueSoon, last30d: { revenue: revenue30, transactions: txCount30 } }
+        estate: {
+          _id: estate._id,
+          name: estate.name,
+          totalUnits,
+          createdAt: estate.createdAt
+        },
+        occupancy: {
+          totalUnits,
+          occupiedUnits,
+          vacantUnits,
+          occupancyRate: totalUnits > 0 ? (occupiedUnits / totalUnits) * 100 : 0
+        },
+        projections: {
+          monthly: potentialMonthlyRevenue,
+          yearly: potentialMonthlyRevenue * 12,
+          currency: 'NGN'
+        },
+        wallets: {
+          marketing: walletBalance.marketing.balance,
+          operations: walletBalance.operations.balance,
+          owner: walletBalance.owner.balance,
+          totalAvailable: walletBalance.totalBalance
+        },
+        billing: {
+          upcomingDueCount: tenantsDueSoon,
+          last30d: {
+            revenue: total30dRevenue,
+            transactions: total30dTxCount,
+            breakdown: incomeByCategory
+          }
+        }
       }
     });
   } catch (err) {
