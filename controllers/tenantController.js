@@ -92,10 +92,35 @@ const createTenant = async (req, res) => {
     const parsedEntryDate = parseFlexibleDate(entryDate);
     const parsedNextDueDate = parseFlexibleDate(nextDueDate);
 
-    // Optionally accept durationMonths to auto-calculate nextDueDate
-    const durationMonths = req.body?.durationMonths != null
+    // Enforce 1-year contract for new tenants
+    let durationMonths = req.body?.durationMonths != null
       ? parseInt(req.body.durationMonths, 10)
       : undefined;
+
+    const isNewTenant = !tenantType || tenantType === 'new';
+
+    if (isNewTenant) {
+      if (durationMonths === undefined) {
+        durationMonths = 12; // Auto-set to 1 year for new tenants
+      } else if (durationMonths < 12) {
+        return res.status(400).json({
+          success: false,
+          message: 'All new apartments must be on a 1-year contract. Minimum 12 months payment required.'
+        });
+      }
+    } else {
+      // For existing/old tenants, we still want a valid duration if provided
+      if (durationMonths !== undefined && durationMonths < 6) {
+        return res.status(400).json({ success: false, message: 'Minimum 6 months payment required for renewals.' });
+      }
+    }
+
+    if (durationMonths !== undefined && durationMonths > 12) {
+      return res.status(400).json({
+        success: false,
+        message: 'The system does not accept payments for more than 12 months (1 year).'
+      });
+    }
 
     let effectiveNextDueDate = parsedNextDueDate;
     if (Number.isInteger(durationMonths) && durationMonths > 0) {
@@ -157,6 +182,11 @@ const createTenant = async (req, res) => {
       nextDueDate: effectiveNextDueDate,
       status: 'occupied',
       user: userId,
+      // Global 26% increase rule fields
+      baseCaution2024: unit.baseCaution2024 || unit.cautionFee || 0,
+      lastCautionIncreaseDate: unit.lastCautionIncreaseDate || startForIncrease,
+      baseLegal2024: unit.baseLegal2024 || unit.legalFee || 0,
+      lastLegalIncreaseDate: unit.lastLegalIncreaseDate || startForIncrease,
       history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice, serviceCharge: unit.serviceChargeMonthly }, createdBy: req.user?._id }],
       createdBy: req.user?._id,
     });
@@ -263,6 +293,18 @@ const getTenants = async (req, res) => {
         false // Occupied
       );
 
+      const currentCaution = getCurrentRent(
+        tenant.baseCaution2024 || 0,
+        tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false // Occupied
+      );
+
+      const currentLegal = getCurrentRent(
+        tenant.baseLegal2024 || 0,
+        tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+        false // Occupied
+      );
+
       const totalMonthlyFees = currentPrice + currentService;
 
       const dueDate = new Date(tenant.nextDueDate);
@@ -284,6 +326,10 @@ const getTenants = async (req, res) => {
         isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount),
         currentEffectiveService: currentService,
         isServiceIncreased: currentService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
+        currentEffectiveCaution: currentCaution,
+        isCautionIncreased: currentCaution > (tenant.baseCaution2024 || 0),
+        currentEffectiveLegal: currentLegal,
+        isLegalIncreased: currentLegal > (tenant.baseLegal2024 || 0),
         totalMonthlyFees,
         daysUntilDue,
         statusColor,

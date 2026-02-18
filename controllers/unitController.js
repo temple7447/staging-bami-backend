@@ -98,9 +98,19 @@ const createUnit = async (req, res) => {
       bathrooms,
       area,
       amenities,
+      amenities,
       streetAddress,
       images,
-      createdBy: adminId
+      createdBy: adminId,
+      // Initialize base pricing for 26% rule
+      basePrice2024: monthlyPrice,
+      lastRentIncreaseDate: new Date(),
+      baseServiceCharge2024: sc != null ? sc : 0,
+      lastServiceIncreaseDate: new Date(),
+      baseCaution2024: cf != null ? cf : 0,
+      lastCautionIncreaseDate: new Date(),
+      baseLegal2024: lf != null ? lf : 0,
+      lastLegalIncreaseDate: new Date()
     });
 
     await unit.save();
@@ -208,6 +218,16 @@ const getEstateUnits = async (req, res) => {
           serviceChargeMonthly: unit.serviceChargeMonthly,
           currentEffectiveService: currentService,
           isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+          currentEffectiveCaution: getCurrentRent(
+            unit.baseCaution2024 || unit.cautionFee || 0,
+            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ),
+          currentEffectiveLegal: getCurrentRent(
+            unit.baseLegal2024 || unit.legalFee || 0,
+            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ),
           meterNumber: unit.meterNumber,
           description: unit.description,
           cautionFee: unit.cautionFee,
@@ -298,6 +318,16 @@ const getVacantUnits = async (req, res) => {
           serviceChargeMonthly: unit.serviceChargeMonthly,
           currentEffectiveService: currentService,
           isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+          currentEffectiveCaution: getCurrentRent(
+            unit.baseCaution2024 || unit.cautionFee || 0,
+            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ),
+          currentEffectiveLegal: getCurrentRent(
+            unit.baseLegal2024 || unit.legalFee || 0,
+            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ),
           meterNumber: unit.meterNumber,
           status: unit.status,
           description: unit.description,
@@ -356,6 +386,16 @@ const getUnitDetails = async (req, res) => {
         serviceChargeMonthly: unit.serviceChargeMonthly,
         currentEffectiveService: currentService,
         isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+        currentEffectiveCaution: getCurrentRent(
+          unit.baseCaution2024 || unit.cautionFee || 0,
+          unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          isVacant
+        ),
+        currentEffectiveLegal: getCurrentRent(
+          unit.baseLegal2024 || unit.legalFee || 0,
+          unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          isVacant
+        ),
         meterNumber: unit.meterNumber,
         description: unit.description,
         serviceChargeMonthly: unit.serviceChargeMonthly,
@@ -453,10 +493,51 @@ const updateUnit = async (req, res) => {
       });
     }
 
-    if (mp != null) unit.monthlyPrice = mp;
-    if (sc != null) unit.serviceChargeMonthly = sc;
-    if (cf != null) unit.cautionFee = cf;
-    if (lf != null) unit.legalFee = lf;
+    // CASCADE 26% increase if unit is vacant and prices change
+    if (unit.status === 'vacant' && (mp != null || sc != null || cf != null || lf != null)) {
+      const INCREASE_RATE = 1.26;
+
+      // If rent changed, and other fields didn't, apply 26% to others
+      // If any field changed, we treat it as a "price refresh" for the vacant unit
+      if (mp == null) unit.monthlyPrice = Math.round(unit.monthlyPrice * INCREASE_RATE);
+      if (sc == null) unit.serviceChargeMonthly = Math.round((unit.serviceChargeMonthly || 0) * INCREASE_RATE);
+      if (cf == null) unit.cautionFee = Math.round((unit.cautionFee || 0) * INCREASE_RATE);
+      if (lf == null) unit.legalFee = Math.round((unit.legalFee || 0) * INCREASE_RATE);
+
+      // System rule: resetting the base after a manual/cascade increase
+      unit.basePrice2024 = unit.monthlyPrice;
+      unit.lastRentIncreaseDate = new Date();
+      unit.baseServiceCharge2024 = unit.serviceChargeMonthly;
+      unit.lastServiceIncreaseDate = new Date();
+      unit.baseCaution2024 = unit.cautionFee;
+      unit.lastCautionIncreaseDate = new Date();
+      unit.baseLegal2024 = unit.legalFee;
+      unit.lastLegalIncreaseDate = new Date();
+
+      logInfo(`Applied 26% cascade increase to vacant unit ${unitId}`);
+    } else {
+      // Normal application of values if provided
+      if (mp != null) {
+        unit.monthlyPrice = mp;
+        unit.basePrice2024 = mp;
+        unit.lastRentIncreaseDate = new Date();
+      }
+      if (sc != null) {
+        unit.serviceChargeMonthly = sc;
+        unit.baseServiceCharge2024 = sc;
+        unit.lastServiceIncreaseDate = new Date();
+      }
+      if (cf != null) {
+        unit.cautionFee = cf;
+        unit.baseCaution2024 = cf;
+        unit.lastCautionIncreaseDate = new Date();
+      }
+      if (lf != null) {
+        unit.legalFee = lf;
+        unit.baseLegal2024 = lf;
+        unit.lastLegalIncreaseDate = new Date();
+      }
+    }
 
     if (meterNumber !== undefined) unit.meterNumber = meterNumber;
     if (description !== undefined) unit.description = description;

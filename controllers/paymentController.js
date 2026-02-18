@@ -61,6 +61,29 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
           if (presetMonths) appliedDurationMonths = presetMonths;
         }
 
+        // ENFORCE CONTRACT RULES
+        if (appliedDurationMonths) {
+          const isNewTenant = tenant.tenantType === 'new';
+          if (isNewTenant && appliedDurationMonths < 12) {
+            return res.status(400).json({
+              success: false,
+              message: 'New tenants must pay for at least 12 months (1-year contract).'
+            });
+          }
+          if (!isNewTenant && appliedDurationMonths < 6) {
+            return res.status(400).json({
+              success: false,
+              message: 'Renewal payments must be for at least 6 months.'
+            });
+          }
+          if (appliedDurationMonths > 12) {
+            return res.status(400).json({
+              success: false,
+              message: 'The system does not accept payments for more than 12 months (1 year).'
+            });
+          }
+        }
+
         // If we have a valid duration, compute amount from tenant's monthly rent/service
         if (appliedDurationMonths) {
           const { calculateEffectiveRent } = require('../utils/rentCalculator');
@@ -108,6 +131,19 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
             req.body._finalServiceAmount = serviceFinal;
           }
         }
+      }
+
+      // 3. Handle Caution and Legal Fees (Anniversary increase)
+      if (paymentType === 'caution_fee') {
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const base = tenant.baseCaution2024 || 0;
+        const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
+        amount = getCurrentRent(base, origin, false);
+      } else if (paymentType === 'legal_fee') {
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const base = tenant.baseLegal2024 || 0;
+        const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
+        amount = getCurrentRent(base, origin, false);
       }
 
       // Final amount validation (for all payment types)
@@ -302,7 +338,42 @@ const initiateInitialPayment = async (req, res) => {
       }
 
       let itemAmount = parseFloat(item.amount);
-      const duration = item.duration ? parseInt(item.duration) : 1;
+      let duration = item.duration ? parseInt(item.duration) : 1;
+
+      // Apply dynamic 26% increase rule to ALL items based on anniversaries
+      const { getCurrentRent } = require('../utils/rentCalculator');
+      if (item.type === 'rent') {
+        itemAmount = getCurrentRent(tenant.baseRent2024 || itemAmount, tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+      } else if (item.type === 'service_charge') {
+        itemAmount = getCurrentRent(tenant.baseServiceCharge2024 || itemAmount, tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+      } else if (item.type === 'caution_fee') {
+        itemAmount = getCurrentRent(tenant.baseCaution2024 || itemAmount, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+      } else if (item.type === 'legal_fee') {
+        itemAmount = getCurrentRent(tenant.baseLegal2024 || itemAmount, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+      }
+
+      // ENFORCE CONTRACT RULES for Rent and Service Charge
+      if (['rent', 'service_charge'].includes(item.type)) {
+        const isNewTenant = tenant.tenantType === 'new';
+        if (isNewTenant && duration < 12) {
+          return res.status(400).json({
+            success: false,
+            message: `New tenants must pay at least 12 months for ${item.type === 'rent' ? 'Rent' : 'Service Charge'}.`
+          });
+        }
+        if (!isNewTenant && duration < 6) {
+          return res.status(400).json({
+            success: false,
+            message: `Renewal payments for ${item.type === 'rent' ? 'Rent' : 'Service Charge'} must be at least 6 months.`
+          });
+        }
+        if (duration > 12) {
+          return res.status(400).json({
+            success: false,
+            message: 'The system does not accept payments for more than 12 months (1 year).'
+          });
+        }
+      }
 
       // Apply duration multiplier for recurring items
       if (['rent', 'service_charge'].includes(item.type) && duration > 1) {
@@ -1210,6 +1281,29 @@ const recordManualPayment = async (req, res) => {
       appliedDurationMonths = parseInt(durationMonths, 10);
     } else if (duration) {
       appliedDurationMonths = RENT_DURATION_PRESETS[duration] || 0;
+    }
+
+    // ENFORCE CONTRACT RULES for Rent and Service Charge
+    if (['rent', 'service_charge'].includes(paymentType) && appliedDurationMonths > 0) {
+      const isNewTenant = tenant.tenantType === 'new';
+      if (isNewTenant && appliedDurationMonths < 12) {
+        return res.status(400).json({
+          success: false,
+          message: 'All new apartments must be on a 1-year contract. Minimum 12 months manual payment required.'
+        });
+      }
+      if (!isNewTenant && appliedDurationMonths < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'Manual renewal payments must be for at least 6 months.'
+        });
+      }
+      if (appliedDurationMonths > 12) {
+        return res.status(400).json({
+          success: false,
+          message: 'The system does not accept payments for more than 12 months (1 year).'
+        });
+      }
     }
 
     // Create payment record (marked as completed immediately)

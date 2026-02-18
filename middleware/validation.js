@@ -86,7 +86,7 @@ const validateTenantCreate = [
   // Billing period length in months (if provided, nextDueDate will be auto-calculated)
   check('durationMonths')
     .optional()
-    .isInt({ min: 1, max: 60 }).withMessage('durationMonths must be a positive integer between 1 and 60')
+    .isInt({ min: 1, max: 12 }).withMessage('durationMonths must be between 1 and 12')
     .toInt(),
 ];
 
@@ -133,11 +133,11 @@ const validateHistoryCreate = [
 const validateShiftDueDate = [
   check('rentMonths')
     .optional()
-    .isInt({ min: 1, max: 60 }).withMessage('Rent months must be between 1 and 60')
+    .isInt({ min: 1, max: 12 }).withMessage('Rent months must be between 1 and 12')
     .toInt(),
   check('serviceMonths')
     .optional()
-    .isInt({ min: 1, max: 60 }).withMessage('Service months must be between 1 and 60')
+    .isInt({ min: 1, max: 12 }).withMessage('Service months must be between 1 and 12')
     .toInt(),
   body().custom((value, { req }) => {
     if (!req.body.rentMonths && !req.body.serviceMonths) {

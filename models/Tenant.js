@@ -103,6 +103,18 @@ const TenantSchema = new mongoose.Schema({
     type: Number,
     description: 'Service Charge as of Jan 1, 2024 or entry date'
   },
+  lastCautionIncreaseDate: {
+    type: Date
+  },
+  baseCaution2024: {
+    type: Number
+  },
+  lastLegalIncreaseDate: {
+    type: Date
+  },
+  baseLegal2024: {
+    type: Number
+  },
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'
