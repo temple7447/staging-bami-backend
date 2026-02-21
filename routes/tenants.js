@@ -37,7 +37,7 @@ const {
 
 // List tenants (optionally filter by estateId)
 router.get('/', protect, getTenants);
-router.get('/:quarter(Q[1-4])', protect, getTenants); // Path param for quarters
+router.get('/:quarter(Q[1-4]|6_months)', protect, getTenants); // Path param for quarters/periods
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
 
 // Special routes (must be before /:id routes)

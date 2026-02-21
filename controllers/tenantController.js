@@ -253,18 +253,22 @@ const getTenants = async (req, res) => {
       { tenantPhone: new RegExp(search, 'i') },
     ];
 
-    // If quarterly view OR specific quarter is requested, return the grouped breakdown
     const requestedQuarter = quarter ? quarter.toUpperCase() : null;
-    const isQuarterlyView = view === 'quarterly';
+    const isExtendedPeriod = requestedQuarter === '6_MONTHS';
     const isValidQuarter = ['Q1', 'Q2', 'Q3', 'Q4'].includes(requestedQuarter);
+    const isQuarterlyView = view === 'quarterly' || (isValidQuarter && !isExtendedPeriod);
 
-    // Date range filtering (Year/Quarter)
+    // Date range filtering (Year/Quarter/Extended Period)
     const year = yearParam ? parseInt(yearParam, 10) : null;
-    if (year || isValidQuarter || isQuarterlyView) {
-      const targetYear = year || new Date().getFullYear();
+    if (year || isValidQuarter || isQuarterlyView || isExtendedPeriod) {
+      const now = new Date();
+      const targetYear = year || now.getFullYear();
       let startDate, endDate;
 
-      if (isValidQuarter) {
+      if (requestedQuarter === '6_MONTHS') {
+        startDate = now;
+        endDate = new Date(now.getTime() + 180 * 24 * 60 * 60 * 1000);
+      } else if (isValidQuarter) {
         const qIndex = parseInt(requestedQuarter.substring(1)) - 1;
         startDate = new Date(targetYear, qIndex * 3, 1);
         endDate = new Date(targetYear, (qIndex + 1) * 3, 1);
@@ -382,6 +386,7 @@ const getTenants = async (req, res) => {
         summary: {
           tenantCount: tenants.length,
           totalMonthlyRent,
+          total6MonthsRent: totalMonthlyRent * 6,
           totalYearlyRent: totalMonthlyRent * 12,
           currency: 'NGN'
         }
@@ -425,6 +430,7 @@ const getTenants = async (req, res) => {
       summary: {
         totalItems: summaryData.count,
         totalMonthlyRent: totalMonthlyRent,
+        total6MonthsRent: totalMonthlyRent * 6,
         totalYearlyRent: totalMonthlyRent * 12,
         currency: 'NGN'
       },

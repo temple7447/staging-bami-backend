@@ -33,7 +33,7 @@ const router = express.Router();
  *         name: period
  *         schema:
  *           type: string
- *           enum: [today, week, month, quarter, year, custom]
+ *           enum: [today, week, month, quarter, year, custom, Q1, Q2, Q3, Q4, 6_months]
  *         description: Predefined time period
  *       - in: query
  *         name: year
@@ -210,6 +210,34 @@ router.post('/', protect, validateEstateCreate, handleValidationErrors, async (r
  *         required: true
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: period
+ *         schema:
+ *           type: string
+ *           enum: [today, week, month, quarter, year, custom, Q1, Q2, Q3, Q4, 6_months]
+ *         description: Predefined time period
+ *       - in: query
+ *         name: year
+ *         schema:
+ *           type: integer
+ *         description: Specific year
+ *       - in: query
+ *         name: month
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 12
+ *         description: Specific month
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
  *     responses:
  *       200:
  *         description: Estate overview with occupancy and billing info

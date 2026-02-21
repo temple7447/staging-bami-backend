@@ -216,15 +216,84 @@ const getEstateOverview = async (req, res) => {
     }
     // Super admin has access to all estates
 
+    const {
+      period, year, month, startDate, endDate
+    } = req.query;
+
+    const now = new Date();
+    let filterStartDate, filterEndDate;
+
+    // Calculate date range based on period filter (Same as overall overview)
+    if (year || month) {
+      const targetYear = year ? parseInt(year) : now.getFullYear();
+      const targetMonth = month ? parseInt(month) - 1 : 0;
+      if (month) {
+        filterStartDate = new Date(targetYear, targetMonth, 1);
+        filterEndDate = new Date(targetYear, targetMonth + 1, 0, 23, 59, 59, 999);
+      } else {
+        filterStartDate = new Date(targetYear, 0, 1);
+        filterEndDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+      }
+    } else if (period === 'custom' && startDate && endDate) {
+      filterStartDate = new Date(startDate);
+      filterEndDate = new Date(endDate);
+      filterEndDate.setHours(23, 59, 59, 999);
+    } else {
+      const targetYear = year ? parseInt(year) : now.getFullYear();
+      switch (period) {
+        case 'today':
+          filterStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          filterEndDate = now;
+          break;
+        case 'week':
+          filterStartDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+        case 'quarter':
+          filterStartDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+        case 'Q1':
+          filterStartDate = new Date(targetYear, 0, 1);
+          filterEndDate = new Date(targetYear, 2, 31, 23, 59, 59, 999);
+          break;
+        case 'Q2':
+          filterStartDate = new Date(targetYear, 3, 1);
+          filterEndDate = new Date(targetYear, 5, 30, 23, 59, 59, 999);
+          break;
+        case 'Q3':
+          filterStartDate = new Date(targetYear, 6, 1);
+          filterEndDate = new Date(targetYear, 8, 30, 23, 59, 59, 999);
+          break;
+        case 'Q4':
+          filterStartDate = new Date(targetYear, 9, 1);
+          filterEndDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+          break;
+        case '6_months':
+          filterStartDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+        case 'year':
+          filterStartDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+        case 'month':
+        default:
+          filterStartDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+      }
+    }
+
     const { getWalletBalance } = require('../utils/distributionService');
     const { getCurrentRent } = require('../utils/rentCalculator');
 
     // Get basic stats and wallet balance
-    const [occupiedCount, tenantsDueSoon, last30RevenueAgg, walletBalance, allActiveTenants] = await Promise.all([
+    const [occupiedCount, tenantsDueSoon, requestedRevenueAgg, walletBalance, allActiveTenants] = await Promise.all([
       Tenant.countDocuments({ estate: estate._id, isActive: true, status: { $in: ['occupied', 'pending'] } }),
       Tenant.countDocuments({ estate: estate._id, isActive: true, nextDueDate: { $gte: new Date(), $lte: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } }),
       Transaction.aggregate([
-        { $match: { estate: estate._id, isActive: true, status: 'paid', createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } },
+        { $match: { estate: estate._id, isActive: true, status: 'paid', createdAt: { $gte: filterStartDate, $lte: filterEndDate } } },
         { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } }
       ]),
       getWalletBalance(estate._id),
@@ -251,13 +320,13 @@ const getEstateOverview = async (req, res) => {
 
     // Breakdown income by category
     const incomeByCategory = {};
-    let total30dRevenue = 0;
-    let total30dTxCount = 0;
+    let periodRevenue = 0;
+    let periodTxCount = 0;
 
-    last30RevenueAgg.forEach(item => {
+    requestedRevenueAgg.forEach(item => {
       incomeByCategory[item._id] = item.total;
-      total30dRevenue += item.total;
-      total30dTxCount += item.count;
+      periodRevenue += item.total;
+      periodTxCount += item.count;
     });
 
     const totalUnits = estate.totalUnits || 0;
@@ -292,9 +361,11 @@ const getEstateOverview = async (req, res) => {
         },
         billing: {
           upcomingDueCount: tenantsDueSoon,
-          last30d: {
-            revenue: total30dRevenue,
-            transactions: total30dTxCount,
+          periodStats: {
+            period: period || 'last_30_days',
+            year: year || now.getFullYear(),
+            revenue: periodRevenue,
+            transactions: periodTxCount,
             breakdown: incomeByCategory
           }
         }
@@ -369,6 +440,7 @@ const getOverallEstateOverview = async (req, res) => {
       filterEndDate.setHours(23, 59, 59, 999);
     } else {
       // Predefined periods
+      const targetYear = year ? parseInt(year) : now.getFullYear();
       switch (period) {
         case 'today':
           filterStartDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -380,6 +452,26 @@ const getOverallEstateOverview = async (req, res) => {
           break;
         case 'quarter':
           filterStartDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+          filterEndDate = now;
+          break;
+        case 'Q1':
+          filterStartDate = new Date(targetYear, 0, 1);
+          filterEndDate = new Date(targetYear, 2, 31, 23, 59, 59, 999);
+          break;
+        case 'Q2':
+          filterStartDate = new Date(targetYear, 3, 1);
+          filterEndDate = new Date(targetYear, 5, 30, 23, 59, 59, 999);
+          break;
+        case 'Q3':
+          filterStartDate = new Date(targetYear, 6, 1);
+          filterEndDate = new Date(targetYear, 8, 30, 23, 59, 59, 999);
+          break;
+        case 'Q4':
+          filterStartDate = new Date(targetYear, 9, 1);
+          filterEndDate = new Date(targetYear, 11, 31, 23, 59, 59, 999);
+          break;
+        case '6_months':
+          filterStartDate = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
           filterEndDate = now;
           break;
         case 'year':
