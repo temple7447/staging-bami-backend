@@ -16,7 +16,6 @@ const {
   handleValidationErrors,
   validateTenantCreate,
   validateTenantUpdate,
-  validateShiftDueDate,
 } = require('../middleware/validation');
 
 const {
@@ -32,7 +31,6 @@ const {
   getMyBillingItems,
   paySelectedBillingItems,
   getQuarterlyRentByDueMonth,
-  shiftNextDueDate,
 } = require('../controllers/tenantController');
 
 // List tenants (optionally filter by estateId)
@@ -49,9 +47,6 @@ router.post('/me/billing/pay', protect, paySelectedBillingItems);
 router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getTenant);
 router.put('/:id', protect, validateObjectId('id'), validateTenantUpdate, handleValidationErrors, updateTenant);
 router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteTenant);
-
-// Shift next due date endpoint - MUST be before catch-all /:id routes
-router.post('/:id/shift-due-date', protect, validateObjectId('id'), validateShiftDueDate, handleValidationErrors, shiftNextDueDate);
 
 // History endpoints
 router.get('/:id/history', protect, validateObjectId('id'), handleValidationErrors, require('../controllers/tenantController').listHistory);

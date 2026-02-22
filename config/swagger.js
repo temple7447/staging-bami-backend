@@ -165,7 +165,7 @@ const options = {
             },
             paymentType: {
               type: 'string',
-              enum: ['deposit', 'rent', 'service_charge', 'security_charge', 'caution_fee', 'legal_fee']
+              enum: ['deposit', 'rent', 'service_charge', 'caution_fee', 'legal_fee']
             },
             status: {
               type: 'string',

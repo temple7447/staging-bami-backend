@@ -98,7 +98,6 @@ const createUnit = async (req, res) => {
       bathrooms,
       area,
       amenities,
-      amenities,
       streetAddress,
       images,
       createdBy: adminId,
@@ -175,7 +174,7 @@ const getEstateUnits = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [units, total] = await Promise.all([
       Unit.find(filter)
-        .populate('occupiedBy', 'tenantName tenantEmail')
+        .populate('occupiedBy', 'tenantName tenantEmail tenantType entryDate')
         .sort({ label: 1 })
         .skip(skip)
         .limit(parseInt(limit)),
@@ -199,7 +198,7 @@ const getEstateUnits = async (req, res) => {
 
         const currentPrice = getCurrentRent(
           unit.basePrice2024 || unit.monthlyPrice,
-          effectiveOriginRent,
+          effectiveOrigin,
           isVacant
         );
 
@@ -208,7 +207,8 @@ const getEstateUnits = async (req, res) => {
           unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01'),
           isVacant
         );
-
+        const { isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+        const isFeeApplicable = !unit.occupiedBy || (isOneTimeFeeApplicable(unit.occupiedBy.entryDate) && unit.occupiedBy.tenantType === 'new');
         return {
           unitId: unit._id,
           label: unit.label,
@@ -218,20 +218,28 @@ const getEstateUnits = async (req, res) => {
           serviceChargeMonthly: unit.serviceChargeMonthly,
           currentEffectiveService: currentService,
           isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
-          currentEffectiveCaution: getCurrentRent(
+          currentEffectiveCaution: isFeeApplicable ? getCurrentRent(
             unit.baseCaution2024 || unit.cautionFee || 0,
             unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
             isVacant
-          ),
-          currentEffectiveLegal: getCurrentRent(
+          ) : 0,
+          currentEffectiveLegal: isFeeApplicable ? getCurrentRent(
             unit.baseLegal2024 || unit.legalFee || 0,
             unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
             isVacant
-          ),
+          ) : 0,
           meterNumber: unit.meterNumber,
           description: unit.description,
-          cautionFee: unit.cautionFee,
-          legalFee: unit.legalFee,
+          cautionFee: isFeeApplicable ? getCurrentRent(
+            unit.baseCaution2024 || unit.cautionFee || 0,
+            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ) : 0,
+          legalFee: isFeeApplicable ? getCurrentRent(
+            unit.baseLegal2024 || unit.legalFee || 0,
+            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            isVacant
+          ) : 0,
           status: unit.status,
           category: unit.category,
           listingType: unit.listingType,
@@ -353,7 +361,9 @@ const getVacantUnits = async (req, res) => {
 const getUnitDetails = async (req, res) => {
   try {
     const { unitId } = req.params;
-    const unit = await Unit.findById(unitId).populate('estate', 'name');
+    const unit = await Unit.findById(unitId)
+      .populate('estate', 'name')
+      .populate('occupiedBy', 'tenantName tenantEmail tenantType entryDate');
     if (!unit || !unit.isActive) {
       return res.status(404).json({ success: false, message: 'Unit not found' });
     }
@@ -374,7 +384,8 @@ const getUnitDetails = async (req, res) => {
       effectiveOriginService,
       isVacant
     );
-
+    const { isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+    const isFeeApplicable = !unit.occupiedBy || (isOneTimeFeeApplicable(unit.occupiedBy.entryDate) && unit.occupiedBy.tenantType === 'new');
     return res.status(200).json({
       success: true,
       data: {
@@ -386,21 +397,29 @@ const getUnitDetails = async (req, res) => {
         serviceChargeMonthly: unit.serviceChargeMonthly,
         currentEffectiveService: currentService,
         isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
-        currentEffectiveCaution: getCurrentRent(
+        currentEffectiveCaution: isFeeApplicable ? getCurrentRent(
           unit.baseCaution2024 || unit.cautionFee || 0,
           unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
           isVacant
-        ),
-        currentEffectiveLegal: getCurrentRent(
+        ) : 0,
+        currentEffectiveLegal: isFeeApplicable ? getCurrentRent(
           unit.baseLegal2024 || unit.legalFee || 0,
           unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
           isVacant
-        ),
+        ) : 0,
         meterNumber: unit.meterNumber,
         description: unit.description,
         serviceChargeMonthly: unit.serviceChargeMonthly,
-        cautionFee: unit.cautionFee,
-        legalFee: unit.legalFee,
+        cautionFee: isFeeApplicable ? getCurrentRent(
+          unit.baseCaution2024 || unit.cautionFee || 0,
+          unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          isVacant
+        ) : 0,
+        legalFee: isFeeApplicable ? getCurrentRent(
+          unit.baseLegal2024 || unit.legalFee || 0,
+          unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          isVacant
+        ) : 0,
         status: unit.status,
         category: unit.category,
         listingType: unit.listingType,

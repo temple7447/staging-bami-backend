@@ -9,7 +9,6 @@ const {
   initiateDepositPayment,
   initiateRentPayment,
   initiateServiceChargePayment,
-  initiateSecurityChargePayment,
   initiateCautionFeePayment,
   initiateLegalFeePayment,
   verifyPayment,
@@ -35,7 +34,6 @@ router.post('/initial', protect, initiateInitialPayment);
 router.post('/deposit', protect, initiateDepositPayment);
 router.post('/rent', protect, initiateRentPayment);
 router.post('/service-charge', protect, initiateServiceChargePayment);
-router.post('/security-charge', protect, initiateSecurityChargePayment);
 router.post('/caution-fee', protect, initiateCautionFeePayment);
 router.post('/legal-fee', protect, initiateLegalFeePayment);
 

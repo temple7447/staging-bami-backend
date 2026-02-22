@@ -281,10 +281,11 @@ const getTenants = async (req, res) => {
       filter.status = { $in: ['occupied', 'pending'] };
     }
 
-    const { getCurrentRent } = require('../utils/rentCalculator');
-
     // Helper to process tenant and add fees/metadata
     const processTenant = (tenant) => {
+      const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+      const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
+
       const currentPrice = getCurrentRent(
         tenant.baseRent2024 || tenant.rentAmount,
         tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
@@ -297,17 +298,17 @@ const getTenants = async (req, res) => {
         false // Occupied
       );
 
-      const currentCaution = getCurrentRent(
+      const currentCaution = isApplicable ? getCurrentRent(
         tenant.baseCaution2024 || 0,
         tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
         false // Occupied
-      );
+      ) : 0;
 
-      const currentLegal = getCurrentRent(
+      const currentLegal = isApplicable ? getCurrentRent(
         tenant.baseLegal2024 || 0,
         tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
         false // Occupied
-      );
+      ) : 0;
 
       const totalMonthlyFees = currentPrice + currentService;
 
@@ -470,7 +471,9 @@ const getTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { getCurrentRent } = require('../utils/rentCalculator');
+    const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+    const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
+
     const currentCalculatedRent = getCurrentRent(
       tenant.baseRent2024 || tenant.rentAmount,
       tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
@@ -482,6 +485,18 @@ const getTenant = async (req, res) => {
       tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
+
+    const currentCalculatedCaution = isApplicable ? getCurrentRent(
+      tenant.baseCaution2024 || tenant.unit?.cautionFee || 0,
+      tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+      false // Occupied
+    ) : 0;
+
+    const currentCalculatedLegal = isApplicable ? getCurrentRent(
+      tenant.baseLegal2024 || tenant.unit?.legalFee || 0,
+      tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+      false // Occupied
+    ) : 0;
 
     console.log('[getTenant] Tenant found:', tenant._id);
 
@@ -523,6 +538,10 @@ const getTenant = async (req, res) => {
       paymentStatus: 'pending'
     });
 
+    // Final check: fees are 0 if payment already exists
+    const finalCalculatedCaution = (isApplicable && !(paymentBreakdown.caution_fee?.count > 0)) ? currentCalculatedCaution : 0;
+    const finalCalculatedLegal = (isApplicable && !(paymentBreakdown.legal_fee?.count > 0)) ? currentCalculatedLegal : 0;
+
     // Calculate total duration in months for the entire lease (from move-in to next due date)
     let leaseDurationMonths = 0;
     let totalLeaseAmount = 0;
@@ -534,7 +553,7 @@ const getTenant = async (req, res) => {
       leaseDurationMonths = (nextDueDate.getFullYear() - entryDate.getFullYear()) * 12 + (nextDueDate.getMonth() - entryDate.getMonth());
       leaseDurationMonths = Math.max(0, leaseDurationMonths); // Avoid negative if dates are weird
 
-      totalLeaseAmount = leaseDurationMonths * (currentCalculatedRent + currentCalculatedService);
+      totalLeaseAmount = (leaseDurationMonths * (currentCalculatedRent + currentCalculatedService)) + finalCalculatedCaution + finalCalculatedLegal;
     }
 
     const overview = {
@@ -552,14 +571,15 @@ const getTenant = async (req, res) => {
       storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
       serviceChargeIncreased: currentCalculatedService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
 
+      cautionFee: finalCalculatedCaution,
+      legalFee: finalCalculatedLegal,
+
       // Total stay calculation (Rent + Service Charge)
       leaseDurationMonths,
       totalLeaseAmount,
 
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
-      cautionFee: tenant.unit ? tenant.unit.cautionFee : null,
-      legalFee: tenant.unit ? tenant.unit.legalFee : null,
 
       nextDue: tenant.nextDueDate,
       meter: tenant.electricMeterNumber,
@@ -1345,108 +1365,6 @@ async function paySelectedBillingItems(req, res) {
   }
 }
 
-// Shift next due date based on payment duration (separate months for rent and service)
-const shiftNextDueDate = async (req, res) => {
-  try {
-    const tenant = await Tenant.findById(req.params.id);
-    if (!tenant || !tenant.isActive) {
-      return res.status(404).json({ success: false, message: 'Tenant not found' });
-    }
-
-    const { rentMonths, serviceMonths } = req.body;
-
-    // Validate at least one is provided
-    if (!rentMonths && !serviceMonths) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide at least one of rentMonths or serviceMonths'
-      });
-    }
-
-    // Get the current next due date or use today if not set
-    const currentDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
-
-    // Calculate the new due date using the maximum of the two months
-    // This ensures the next due date covers both rent and service periods
-    const maxMonths = Math.max(rentMonths || 0, serviceMonths || 0);
-    const newDueDate = new Date(currentDueDate);
-    newDueDate.setMonth(newDueDate.getMonth() + maxMonths);
-
-    // Store the old date for history
-    const oldDueDate = tenant.nextDueDate;
-
-    // Update the tenant's next due date
-    tenant.nextDueDate = newDueDate;
-    tenant.updatedBy = req.user?.id;
-
-    // Build payment description
-    const paymentParts = [];
-    if (rentMonths) paymentParts.push(`${rentMonths} month${rentMonths > 1 ? 's' : ''} rent`);
-    if (serviceMonths) paymentParts.push(`${serviceMonths} month${serviceMonths > 1 ? 's' : ''} service`);
-    const paymentDesc = paymentParts.join(' and ');
-
-    // Create history entry
-    const historyEntry = {
-      event: 'payment',
-      note: `Payment received for ${paymentDesc}. Next due date shifted from ${oldDueDate ? oldDueDate.toISOString().split('T')[0] : 'not set'} to ${newDueDate.toISOString().split('T')[0]}`,
-      meta: {
-        rentMonths: rentMonths || 0,
-        serviceMonths: serviceMonths || 0,
-        oldNextDueDate: oldDueDate,
-        newNextDueDate: newDueDate
-      },
-      createdBy: req.user?.id
-    };
-
-    // Update tenant using findByIdAndUpdate to avoid full document validation
-    // This is necessary because some legacy tenants might not have the required 'unit' field
-    await Tenant.findByIdAndUpdate(
-      req.params.id,
-      {
-        $set: {
-          nextDueDate: newDueDate,
-          updatedBy: req.user?.id
-        },
-        $push: {
-          history: historyEntry
-        }
-      },
-      { runValidators: false }
-    );
-
-    logInfo('Tenant next due date shifted', {
-      tenantId: tenant._id,
-      tenantName: tenant.tenantName,
-      rentMonths,
-      serviceMonths,
-      oldDueDate,
-      newDueDate
-    });
-
-    res.status(200).json({
-      success: true,
-      message: `Next due date successfully shifted by ${maxMonths} month${maxMonths > 1 ? 's' : ''} (${paymentDesc})`,
-      data: {
-        tenantId: tenant._id,
-        tenantName: tenant.tenantName,
-        oldNextDueDate: oldDueDate,
-        newNextDueDate: newDueDate,
-        rentMonthsPaid: rentMonths || 0,
-        serviceMonthsPaid: serviceMonths || 0,
-        totalMonthsShifted: maxMonths
-      }
-    });
-  } catch (err) {
-    logError('POST /api/tenants/:id/shift-due-date', err, { tenantId: req.params.id });
-    if (err.name === 'CastError') {
-      return res.status(404).json({ success: false, message: 'Tenant not found' });
-    }
-    res.status(500).json({
-      success: false,
-      message: 'Server error occurred while shifting next due date'
-    });
-  }
-};
 
 module.exports = {
   createTenant,
@@ -1463,5 +1381,4 @@ module.exports = {
   listMyHistory,
   getMyBillingItems,
   paySelectedBillingItems,
-  shiftNextDueDate,
 };

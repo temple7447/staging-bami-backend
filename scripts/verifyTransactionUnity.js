@@ -28,7 +28,7 @@ const verifyTransactionUnity = async () => {
         console.log(`ℹ️  Using Tenant: ${tenant.tenantName || 'Mock'}`);
 
         // 3. Test New Enum Types
-        const newTypes = ['service_charge', 'security_charge', 'caution_fee', 'legal_fee', 'maintenance', 'initial'];
+        const newTypes = ['service_charge', 'caution_fee', 'legal_fee', 'maintenance', 'initial'];
         console.log('\n📝 Testing new transaction types...');
 
         for (const type of newTypes) {

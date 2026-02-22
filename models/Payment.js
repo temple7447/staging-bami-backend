@@ -21,7 +21,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   paymentType: {
     type: String,
-    enum: ['deposit', 'rent', 'service_charge', 'security_charge', 'caution_fee', 'legal_fee', 'utilities', 'maintenance', 'initial', 'bundle', 'other'],
+    enum: ['deposit', 'rent', 'service_charge', 'caution_fee', 'legal_fee', 'utilities', 'maintenance', 'initial', 'bundle', 'other'],
     required: true
   },
   amount: {

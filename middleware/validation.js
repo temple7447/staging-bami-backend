@@ -130,22 +130,6 @@ const validateHistoryCreate = [
   check('meta').optional().isObject()
 ];
 
-const validateShiftDueDate = [
-  check('rentMonths')
-    .optional()
-    .isInt({ min: 1, max: 12 }).withMessage('Rent months must be between 1 and 12')
-    .toInt(),
-  check('serviceMonths')
-    .optional()
-    .isInt({ min: 1, max: 12 }).withMessage('Service months must be between 1 and 12')
-    .toInt(),
-  body().custom((value, { req }) => {
-    if (!req.body.rentMonths && !req.body.serviceMonths) {
-      throw new Error('At least one of rentMonths or serviceMonths is required');
-    }
-    return true;
-  })
-];
 
 module.exports = {
   handleValidationErrors,
@@ -155,6 +139,5 @@ module.exports = {
   validateTenantCreate,
   validateTenantUpdate,
   validateTransactionCreate,
-  validateHistoryCreate,
-  validateShiftDueDate
+  validateHistoryCreate
 };

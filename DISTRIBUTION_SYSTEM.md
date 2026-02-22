@@ -33,7 +33,6 @@ The 50/30/20 split applies to:
 | Deposit | `POST /api/payments/deposit` | ✅ Automatic |
 | Rent | `POST /api/payments/rent` | ✅ Automatic |
 | Service Charge | `POST /api/payments/service_charge` | ✅ Automatic |
-| Security Charge | `POST /api/payments/security_charge` | ✅ Automatic |
 | Caution Fee | `POST /api/payments/caution_fee` | ✅ Automatic |
 | Legal Fee | `POST /api/payments/legal_fee` | ✅ Automatic |
 

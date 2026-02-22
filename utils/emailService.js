@@ -509,70 +509,33 @@ exports.sendManagerWelcomeEmail = async (user, temporaryPassword, assignedEstate
 };
 
 // Helper to generate PDF Receipt
-exports.generateReceiptPdf = (payment, tenant, estate, wallet) => {
+// receiptData: pre-calculated object with all financial figures
+exports.generateReceiptPdf = (receiptData, tenant, estate) => {
   return new Promise(async (resolve, reject) => {
     try {
-      const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
-
-      // Calculate dates
-      const moveInDate = tenant.entryDate ? formatDate(tenant.entryDate) : '-';
-      const expiryDate = tenant.nextDueDate ? formatDate(tenant.nextDueDate) : '-';
-      const paymentDate = payment.paymentDate ? formatDate(payment.paymentDate) : formatDate(new Date());
-
-      // Calculate durations and years
-      const currentYear = new Date().getFullYear();
-      const nextYear = currentYear + 1;
-      const yearDuration = `${currentYear} - ${nextYear}`;
-
-      // Calculate financial figures
-      const rentAmount = tenant.rentAmount || 0;
-      const serviceCharge = tenant.unit?.serviceChargeMonthly ? tenant.unit.serviceChargeMonthly * 12 : 0;
-      const cautionFee = tenant.unit?.cautionFee || 0;
-      const legalFee = tenant.unit?.legalFee || 0;
-
-      const rentOutstanding = 0;
-      const serviceChargeOutstanding = 0;
-      const walletBalance = wallet?.balance || 0;
-      const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-
-      // Totals
-      const currentTotalTenancyRate = rentAmount + serviceCharge;
-
-      // Future projections (26% increase)
-      const increaseRate = 1.26;
-      const nextRentPrice = rentAmount * increaseRate;
-      const nextServiceChargePrice = serviceCharge * increaseRate;
-
-      const nextRentIncreaseAmount = nextRentPrice;
-      const nextServiceChargeIncreaseAmount = nextServiceChargePrice;
-      const totalTenancyRateIncreaseAmount = nextRentPrice + nextServiceChargePrice;
-      const nextTotalTenancyRate = nextRentPrice + nextServiceChargePrice;
-
-      const nextIncreaseDate = tenant.nextDueDate
-        ? new Date(new Date(tenant.nextDueDate).setFullYear(new Date(tenant.nextDueDate).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
-        : 'July 15th, 2027';
-
-      // Prepare data object for PDF
+      // Format numeric values for PDF display
       const data = {
-        paymentDate,
-        moveInDate,
-        expiryDate,
-        currentYear,
-        nextYear,
-        yearDuration,
-        rentAmount: formatCurrencyForPDF(rentAmount),
-        rentOutstanding: formatCurrencyForPDF(rentOutstanding),
-        serviceCharge: formatCurrencyForPDF(serviceCharge),
-        serviceChargeOutstanding: formatCurrencyForPDF(serviceChargeOutstanding),
-        cautionFee: formatCurrencyForPDF(cautionFee),
-        legalFee: formatCurrencyForPDF(legalFee),
-        outstandingBalance: formatCurrencyForPDF(outstandingBalance),
-        currentTotalTenancyRate: formatCurrencyForPDF(currentTotalTenancyRate),
-        nextTotalTenancyRate: formatCurrencyForPDF(nextTotalTenancyRate),
-        nextIncreaseDate,
-        nextRentIncrease: formatCurrencyForPDF(nextRentIncreaseAmount),
-        nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncreaseAmount),
-        totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncreaseAmount)
+        paymentDate: receiptData.paymentDate,
+        moveInDate: receiptData.moveInDate,
+        expiryDate: receiptData.expiryDate,
+        currentYear: receiptData.currentYear,
+        nextYear: receiptData.nextYear,
+        yearDuration: receiptData.yearDuration,
+        tenancyDuration: receiptData.tenancyDuration || '1 YEAR',
+        tenantTotalStay: receiptData.tenantTotalStay || '1st YEAR',
+        rentAmount: formatCurrencyForPDF(receiptData.rentAmount),
+        rentOutstanding: formatCurrencyForPDF(receiptData.rentOutstanding),
+        serviceCharge: formatCurrencyForPDF(receiptData.serviceCharge),
+        serviceChargeOutstanding: formatCurrencyForPDF(receiptData.serviceChargeOutstanding),
+        cautionFee: formatCurrencyForPDF(receiptData.cautionFee),
+        legalFee: formatCurrencyForPDF(receiptData.legalFee),
+        outstandingBalance: formatCurrencyForPDF(receiptData.outstandingBalance),
+        currentTotalTenancyRate: formatCurrencyForPDF(receiptData.currentTotalTenancyRate),
+        nextTotalTenancyRate: formatCurrencyForPDF(receiptData.nextTotalTenancyRate),
+        nextIncreaseDate: receiptData.nextIncreaseDate,
+        nextRentIncrease: formatCurrencyForPDF(receiptData.nextRentIncrease),
+        nextServiceChargeIncrease: formatCurrencyForPDF(receiptData.nextServiceChargeIncrease),
+        totalTenancyRateIncrease: formatCurrencyForPDF(receiptData.totalTenancyRateIncrease)
       };
 
       const doc = new PDFDocument({ size: 'A4', margin: 30 });
@@ -642,8 +605,8 @@ exports.generateReceiptPdf = (payment, tenant, estate, wallet) => {
       drawReceiptRow('OUTSTANDING BALANCE:', data.outstandingBalance, { valueColor: '#ff0000' });
       drawReceiptRow(`CURRENT TOTAL TENANCY RATE: ${data.currentYear}`, data.currentTotalTenancyRate, { labelColor: '#70ad47', valueColor: '#70ad47' });
       drawReceiptRow(`NEXT TOTAL TENANCY RATE ${data.nextYear}:`, data.nextTotalTenancyRate, { labelColor: '#ffc000', valueColor: '#ffc000' });
-      drawReceiptRow('TENANCY DURATION:', '1 YEAR');
-      drawReceiptRow('TENANT TOTAL STAY:', '1st YEAR');
+      drawReceiptRow('TENANCY DURATION:', data.tenancyDuration);
+      drawReceiptRow('TENANT TOTAL STAY:', data.tenantTotalStay);
       drawReceiptRow('YEAR DURATION', data.yearDuration);
       drawReceiptRow(`NEXT RENTAL INCREASE BY (26%) ON ${data.nextIncreaseDate}:`, data.nextRentIncrease, { labelColor: '#ff0000', valueColor: '#ff0000' });
       drawReceiptRow(`NEXT SERVICE CHARGE INCREASE BY (26%) ${data.nextIncreaseDate}:`, data.nextServiceChargeIncrease, { labelColor: '#ff0000', valueColor: '#ff0000' });
@@ -662,75 +625,38 @@ exports.generateReceiptPdf = (payment, tenant, estate, wallet) => {
 };
 
 // Receipt email
-exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
-  const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+// receiptData: pre-calculated object with all financial figures (same as generateReceiptPdf)
+exports.sendReceiptEmail = async (receiptData, tenant, estate) => {
   const formatMoney = (amount) => formatCurrency(amount || 0);
 
-  // Calculate dates
-  const moveInDate = tenant.entryDate ? formatDate(tenant.entryDate) : '-';
-  const expiryDate = tenant.nextDueDate ? formatDate(tenant.nextDueDate) : '-';
-  const paymentDate = payment.paymentDate ? formatDate(payment.paymentDate) : formatDate(new Date());
+  // Use pre-calculated values from receiptData
+  const paymentDate = receiptData.paymentDate;
+  const moveInDate = receiptData.moveInDate;
+  const expiryDate = receiptData.expiryDate;
+  const currentYear = receiptData.currentYear;
+  const nextYear = receiptData.nextYear;
+  const yearDuration = receiptData.yearDuration;
+  const tenancyDuration = receiptData.tenancyDuration || '1 YEAR';
+  const tenantTotalStay = receiptData.tenantTotalStay || '1st YEAR';
 
-  // Calculate durations and years
-  const currentYear = new Date().getFullYear();
-  const nextYear = currentYear + 1;
-  const yearDuration = `${currentYear} - ${nextYear}`;
-
-  // Calculate financial figures
-  const rentAmount = tenant.rentAmount || 0;
-  const serviceCharge = tenant.unit?.serviceChargeMonthly ? tenant.unit.serviceChargeMonthly * 12 : 0;
-  const cautionFee = tenant.unit?.cautionFee || 0;
-  const legalFee = tenant.unit?.legalFee || 0;
-
-  const rentOutstanding = 0;
-  const serviceChargeOutstanding = 0;
-  const walletBalance = wallet?.balance || 0;
-  const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
-
-  // Totals
-  const currentTotalTenancyRate = rentAmount + serviceCharge;
-
-  // Future projections (26% increase)
-  const increaseRate = 1.26;
-  const nextRentPrice = rentAmount * increaseRate;
-  const nextServiceChargePrice = serviceCharge * increaseRate;
-
-  const nextRentIncreaseAmount = nextRentPrice;
-  const nextServiceChargeIncreaseAmount = nextServiceChargePrice;
-  const totalTenancyRateIncreaseAmount = nextRentPrice + nextServiceChargePrice;
-  const nextTotalTenancyRate = nextRentPrice + nextServiceChargePrice;
-
-  const nextIncreaseDate = tenant.nextDueDate
-    ? new Date(new Date(tenant.nextDueDate).setFullYear(new Date(tenant.nextDueDate).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
-    : 'July 15th, 2027';
-
-  // Prepare data object for PDF
-  const data = {
-    paymentDate,
-    moveInDate,
-    expiryDate,
-    currentYear,
-    nextYear,
-    yearDuration,
-    rentAmount: formatCurrencyForPDF(rentAmount),
-    rentOutstanding: formatCurrencyForPDF(rentOutstanding),
-    serviceCharge: formatCurrencyForPDF(serviceCharge),
-    serviceChargeOutstanding: formatCurrencyForPDF(serviceChargeOutstanding),
-    cautionFee: formatCurrencyForPDF(cautionFee),
-    legalFee: formatCurrencyForPDF(legalFee),
-    outstandingBalance: formatCurrencyForPDF(outstandingBalance),
-    currentTotalTenancyRate: formatCurrencyForPDF(currentTotalTenancyRate),
-    nextTotalTenancyRate: formatCurrencyForPDF(nextTotalTenancyRate),
-    nextIncreaseDate,
-    nextRentIncrease: formatCurrencyForPDF(nextRentIncreaseAmount),
-    nextServiceChargeIncrease: formatCurrencyForPDF(nextServiceChargeIncreaseAmount),
-    totalTenancyRateIncrease: formatCurrencyForPDF(totalTenancyRateIncreaseAmount)
-  };
+  const rentAmount = receiptData.rentAmount;
+  const serviceCharge = receiptData.serviceCharge;
+  const cautionFee = receiptData.cautionFee;
+  const legalFee = receiptData.legalFee;
+  const rentOutstanding = receiptData.rentOutstanding;
+  const serviceChargeOutstanding = receiptData.serviceChargeOutstanding;
+  const outstandingBalance = receiptData.outstandingBalance;
+  const currentTotalTenancyRate = receiptData.currentTotalTenancyRate;
+  const nextTotalTenancyRate = receiptData.nextTotalTenancyRate;
+  const nextIncreaseDate = receiptData.nextIncreaseDate;
+  const nextRentIncreaseAmount = receiptData.nextRentIncrease;
+  const nextServiceChargeIncreaseAmount = receiptData.nextServiceChargeIncrease;
+  const totalTenancyRateIncreaseAmount = receiptData.totalTenancyRateIncrease;
 
   // Generate PDF
   let pdfBuffer = null;
   try {
-    pdfBuffer = await exports.generateReceiptPdf(payment, tenant, estate, wallet);
+    pdfBuffer = await exports.generateReceiptPdf(receiptData, tenant, estate);
   } catch (pdfError) {
     console.error('Error generating PDF receipt:', pdfError);
   }
@@ -828,11 +754,11 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
         </tr>
         <tr>
           <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">TENANCY DURATION:</td>
-          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1 YEAR</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${tenancyDuration}</td>
         </tr>
         <tr>
           <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">TENANT TOTAL STAY:</td>
-          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">1st YEAR</td>
+          <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">${tenantTotalStay}</td>
         </tr>
         <tr>
           <td style="border: 1px solid #999; padding: 8px; color: #4472c4; font-weight: bold;">YEAR DURATION</td>
@@ -889,4 +815,3 @@ exports.sendReceiptEmail = async (payment, tenant, estate, wallet) => {
 
   return await exports.sendEmail(emailOptions);
 };
-

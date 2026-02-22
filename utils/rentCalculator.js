@@ -73,8 +73,29 @@ const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originD
     };
 };
 
+/**
+ * Checks if a one-time fee (like caution or legal) should be charged.
+ * Rule: Only applicable during the first year of stay.
+ * 
+ * @param {Date} entryDate - The date the tenant moved in
+ * @returns {boolean} True if stay duration is less than 1 year
+ */
+const isOneTimeFeeApplicable = (entryDate) => {
+    if (!entryDate) return true;
+    const entry = new Date(entryDate);
+    const now = new Date();
+
+    // Difference in years
+    const yearsDiff = (now.getFullYear() - entry.getFullYear()) +
+        (now.getMonth() - entry.getMonth()) / 12 +
+        (now.getDate() - entry.getDate()) / 365;
+
+    return yearsDiff < 1;
+};
+
 module.exports = {
     getCurrentRent,
     calculateEffectiveRent,
+    isOneTimeFeeApplicable,
     RULE_START_DATE
 };

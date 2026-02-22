@@ -13,6 +13,143 @@ const { sendEmail, sendReceiptEmail } = require('../utils/emailService');
 const { logError, logInfo } = require('../utils/logger');
 const { sendTransactionToSlack } = require('../utils/slackService');
 
+/**
+ * Calculates all receipt data using dynamic rent/fee rules.
+ * Used by downloadPaymentReceipt, sendPaymentReceipt, and sendTenantReceipt.
+ *
+ * @param {Object} tenant - Tenant document (populated with unit)
+ * @param {Object} payment - Payment document (or mock with paymentDate)
+ * @param {Object} wallet - Wallet document (or null)
+ * @returns {Object} receiptData - Pre-calculated values for PDF/email
+ */
+const calculateReceiptData = (tenant, payment, wallet) => {
+  const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+
+  const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  // Dates
+  const moveInDate = tenant.entryDate ? formatDate(tenant.entryDate) : '-';
+  const expiryDate = tenant.nextDueDate ? formatDate(tenant.nextDueDate) : '-';
+  const paymentDate = payment?.paymentDate ? formatDate(payment.paymentDate) : formatDate(new Date());
+
+  // Dynamic rent (same logic as tenant detail view)
+  const effectiveRent = getCurrentRent(
+    tenant.baseRent2024 || tenant.rentAmount,
+    tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+    false // Occupied
+  );
+
+  // Dynamic service charge (monthly)
+  const effectiveServiceMonthly = getCurrentRent(
+    tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+    tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+    false // Occupied
+  );
+
+  // Caution & Legal fees (only for new tenants within first year)
+  const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
+
+  const effectiveCautionFee = isApplicable ? getCurrentRent(
+    tenant.baseCaution2024 || tenant.unit?.cautionFee || 0,
+    tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+    false
+  ) : 0;
+
+  const effectiveLegalFee = isApplicable ? getCurrentRent(
+    tenant.baseLegal2024 || tenant.unit?.legalFee || 0,
+    tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+    false
+  ) : 0;
+
+  // Calculate lease duration in months
+  let durationMonths = 12; // Default
+  if (tenant.entryDate && tenant.nextDueDate) {
+    const entry = new Date(tenant.entryDate);
+    const nextDue = new Date(tenant.nextDueDate);
+    durationMonths = Math.max(1, (nextDue.getFullYear() - entry.getFullYear()) * 12 + (nextDue.getMonth() - entry.getMonth()));
+  }
+
+  // Calculate total stay from entry to now
+  let totalStayYears = 1;
+  if (tenant.entryDate) {
+    const entry = new Date(tenant.entryDate);
+    const now = new Date();
+    totalStayYears = Math.max(1, Math.ceil(((now.getFullYear() - entry.getFullYear()) * 12 + (now.getMonth() - entry.getMonth())) / 12));
+  }
+
+  // Service charge for the full duration
+  const serviceChargeTotal = effectiveServiceMonthly * durationMonths;
+
+  // Rent is annual (already the yearly amount from the model)
+  const rentAmount = effectiveRent;
+
+  // Outstanding
+  const walletBalance = wallet?.balance || 0;
+  const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
+
+  // Current total tenancy rate = rent + service charge total
+  const currentTotalTenancyRate = rentAmount + serviceChargeTotal;
+
+  // Future projections (26% increase)
+  const increaseRate = 1.26;
+  const nextRentIncrease = Math.round(rentAmount * increaseRate);
+  const nextServiceChargeIncrease = Math.round(serviceChargeTotal * increaseRate);
+  const nextTotalTenancyRate = nextRentIncrease + nextServiceChargeIncrease;
+  const totalTenancyRateIncrease = nextTotalTenancyRate;
+
+  // Next increase date (2 years from last increase or entry)
+  const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+  const nextIncreaseDate = rentOrigin
+    ? new Date(new Date(rentOrigin).setFullYear(new Date(rentOrigin).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
+    : '-';
+
+  // Year calculations
+  const currentYear = new Date().getFullYear();
+  const nextYear = currentYear + 1;
+
+  // Tenancy duration label
+  const tenancyDuration = durationMonths >= 12
+    ? `${Math.floor(durationMonths / 12)} YEAR${Math.floor(durationMonths / 12) > 1 ? 'S' : ''}`
+    : `${durationMonths} MONTH${durationMonths > 1 ? 'S' : ''}`;
+
+  // Total stay ordinal
+  const ordinalSuffix = (n) => {
+    const s = ['th', 'st', 'nd', 'rd'];
+    const v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  };
+  const tenantTotalStay = `${ordinalSuffix(totalStayYears)} YEAR`;
+
+  // Year duration
+  const entryYear = tenant.entryDate ? new Date(tenant.entryDate).getFullYear() : currentYear;
+  const dueYear = tenant.nextDueDate ? new Date(tenant.nextDueDate).getFullYear() : nextYear;
+  const yearDuration = `${entryYear} - ${dueYear}`;
+
+  return {
+    paymentDate,
+    moveInDate,
+    expiryDate,
+    currentYear,
+    nextYear,
+    yearDuration,
+    tenancyDuration,
+    tenantTotalStay,
+    rentAmount,
+    rentOutstanding: 0,
+    serviceCharge: serviceChargeTotal,
+    serviceChargeOutstanding: 0,
+    cautionFee: effectiveCautionFee,
+    legalFee: effectiveLegalFee,
+    outstandingBalance,
+    currentTotalTenancyRate,
+    nextTotalTenancyRate,
+    nextIncreaseDate,
+    nextRentIncrease,
+    nextServiceChargeIncrease,
+    totalTenancyRateIncrease
+  };
+};
+
 // Supported duration presets for rent payments
 const RENT_DURATION_PRESETS = {
   '6_months': 6,
@@ -133,17 +270,24 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         }
       }
 
-      // 3. Handle Caution and Legal Fees (Anniversary increase)
       if (paymentType === 'caution_fee') {
-        const { getCurrentRent } = require('../utils/rentCalculator');
-        const base = tenant.baseCaution2024 || 0;
-        const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
-        amount = getCurrentRent(base, origin, false);
+        const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
+          amount = 0; // Exempt after 1 year or if not a new tenant
+        } else {
+          const base = tenant.baseCaution2024 || tenant.unit?.cautionFee || 0;
+          const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
+          amount = getCurrentRent(base, origin, false);
+        }
       } else if (paymentType === 'legal_fee') {
-        const { getCurrentRent } = require('../utils/rentCalculator');
-        const base = tenant.baseLegal2024 || 0;
-        const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
-        amount = getCurrentRent(base, origin, false);
+        const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
+        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
+          amount = 0; // Exempt after 1 year or if not a new tenant
+        } else {
+          const base = tenant.baseLegal2024 || tenant.unit?.legalFee || 0;
+          const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
+          amount = getCurrentRent(base, origin, false);
+        }
       }
 
       // Final amount validation (for all payment types)
@@ -168,7 +312,6 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
         'deposit': 'Deposit',
         'rent': 'Rent Payment',
         'service_charge': 'Service Charge',
-        'security_charge': 'Security Charge',
         'caution_fee': 'Caution Fee',
         'legal_fee': 'Legal Fee'
       };
@@ -341,15 +484,23 @@ const initiateInitialPayment = async (req, res) => {
       let duration = item.duration ? parseInt(item.duration) : 1;
 
       // Apply dynamic 26% increase rule to ALL items based on anniversaries
-      const { getCurrentRent } = require('../utils/rentCalculator');
+      const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
       if (item.type === 'rent') {
         itemAmount = getCurrentRent(tenant.baseRent2024 || itemAmount, tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt, false);
       } else if (item.type === 'service_charge') {
         itemAmount = getCurrentRent(tenant.baseServiceCharge2024 || itemAmount, tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt, false);
       } else if (item.type === 'caution_fee') {
-        itemAmount = getCurrentRent(tenant.baseCaution2024 || itemAmount, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
+          itemAmount = 0;
+        } else {
+          itemAmount = getCurrentRent(tenant.baseCaution2024 || itemAmount, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        }
       } else if (item.type === 'legal_fee') {
-        itemAmount = getCurrentRent(tenant.baseLegal2024 || itemAmount, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
+          itemAmount = 0;
+        } else {
+          itemAmount = getCurrentRent(tenant.baseLegal2024 || itemAmount, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        }
       }
 
       // ENFORCE CONTRACT RULES for Rent and Service Charge
@@ -539,7 +690,6 @@ const initiateInitialPayment = async (req, res) => {
 const initiateDepositPayment = initiatePaymentGeneric('deposit', true);
 const initiateRentPayment = initiatePaymentGeneric('rent', false);
 const initiateServiceChargePayment = initiatePaymentGeneric('service_charge', false);
-const initiateSecurityChargePayment = initiatePaymentGeneric('security_charge', false);
 const initiateCautionFeePayment = initiatePaymentGeneric('caution_fee', false);
 const initiateLegalFeePayment = initiatePaymentGeneric('legal_fee', false);
 
@@ -1069,8 +1219,11 @@ const sendPaymentReceipt = async (req, res) => {
           wallet = await Wallet.findOne({ userId: payment.tenant.user });
         }
 
+        // Calculate correct receipt data
+        const receiptData = calculateReceiptData(payment.tenant, payment, wallet);
+
         // Send the receipt email
-        await sendReceiptEmail(payment, payment.tenant, payment.estate, wallet);
+        await sendReceiptEmail(receiptData, payment.tenant, payment.estate);
         console.log(`✅ Receipt sent successfully for payment ${paymentId}`);
       } catch (emailError) {
         console.error(`❌ Error sending receipt for payment ${paymentId}:`, emailError.message);
@@ -1119,13 +1272,15 @@ const downloadPaymentReceipt = async (req, res) => {
       wallet = await Wallet.findOne({ userId: payment.tenant.user });
     }
 
+    // Calculate correct receipt data
+    const receiptData = calculateReceiptData(payment.tenant, payment, wallet);
+
     // Generate PDF
     const { generateReceiptPdf } = require('../utils/emailService');
     const pdfBuffer = await generateReceiptPdf(
-      payment,
+      receiptData,
       payment.tenant,
-      payment.estate || payment.tenant.estate,
-      wallet
+      payment.estate || payment.tenant.estate
     );
 
     // Set headers for download
@@ -1204,38 +1359,18 @@ const sendTenantReceipt = async (req, res) => {
           console.log(`💰 No user account linked, no wallet data`);
         }
 
-        // Calculate total rent from move-in date to expiration date
-        let totalRent = tenant.rentAmount || 0;
-
-        if (tenant.entryDate && tenant.nextDueDate && tenant.rentAmount) {
-          // Calculate the number of months between entryDate and nextDueDate
-          const moveInDate = new Date(tenant.entryDate);
-          const expireDate = new Date(tenant.nextDueDate);
-
-          // Calculate difference in months
-          const monthsDiff = (expireDate.getFullYear() - moveInDate.getFullYear()) * 12
-            + (expireDate.getMonth() - moveInDate.getMonth());
-
-          // Calculate total rent (ensure at least 1 month)
-          const totalMonths = Math.max(1, monthsDiff);
-          totalRent = tenant.rentAmount * totalMonths;
-
-          console.log(`📊 Rent calculation: ${tenant.rentAmount} x ${totalMonths} months = ${totalRent}`);
-        } else {
-          console.log(`⚠️ Using single month rent: ${totalRent} (missing date fields)`);
-        }
-
-        // Create a mock payment object with current date
+        // Create a mock payment for the receipt date
         const mockPayment = {
-          _id: tenant._id, // Use tenant ID as receipt reference
-          paymentDate: new Date(),
-          amount: totalRent
+          paymentDate: new Date()
         };
+
+        // Calculate correct receipt data
+        const receiptData = calculateReceiptData(tenant, mockPayment, wallet);
 
         console.log(`📄 Generating PDF and sending email to ${tenant.tenantEmail}...`);
 
         // Send the receipt email
-        await sendReceiptEmail(mockPayment, tenant, tenant.estate, wallet);
+        await sendReceiptEmail(receiptData, tenant, tenant.estate);
 
         console.log(`✅ Receipt sent successfully for tenant ${tenantId} to ${tenant.tenantEmail}`);
       } catch (emailError) {
@@ -1405,7 +1540,6 @@ module.exports = {
   initiateDepositPayment,
   initiateRentPayment,
   initiateServiceChargePayment,
-  initiateSecurityChargePayment,
   initiateCautionFeePayment,
   initiateLegalFeePayment,
   verifyPayment,

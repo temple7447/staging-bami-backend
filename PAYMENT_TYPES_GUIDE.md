@@ -33,14 +33,7 @@ The BamiHustle backend now supports **6 different payment types** for tenant tra
 - **Use Case**: Maintenance of common areas, security services
 - **Example**: ₦25,000 monthly service charge
 
-### 4. **Security Charge** 🛡️
-- **Endpoint**: `POST /api/payments/security-charge`
-- **Description**: Security personnel and equipment fees
-- **Refundable**: No
-- **Use Case**: Payment for security services
-- **Example**: ₦15,000 monthly security charge
-
-### 5. **Caution Fee** ⚠️
+### 4. **Caution Fee** ⚠️
 - **Endpoint**: `POST /api/payments/caution-fee`
 - **Description**: One-time caution/cautionary deposit
 - **Refundable**: Yes (can be refunded upon lease termination)
@@ -210,7 +203,7 @@ All payments are stored with these fields:
 | `tenant` | ObjectId | Reference to Tenant |
 | `estate` | ObjectId | Reference to Estate |
 | `admin` | ObjectId | Admin who initiated payment |
-| `paymentType` | String | Type: deposit, rent, service_charge, security_charge, caution_fee, legal_fee |
+| `paymentType` | String | Type: deposit, rent, service_charge, caution_fee, legal_fee |
 | `amount` | Number | Amount in NGN |
 | `currency` | String | Always 'NGN' |
 | `description` | String | Payment description |
@@ -233,7 +226,6 @@ All payments are stored with these fields:
 **Non-Refundable**:
 - Rent
 - Service Charge
-- Security Charge
 - Legal Fee
 
 ### By Frequency
@@ -246,7 +238,6 @@ All payments are stored with these fields:
 **Recurring Payments**:
 - Rent (monthly/periodic)
 - Service Charge (monthly/periodic)
-- Security Charge (monthly/periodic)
 
 ### By Amount Range (Typical)
 
@@ -255,7 +246,6 @@ All payments are stored with these fields:
 | Deposit | ₦200,000 | ₦500,000 | ₦2,000,000 |
 | Rent | ₦50,000 | ₦150,000 | ₦500,000 |
 | Service Charge | ₦5,000 | ₦25,000 | ₦100,000 |
-| Security Charge | ₦5,000 | ₦15,000 | ₦50,000 |
 | Caution Fee | ₦100,000 | ₦250,000 | ₦1,000,000 |
 | Legal Fee | ₦10,000 | ₦20,000 | ₦50,000 |
 
@@ -412,7 +402,6 @@ Specific handlers:
 ├── initiateDepositPayment
 ├── initiateRentPayment
 ├── initiateServiceChargePayment
-├── initiateSecurityChargePayment
 ├── initiateCautionFeePayment
 └── initiateLegalFeePayment
 ```
@@ -425,7 +414,6 @@ paymentType: {
     'deposit',
     'rent',
     'service_charge',
-    'security_charge',
     'caution_fee',
     'legal_fee',
     'utilities',
