@@ -46,7 +46,6 @@ const WithdrawalSchema = new mongoose.Schema({
 
 // Index for filtering
 WithdrawalSchema.index({ user: 1, status: 1 });
-WithdrawalSchema.index({ reference: 1 });
 WithdrawalSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model('Withdrawal', WithdrawalSchema);

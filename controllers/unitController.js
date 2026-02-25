@@ -7,8 +7,8 @@ const { logError, logInfo, logWarning } = require('../utils/logger');
  * Create a new unit for an estate
  */
 const createUnit = async (req, res) => {
+  const { estateId } = req.params;
   try {
-    const { estateId } = req.params;
     const {
       label,
       monthlyPrice,
@@ -154,8 +154,8 @@ const createUnit = async (req, res) => {
  * Get all units for an estate
  */
 const getEstateUnits = async (req, res) => {
+  const { estateId } = req.params;
   try {
-    const { estateId } = req.params;
     const { status, page = 1, limit = 50 } = req.query;
 
     const estate = await Estate.findById(estateId);
@@ -281,8 +281,8 @@ const getEstateUnits = async (req, res) => {
  * Get vacant units for tenant assignment
  */
 const getVacantUnits = async (req, res) => {
+  const { estateId } = req.params;
   try {
-    const { estateId } = req.params;
 
     const estate = await Estate.findById(estateId);
     if (!estate) {
@@ -329,12 +329,12 @@ const getVacantUnits = async (req, res) => {
           currentEffectiveCaution: getCurrentRent(
             unit.baseCaution2024 || unit.cautionFee || 0,
             unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
-            isVacant
+            true
           ),
           currentEffectiveLegal: getCurrentRent(
             unit.baseLegal2024 || unit.legalFee || 0,
             unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
-            isVacant
+            true
           ),
           meterNumber: unit.meterNumber,
           status: unit.status,
