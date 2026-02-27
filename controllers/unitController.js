@@ -576,11 +576,25 @@ const updateUnit = async (req, res) => {
     unit.updatedBy = req.user?._id;
     await unit.save();
 
-    // Keep active tenants in this unit in sync with the unit's monthlyPrice
+    // Keep active tenants in this unit in sync with the unit's updated prices.
+    // IMPORTANT: must sync baseRent2024 + lastRentIncreaseDate (not just rentAmount)
+    // otherwise getTenant's getCurrentRent() still uses the old base and applies 26% on top.
+    const tenantSync = {};
     if (mp != null) {
+      tenantSync.rentAmount = mp;
+      tenantSync.baseRent2024 = mp;               // Reset base so 26% calculates from new price
+      tenantSync.lastRentIncreaseDate = new Date(); // Reset origin date
+    }
+    if (sc != null) {
+      tenantSync.serviceChargeAmount = sc;
+      tenantSync.baseServiceCharge2024 = sc;
+      tenantSync.lastServiceIncreaseDate = new Date();
+    }
+    if (Object.keys(tenantSync).length > 0) {
+      tenantSync.updatedBy = req.user?._id;
       await Tenant.updateMany(
         { unit: unit._id, isActive: true },
-        { $set: { rentAmount: mp, updatedBy: req.user?._id } }
+        { $set: tenantSync }
       );
     }
 
