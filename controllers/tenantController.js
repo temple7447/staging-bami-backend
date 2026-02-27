@@ -666,7 +666,9 @@ const updateTenant = async (req, res) => {
       tenantPhone,
       whatsapp,
       rentAmount,
+      serviceChargeAmount,
       tenantType,
+      status,
       electricMeterNumber,
       entryDate,
       nextDueDate
@@ -687,11 +689,32 @@ const updateTenant = async (req, res) => {
     // Rent and unit monthly price are the same concept. If rent is updated here,
     // also update the linked unit's monthlyPrice so they stay in sync.
     let newRentAmount = undefined;
+    let newServiceChargeAmount = undefined;
+    const historyMeta = {};
+
     if (rentAmount !== undefined) {
       newRentAmount = parseInt(rentAmount);
+      if (newRentAmount !== tenant.rentAmount) {
+        historyMeta.oldRent = tenant.rentAmount;
+        historyMeta.newRent = newRentAmount;
+      }
       tenant.rentAmount = newRentAmount;
     }
-    if (tenantType !== undefined) tenant.tenantType = tenantType;
+
+    if (serviceChargeAmount !== undefined) {
+      newServiceChargeAmount = parseInt(serviceChargeAmount);
+      if (newServiceChargeAmount !== tenant.serviceChargeAmount) {
+        historyMeta.oldServiceCharge = tenant.serviceChargeAmount;
+        historyMeta.newServiceCharge = newServiceChargeAmount;
+      }
+      tenant.serviceChargeAmount = newServiceChargeAmount;
+    }
+
+    if (tenantType !== undefined) {
+      if (tenantType !== tenant.tenantType) historyMeta.tenantType = tenantType;
+      tenant.tenantType = tenantType;
+    }
+    if (status !== undefined) tenant.status = status;
     if (electricMeterNumber !== undefined) tenant.electricMeterNumber = electricMeterNumber;
 
     if (entryDate !== undefined) {
@@ -703,6 +726,18 @@ const updateTenant = async (req, res) => {
     }
 
     if (req.user?.id) tenant.updatedBy = req.user.id;
+    // Backfill createdBy for old records that were saved without it (prevents Mongoose ValidationError)
+    if (!tenant.createdBy && req.user?._id) tenant.createdBy = req.user._id;
+
+    // Record a note in history if significant fields changed
+    if (Object.keys(historyMeta).length > 0) {
+      tenant.history.push({
+        event: 'note',
+        note: 'Tenant information updated',
+        meta: historyMeta,
+        createdBy: req.user?._id
+      });
+    }
 
     // If rent changed and this tenant has a unit, mirror it to the unit.monthlyPrice
     if (newRentAmount != null && tenant.unit) {
@@ -713,6 +748,22 @@ const updateTenant = async (req, res) => {
         });
       } catch (e) {
         logWarning('Failed to sync unit monthlyPrice from tenant rentAmount', {
+          tenantId: tenant._id,
+          unitId: tenant.unit,
+          error: e?.message,
+        });
+      }
+    }
+
+    // If service charge changed and this tenant has a unit, mirror it to the unit
+    if (newServiceChargeAmount != null && tenant.unit) {
+      try {
+        await Unit.findByIdAndUpdate(tenant.unit, {
+          serviceChargeMonthly: newServiceChargeAmount,
+          updatedBy: req.user?.id,
+        });
+      } catch (e) {
+        logWarning('Failed to sync unit serviceChargeMonthly from tenant serviceChargeAmount', {
           tenantId: tenant._id,
           unitId: tenant.unit,
           error: e?.message,

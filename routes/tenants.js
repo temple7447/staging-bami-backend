@@ -46,6 +46,7 @@ router.post('/me/billing/pay', protect, paySelectedBillingItems);
 // Single tenant ops - parameterized routes
 router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getTenant);
 router.put('/:id', protect, validateObjectId('id'), validateTenantUpdate, handleValidationErrors, updateTenant);
+router.patch('/:id', protect, validateObjectId('id'), validateTenantUpdate, handleValidationErrors, updateTenant); // PATCH alias for partial updates
 router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteTenant);
 
 // History endpoints

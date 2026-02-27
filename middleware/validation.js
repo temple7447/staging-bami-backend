@@ -94,22 +94,29 @@ const validateTenantUpdate = [
   check('unitId').optional().trim().isMongoId().withMessage('Invalid unit ID'),
 
   // Allow updating name via either full name or parts
-  check('tenantName').optional().trim().notEmpty().isLength({ max: 150 }),
-  check('firstName').optional().trim().isLength({ min: 1, max: 100 }),
-  check('surname').optional().trim().isLength({ min: 1, max: 100 }),
-  check('otherNames').optional().trim().isLength({ max: 100 }),
+  check('tenantName').optional().trim().notEmpty().withMessage('Tenant name cannot be empty').isLength({ max: 150 }).withMessage('Tenant name cannot be more than 150 characters'),
+  check('firstName').optional().trim().isLength({ min: 1, max: 100 }).withMessage('First name must be between 1 and 100 characters'),
+  check('surname').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Surname must be between 1 and 100 characters'),
+  check('otherNames').optional().trim().isLength({ max: 100 }).withMessage('Other names cannot be more than 100 characters'),
 
-  check('tenantEmail').optional().isEmail().normalizeEmail(),
-  check('email').optional().isEmail().normalizeEmail(),
-  check('tenantPhone').optional().isLength({ min: 5, max: 25 }),
-  check('whatsapp').optional().isLength({ min: 5, max: 25 }),
-  check('rentAmount').optional().isInt({ min: 0 }).toInt(),
+  check('tenantEmail').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email').normalizeEmail(),
+  check('email').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email').normalizeEmail(),
+  check('tenantPhone').optional({ checkFalsy: true }).isLength({ min: 5, max: 25 }).withMessage('Invalid phone number'),
+  check('whatsapp').optional({ checkFalsy: true }).isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
+  check('rentAmount').optional().isInt({ min: 0 }).withMessage('Rent amount must be a non-negative number').toInt(),
+  check('serviceChargeAmount').optional().isInt({ min: 0 }).withMessage('Service charge must be a non-negative number').toInt(),
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
-    .isIn(['new', 'existing', 'renewal', 'transfer']),
-  check('entryDate').optional().isString(),
-  check('nextDueDate').optional().isString()
+    .isIn(['new', 'existing', 'renewal', 'transfer'])
+    .withMessage('Tenant type must be one of: new, existing, renewal, transfer'),
+  check('status')
+    .optional()
+    .isIn(['occupied', 'vacant', 'pending', 'evicted'])
+    .withMessage('Status must be one of: occupied, vacant, pending, evicted'),
+  check('electricMeterNumber').optional().isString().withMessage('Invalid meter number'),
+  check('entryDate').optional().isString().withMessage('entryDate must be a string date'),
+  check('nextDueDate').optional().isString().withMessage('nextDueDate must be a string date')
 ];
 
 // Transaction validators
