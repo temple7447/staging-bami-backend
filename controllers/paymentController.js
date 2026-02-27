@@ -271,23 +271,15 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
       }
 
       if (paymentType === 'caution_fee') {
-        const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
-        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
-          amount = 0; // Exempt after 1 year or if not a new tenant
-        } else {
-          const base = tenant.baseCaution2024 || tenant.unit?.cautionFee || 0;
-          const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
-          amount = getCurrentRent(base, origin, false);
-        }
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const base = tenant.baseCaution2024 || tenant.unit?.cautionFee || 0;
+        const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
+        amount = getCurrentRent(base, origin, false);
       } else if (paymentType === 'legal_fee') {
-        const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
-        if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
-          amount = 0; // Exempt after 1 year or if not a new tenant
-        } else {
-          const base = tenant.baseLegal2024 || tenant.unit?.legalFee || 0;
-          const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
-          amount = getCurrentRent(base, origin, false);
-        }
+        const { getCurrentRent } = require('../utils/rentCalculator');
+        const base = tenant.baseLegal2024 || tenant.unit?.legalFee || 0;
+        const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
+        amount = getCurrentRent(base, origin, false);
       }
 
       // Final amount validation (for all payment types)

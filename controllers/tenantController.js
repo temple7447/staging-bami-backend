@@ -478,7 +478,7 @@ const getTenant = async (req, res) => {
     }
 
     const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
-    const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
+    const isApplicable = true; // Use business logic from calculator, now universally true
 
     const currentCalculatedRent = getCurrentRent(
       tenant.baseRent2024 || tenant.rentAmount,
@@ -963,8 +963,8 @@ const listBillingItems = async (req, res) => {
       });
     }
 
-    // For "new" tenants we also expose caution and legal fees if configured and not yet paid
-    if (!isExistingLike) {
+    // Expose caution and legal fees if configured and not yet paid
+    if (true) { // Restriction removed: apply to all tenant types (existing, new, etc)
       if (unit.cautionFee && unit.cautionFee > 0) {
         const paidCaution = await Payment.exists({
           tenant: tenant._id,

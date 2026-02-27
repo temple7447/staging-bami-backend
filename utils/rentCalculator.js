@@ -81,16 +81,9 @@ const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originD
  * @returns {boolean} True if stay duration is less than 1 year
  */
 const isOneTimeFeeApplicable = (entryDate) => {
-    if (!entryDate) return true;
-    const entry = new Date(entryDate);
-    const now = new Date();
-
-    // Difference in years
-    const yearsDiff = (now.getFullYear() - entry.getFullYear()) +
-        (now.getMonth() - entry.getMonth()) / 12 +
-        (now.getDate() - entry.getDate()) / 365;
-
-    return yearsDiff < 1;
+    // UPDATED: Business rule relaxed. Fees are now applicable if configured on the unit/tenant,
+    // regardless of stay duration. 
+    return true;
 };
 
 module.exports = {
