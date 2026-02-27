@@ -64,13 +64,24 @@ const validateTenantCreate = [
     return true;
   }),
 
-  // Email: accept either tenantEmail or email
-  check('tenantEmail').optional().isEmail().withMessage('Invalid email').normalizeEmail(),
-  check('email').optional().isEmail().withMessage('Invalid email').normalizeEmail(),
+  // Email: strip invalid emails instead of blocking the request
+  // (e.g. if user types a name instead of an email, just save with no email)
+  check('tenantEmail').optional({ checkFalsy: true })
+    .customSanitizer(v => (v && v.includes('@') ? v : undefined))
+    .if(body('tenantEmail').notEmpty())
+    .isEmail().withMessage('Invalid email').normalizeEmail(),
+  check('email').optional({ checkFalsy: true })
+    .customSanitizer(v => (v && v.includes('@') ? v : undefined))
+    .if(body('email').notEmpty())
+    .isEmail().withMessage('Invalid email').normalizeEmail(),
 
-  // Phone/WhatsApp
-  check('tenantPhone').optional().isLength({ min: 5, max: 25 }).withMessage('Invalid phone'),
-  check('whatsapp').optional().isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
+  // Phone/WhatsApp — strip spaces so '0705 078 2155' works fine
+  check('tenantPhone').optional({ checkFalsy: true })
+    .customSanitizer(v => (v ? String(v).replace(/\s+/g, '') : v))
+    .isLength({ min: 5, max: 25 }).withMessage('Invalid phone'),
+  check('whatsapp').optional({ checkFalsy: true })
+    .customSanitizer(v => (v ? String(v).replace(/\s+/g, '') : v))
+    .isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
 
   check('rentAmount').optional().isInt({ min: 0 }).toInt(),
   check('tenantType')
@@ -99,10 +110,20 @@ const validateTenantUpdate = [
   check('surname').optional().trim().isLength({ min: 1, max: 100 }).withMessage('Surname must be between 1 and 100 characters'),
   check('otherNames').optional().trim().isLength({ max: 100 }).withMessage('Other names cannot be more than 100 characters'),
 
-  check('tenantEmail').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email').normalizeEmail(),
-  check('email').optional({ checkFalsy: true }).isEmail().withMessage('Invalid email').normalizeEmail(),
-  check('tenantPhone').optional({ checkFalsy: true }).isLength({ min: 5, max: 25 }).withMessage('Invalid phone number'),
-  check('whatsapp').optional({ checkFalsy: true }).isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
+  check('tenantEmail').optional({ checkFalsy: true })
+    .customSanitizer(v => (v && v.includes('@') ? v : undefined))
+    .if(body('tenantEmail').notEmpty())
+    .isEmail().withMessage('Invalid email').normalizeEmail(),
+  check('email').optional({ checkFalsy: true })
+    .customSanitizer(v => (v && v.includes('@') ? v : undefined))
+    .if(body('email').notEmpty())
+    .isEmail().withMessage('Invalid email').normalizeEmail(),
+  check('tenantPhone').optional({ checkFalsy: true })
+    .customSanitizer(v => (v ? String(v).replace(/\s+/g, '') : v))
+    .isLength({ min: 5, max: 25 }).withMessage('Invalid phone number'),
+  check('whatsapp').optional({ checkFalsy: true })
+    .customSanitizer(v => (v ? String(v).replace(/\s+/g, '') : v))
+    .isLength({ min: 5, max: 25 }).withMessage('Invalid WhatsApp number'),
   check('rentAmount').optional().isInt({ min: 0 }).withMessage('Rent amount must be a non-negative number').toInt(),
   check('serviceChargeAmount').optional().isInt({ min: 0 }).withMessage('Service charge must be a non-negative number').toInt(),
   check('tenantType')

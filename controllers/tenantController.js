@@ -219,17 +219,23 @@ const createTenant = async (req, res) => {
     res.status(201).json({ success: true, message: 'Tenant created successfully', data: tenant });
   } catch (err) {
     logError('POST /api/tenants', err, { unitId: req.body?.unitId, tenantName: req.body?.tenantName, estateId });
+    console.error('DIAGNOSTIC - Tenant creation failed:', {
+      errorName: err.name,
+      errorCode: err.code,
+      errorMessage: err.message,
+      body: req.body
+    });
 
     if (err.code === 11000) {
       const message = 'A tenant already exists for this unit in the estate';
       logWarning('Duplicate tenant entry attempted', { unitId, tenantName });
-      return res.status(400).json({ success: false, message });
+      return res.status(400).json({ success: false, message, detail: err.message });
     }
     if (err.name === 'ValidationError') {
       logWarning('Validation error on tenant creation', { message: err.message });
-      return res.status(400).json({ success: false, message: err.message });
+      return res.status(400).json({ success: false, message: err.message, errors: err.errors });
     }
-    res.status(500).json({ success: false, message: 'Server error occurred while creating tenant' });
+    res.status(500).json({ success: false, message: 'Server error occurred while creating tenant', error: err.message });
   }
 };
 
