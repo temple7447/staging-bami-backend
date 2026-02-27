@@ -806,7 +806,7 @@ exports.sendReceiptEmail = async (receiptData, tenant, estate) => {
   if (pdfBuffer) {
     emailOptions.attachments = [
       {
-        filename: `Receipt-${paymentDate.replace(/ /g, '-')}.pdf`,
+        filename: `Receipt-${String(paymentDate).replace(/ /g, '-')}.pdf`,
         content: pdfBuffer,
         type: 'application/pdf'
       }

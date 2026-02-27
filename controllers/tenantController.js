@@ -832,7 +832,7 @@ const addTransaction = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { amount, type, method, status, reference, periodMonth, periodYear, notes } = req.body;
+    const { amount, type, method, status, reference, periodMonth, periodYear, notes, durationMonths } = req.body;
     const tx = await Transaction.create({
       tenant: tenant._id,
       estate: tenant.estate,
@@ -847,9 +847,39 @@ const addTransaction = async (req, res) => {
       createdBy: req.user?.id
     });
 
-    // Record in tenant history
-    tenant.history.push({ event: 'payment', note: `Payment ${type}`, meta: { amount, reference }, createdBy: req.user?.id });
-    await tenant.save();
+    // Auto-advance nextDueDate for rent/service_charge payments
+    let newDueDate = null;
+    let appliedMonths = 0;
+    if (['rent', 'service_charge'].includes(type) && status === 'paid') {
+      // Use provided durationMonths, or default based on tenant type
+      appliedMonths = durationMonths
+        ? parseInt(durationMonths, 10)
+        : (tenant.tenantType === 'new' ? 12 : 6);
+
+      if (appliedMonths > 0) {
+        const baseDate = tenant.nextDueDate
+          ? new Date(tenant.nextDueDate)
+          : (tenant.entryDate ? new Date(tenant.entryDate) : new Date());
+        newDueDate = new Date(baseDate);
+        newDueDate.setMonth(newDueDate.getMonth() + appliedMonths);
+
+        const oldDueDate = tenant.nextDueDate;
+        tenant.nextDueDate = newDueDate;
+
+        tenant.history.push({
+          event: 'payment',
+          note: `${type === 'rent' ? 'Rent' : 'Service charge'} payment recorded (${method || 'cash'}) for ${appliedMonths} month(s). Due date advanced to ${newDueDate.toISOString().split('T')[0]}`,
+          meta: { amount, reference, type, durationMonths: appliedMonths, oldDueDate, newDueDate, txId: tx._id },
+          createdBy: req.user?.id
+        });
+      }
+    } else {
+      // Non-rent payments — just log in history
+      tenant.history.push({ event: 'payment', note: `Payment ${type}`, meta: { amount, reference }, createdBy: req.user?.id });
+    }
+
+    if (!tenant.createdBy && req.user?._id) tenant.createdBy = req.user._id;
+    await tenant.save({ validateBeforeSave: false });
 
     res.status(201).json({ success: true, message: 'Transaction recorded', data: tx });
   } catch (err) {

@@ -122,13 +122,14 @@ const validateTenantUpdate = [
 // Transaction validators
 const validateTransactionCreate = [
   check('amount').notEmpty().withMessage('Amount is required').isInt({ min: 0 }).withMessage('Amount must be a non-negative integer').toInt(),
-  check('type').notEmpty().isIn(['rent', 'utility', 'deposit', 'other']).withMessage('Invalid type'),
+  check('type').notEmpty().isIn(['rent', 'utility', 'deposit', 'service_charge', 'other']).withMessage('Invalid type'),
   check('method').optional().isIn(['cash', 'transfer', 'card', 'bank', 'other']).withMessage('Invalid method'),
   check('status').optional().isIn(['paid', 'pending', 'failed']).withMessage('Invalid status'),
   check('periodMonth').optional().isInt({ min: 1, max: 12 }).toInt(),
   check('periodYear').optional().isInt({ min: 1900 }).toInt(),
   check('reference').optional().isLength({ max: 120 }),
-  check('notes').optional().isLength({ max: 1000 })
+  check('notes').optional().isLength({ max: 1000 }),
+  check('durationMonths').optional().isInt({ min: 1, max: 12 }).withMessage('durationMonths must be between 1 and 12').toInt()
 ];
 
 const validateHistoryCreate = [

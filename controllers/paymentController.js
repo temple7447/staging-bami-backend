@@ -1515,7 +1515,9 @@ const recordManualPayment = async (req, res) => {
       try {
         let wallet = null;
         if (tenant.user) wallet = await Wallet.findOne({ userId: tenant.user });
-        await sendReceiptEmail(payment, tenant, tenant.estate, wallet);
+        // Build the pre-calculated receipt data (sendReceiptEmail expects this, not the raw payment)
+        const receiptData = calculateReceiptData(tenant, payment, wallet);
+        await sendReceiptEmail(receiptData, tenant, tenant.estate, wallet);
       } catch (emailError) {
         logError('Manual payment receipt failure', emailError);
       }
