@@ -582,6 +582,7 @@ const getTenant = async (req, res) => {
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
 
       nextDue: tenant.nextDueDate,
+      entryDate: tenant.entryDate,       // Move-in date (for edit form pre-population)
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
       typeBadge: tenant.tenantType === 'new' ? 'New' : tenant.tenantType === 'existing' ? 'Existing' : tenant.tenantType === 'renewal' ? 'Renewal' : 'Transfer',
