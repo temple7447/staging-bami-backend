@@ -586,6 +586,8 @@ const getTenant = async (req, res) => {
 
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
+      unitCautionFee: tenant.unit ? tenant.unit.cautionFee : null,
+      unitLegalFee: tenant.unit ? tenant.unit.legalFee : null,
 
       nextDue: tenant.nextDueDate,
       entryDate: tenant.entryDate,       // Move-in date (for edit form pre-population)

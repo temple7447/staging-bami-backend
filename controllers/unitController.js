@@ -500,6 +500,12 @@ const updateUnit = async (req, res) => {
     const cf = cautionFee != null ? Number(cautionFee) : undefined;
     const lf = legalFee != null ? Number(legalFee) : undefined;
 
+    console.log('DIAGNOSTIC - updateUnit Incoming:', {
+      unitId,
+      body: req.body,
+      parsed: { mp, sc, cf, lf }
+    });
+
     if (mp != null && (Number.isNaN(mp) || mp <= 0)) {
       return res.status(400).json({ success: false, message: 'Monthly price must be a positive number' });
     }
@@ -600,9 +606,22 @@ const updateUnit = async (req, res) => {
     }
     if (Object.keys(tenantSync).length > 0) {
       tenantSync.updatedBy = req.user?._id;
+
+      // Build a history entry record
+      const historyEntry = {
+        event: 'note',
+        note: 'Unit fees updated, tenant synced automatically',
+        meta: { ...tenantSync },
+        createdBy: req.user?._id,
+        createdAt: new Date()
+      };
+
       await Tenant.updateMany(
         { unit: unit._id, isActive: true },
-        { $set: tenantSync }
+        {
+          $set: tenantSync,
+          $push: { history: historyEntry }
+        }
       );
     }
 
