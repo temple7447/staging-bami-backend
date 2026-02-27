@@ -590,6 +590,14 @@ const updateUnit = async (req, res) => {
       tenantSync.baseServiceCharge2024 = sc;
       tenantSync.lastServiceIncreaseDate = new Date();
     }
+    if (cf != null) {
+      tenantSync.baseCaution2024 = cf;
+      tenantSync.lastCautionIncreaseDate = new Date();
+    }
+    if (lf != null) {
+      tenantSync.baseLegal2024 = lf;
+      tenantSync.lastLegalIncreaseDate = new Date();
+    }
     if (Object.keys(tenantSync).length > 0) {
       tenantSync.updatedBy = req.user?._id;
       await Tenant.updateMany(
