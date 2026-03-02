@@ -259,6 +259,23 @@ app.use('/api/service-requests', require('./routes/serviceRequests'));
 app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/notifications', require('./routes/notifications'));
 
+// Test routes for manual triggers
+const { triggerMonthlyReport, getSchedulerStatus } = require('./utils/scheduler');
+
+app.get('/api/test/send-monthly-report', async (req, res) => {
+  try {
+    const result = await triggerMonthlyReport();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/scheduler-status', (req, res) => {
+  const status = getSchedulerStatus();
+  res.json(status);
+});
+
 app.all('*', (req, res) => {
   res.status(404).json({
     success: false,
