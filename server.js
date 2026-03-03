@@ -15,6 +15,7 @@ const requestIdMiddleware = require('./middleware/requestId');
 const sanitizationMiddleware = require('./middleware/sanitization');
 const { versioningMiddleware, apiVersion } = require('./middleware/apiVersion');
 const { initializeScheduler } = require('./utils/scheduler');
+const { ensureAllUsersHaveWallets } = require('./utils/ensureWallets');
 const { ensureCloudinaryConfigured } = require('./config/cloudinary');
 const { getMailtrapStatus } = require('./utils/emailService');
 const swaggerSpec = require('./config/swagger');
@@ -30,6 +31,14 @@ const serverStart = async () => {
   try {
     await connectDatabase();
     logger.info('Database connected successfully');
+    
+    // Ensure all users have wallets (run on every server start)
+    console.log('\n' + '='.repeat(50));
+    console.log('🚀 STARTING WALLET CHECK ON SERVER BOOT');
+    console.log('='.repeat(50));
+    const walletCheck = await ensureAllUsersHaveWallets();
+    console.log('='.repeat(50));
+    console.log('✅ Wallet check completed on server boot\n');
   } catch (error) {
     logger.error('Failed to connect to database', { error: error.message });
     process.exit(1);
