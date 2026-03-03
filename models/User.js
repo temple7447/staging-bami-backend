@@ -28,7 +28,7 @@ const UserSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: ['super_admin', 'admin', 'business_owner', 'manager', 'super_manager', 'vendor', 'super_vendor', 'tenant', 'user'],
-    default: 'admin'
+    default: 'tenant'
   },
   // For business_owner role - estates they own
   assignedEstates: [{
