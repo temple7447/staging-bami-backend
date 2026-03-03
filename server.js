@@ -258,9 +258,10 @@ app.use('/api/business-types', require('./routes/businessTypes'));
 app.use('/api/service-requests', require('./routes/serviceRequests'));
 app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/vendor-manager-payout', require('./routes/vendorManagerPayout'));
 
 // Test routes for manual triggers
-const { triggerMonthlyReport, getSchedulerStatus } = require('./utils/scheduler');
+const { triggerMonthlyReport, getSchedulerStatus, triggerVendorManagerPayout } = require('./utils/scheduler');
 
 app.get('/api/test/send-monthly-report', async (req, res) => {
   try {
@@ -269,6 +270,20 @@ app.get('/api/test/send-monthly-report', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+app.get('/api/test/trigger-vendor-manager-payout', async (req, res) => {
+  try {
+    const result = await triggerVendorManagerPayout();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/test/scheduler-status', (req, res) => {
+  const status = getSchedulerStatus();
+  res.json(status);
 });
 
 app.get('/api/test/scheduler-status', (req, res) => {

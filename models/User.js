@@ -208,6 +208,36 @@ UserSchema.methods.updateLastLogin = function () {
   return this.save({ validateBeforeSave: false });
 };
 
+// Auto-create wallet for new users
+UserSchema.post('save', async function (user) {
+  try {
+    const Wallet = mongoose.model('Wallet');
+    const existingWallet = await Wallet.findOne({ userId: user._id });
+    
+    if (!existingWallet) {
+      await Wallet.create({
+        userId: user._id,
+        balance: 0,
+        currency: 'NGN',
+        totalEarnings: 0,
+        totalSpent: 0,
+        isActive: true
+      });
+      console.log(`[User Model] Wallet created for user: ${user.email} (${user.role})`);
+      
+      // Send wallet created email
+      try {
+        const { sendWalletCreatedEmail } = require('../utils/walletEmailService');
+        await sendWalletCreatedEmail(user);
+      } catch (emailError) {
+        console.error(`[User Model] Failed to send wallet created email:`, emailError.message);
+      }
+    }
+  } catch (error) {
+    console.error(`[User Model] Error creating wallet for user ${user._id}:`, error.message);
+  }
+});
+
 // Performance indexes for common query patterns
 UserSchema.index({ email: 1, isActive: 1 });
 UserSchema.index({ role: 1, isActive: 1 });

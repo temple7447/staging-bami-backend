@@ -2,11 +2,13 @@ const schedule = require('node-schedule');
 const { checkAndSendReminders, checkAndSendOverdueReminders } = require('./reminderService');
 const { processPeriodicRentIncreases } = require('./rentIncreaseService');
 const { sendMonthlyReport } = require('./monthlyReportService');
+const { processMonthlyPayout, getPayoutStatus } = require('./vendorManagerPayoutService');
 
 let reminderJob = null;
 let overdueReminderJob = null;
 let rentIncreaseJob = null;
 let monthlyReportJob = null;
+let vendorManagerPayoutJob = null;
 
 /**
  * Initialize the reminder scheduler
@@ -70,12 +72,35 @@ const initializeScheduler = () => {
       console.log('═'.repeat(60));
     });
 
+    // Schedule vendor/manager monthly payout on the 1st of every month at 10 AM
+    // Cron pattern: "0 10 1 * *" = 10:00 AM on the 1st of every month
+    vendorManagerPayoutJob = schedule.scheduleJob('0 10 1 * *', async () => {
+      console.log('═'.repeat(60));
+      console.log('💰 VENDOR/MANAGER MONTHLY PAYOUT STARTED');
+      console.log('═'.repeat(60));
+      const result = await processMonthlyPayout();
+      if (result.success) {
+        console.log(`✅ Payout processed: ₦${result.currentAmount.toLocaleString()} per user`);
+        console.log(`👥 Successful payouts: ${result.summary.successfulPayouts}`);
+        console.log(`💵 Total distributed: ₦${result.summary.totalDistributed.toLocaleString()}`);
+        if (result.summary.failedPayouts > 0) {
+          console.log(`⚠️  Failed payouts: ${result.summary.failedPayouts}`);
+        }
+      } else {
+        console.log(`❌ Payout failed: ${result.message}`);
+      }
+      console.log('═'.repeat(60));
+      console.log('💰 VENDOR/MANAGER MONTHLY PAYOUT COMPLETED');
+      console.log('═'.repeat(60));
+    });
+
     console.log('✅ Reminder scheduler initialized successfully');
     console.log('⏰ Full reminders and Rent Increases checked daily at 08:00 AM');
     console.log('⚠️  Overdue reminders checked every 12 hours at 08:00 AM and 08:00 PM');
     console.log('📊 Monthly tenant report sent on the 1st of every month at 09:00 AM');
+    console.log('💰 Vendor/Manager monthly payout on the 1st of every month at 10:00 AM');
 
-    return { reminderJob, overdueReminderJob, rentIncreaseJob, monthlyReportJob };
+    return { reminderJob, overdueReminderJob, rentIncreaseJob, monthlyReportJob, vendorManagerPayoutJob };
   } catch (error) {
     console.error('❌ Error initializing reminder scheduler:', error.message);
     throw error;
@@ -102,6 +127,10 @@ const stopScheduler = () => {
     if (monthlyReportJob) {
       monthlyReportJob.cancel();
       monthlyReportJob = null;
+    }
+    if (vendorManagerPayoutJob) {
+      vendorManagerPayoutJob.cancel();
+      vendorManagerPayoutJob = null;
     }
     console.log('✅ All reminder schedulers stopped');
   } catch (error) {
@@ -140,6 +169,21 @@ const triggerMonthlyReport = async () => {
 };
 
 /**
+ * Manually trigger vendor/manager payout (useful for testing)
+ */
+const triggerVendorManagerPayout = async () => {
+  try {
+    console.log('⚙️  Manually triggering vendor/manager payout...');
+    const result = await processMonthlyPayout();
+    console.log('✅ Manual vendor/manager payout completed:', result);
+    return result;
+  } catch (error) {
+    console.error('❌ Error during manual vendor/manager payout:', error.message);
+    throw error;
+  }
+};
+
+/**
  * Get scheduler status
  */
 const getSchedulerStatus = () => {
@@ -163,6 +207,11 @@ const getSchedulerStatus = () => {
       isRunning: monthlyReportJob !== null,
       nextInvocation: monthlyReportJob ? monthlyReportJob.nextInvocation() : null,
       schedule: '0 9 1 * * (09:00 AM on 1st of every month)'
+    },
+    vendorManagerPayout: {
+      isRunning: vendorManagerPayoutJob !== null,
+      nextInvocation: vendorManagerPayoutJob ? vendorManagerPayoutJob.nextInvocation() : null,
+      schedule: '0 10 1 * * (10:00 AM on 1st of every month)'
     }
   };
 };
@@ -172,5 +221,6 @@ module.exports = {
   stopScheduler,
   triggerReminderCheck,
   triggerMonthlyReport,
-  getSchedulerStatus
+  getSchedulerStatus,
+  triggerVendorManagerPayout
 };

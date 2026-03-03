@@ -2,6 +2,7 @@ const Wallet = require('../models/Wallet');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 const { validationResult } = require('express-validator');
+const { sendDepositEmail, sendWithdrawalEmail, sendTransactionNotificationEmail } = require('../utils/walletEmailService');
 
 // Get wallet balance
 const getWallet = async (req, res) => {
@@ -91,6 +92,14 @@ const addFunds = async (req, res) => {
     wallet.lastUpdated = new Date();
     await wallet.save();
 
+    // Send deposit email notification
+    try {
+      const user = await User.findById(req.user.id);
+      await sendDepositEmail(user, amount, { _id: 'WALLET-DEP-' + Date.now(), newBalance: wallet.balance }, 'Wallet Deposit');
+    } catch (emailError) {
+      console.error('Failed to send deposit email:', emailError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Funds added successfully',
@@ -129,6 +138,14 @@ const deductFunds = async (req, res) => {
     wallet.totalSpent += amount;
     wallet.lastUpdated = new Date();
     await wallet.save();
+
+    // Send withdrawal/debit email notification
+    try {
+      const user = await User.findById(req.user.id);
+      await sendWithdrawalEmail(user, amount, { _id: 'WALLET-WD-' + Date.now(), newBalance: wallet.balance });
+    } catch (emailError) {
+      console.error('Failed to send withdrawal email:', emailError.message);
+    }
 
     res.status(200).json({
       success: true,

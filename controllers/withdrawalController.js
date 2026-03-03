@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { logError } = require('../utils/logger');
 const { createNotification } = require('../utils/notificationService');
 const { sendWithdrawalToSlack } = require('../utils/slackService');
+const { sendWithdrawalEmail } = require('../utils/walletEmailService');
 
 // @desc    Request a withdrawal
 // @route   POST /api/withdrawals/request
@@ -60,6 +61,13 @@ exports.requestWithdrawal = async (req, res) => {
         });
 
         sendWithdrawalToSlack(withdrawal, user.email, 'requested');
+
+        // Send email notification
+        try {
+          await sendWithdrawalEmail(user, amount, { _id: withdrawal._id, reference, newBalance: wallet.balance }, effectiveBankDetails);
+        } catch (emailError) {
+          console.error('Failed to send withdrawal email:', emailError.message);
+        }
 
         res.status(201).json({
             success: true,
