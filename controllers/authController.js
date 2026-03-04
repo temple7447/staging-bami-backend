@@ -1351,8 +1351,9 @@ exports.deleteVendor = async (req, res) => {
       });
     }
 
-    // Delete the user
-    await vendor.deleteOne();
+    // Soft delete by setting isActive to false - prevents access and payments
+    vendor.isActive = false;
+    await vendor.save();
 
     res.status(200).json({
       success: true,
