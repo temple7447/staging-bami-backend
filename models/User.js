@@ -30,6 +30,11 @@ const UserSchema = new mongoose.Schema({
     enum: ['super_admin', 'admin', 'business_owner', 'manager', 'super_manager', 'vendor', 'super_vendor', 'tenant', 'user'],
     default: 'tenant'
   },
+  position: {
+    type: String,
+    trim: true,
+    maxlength: [100, 'Position cannot be more than 100 characters']
+  },
   // For business_owner role - estates they own
   assignedEstates: [{
     type: mongoose.Schema.ObjectId,

@@ -1096,19 +1096,7 @@ exports.onboardVendor = async (req, res) => {
       name,
       email,
       phone,
-      businessTypeId,
-      businessName,
-      specialization,
-      cacNumber,
-      govId,
-      certification,
-      businessAddress,
-      portfolio,
-      bio,
-      location,
-      operationalHours,
-      isVerifiedPro,
-      services,
+      position,
       sendCredentials = true
     } = req.body;
 
@@ -1129,22 +1117,7 @@ exports.onboardVendor = async (req, res) => {
       });
     }
 
-    // Validate business type if provided
-    let businessType = null;
-    if (businessTypeId) {
-      const BusinessType = require('../models/BusinessType');
-      businessType = await BusinessType.findOne({
-        _id: businessTypeId,
-        isActive: true
-      });
-
-      if (!businessType) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid or inactive business type'
-        });
-      }
-    }
+    // Note: Business details are assigned separately by admin after onboarding
 
     // Generate secure password
     const temporaryPassword = generateSecurePassword(12);
@@ -1157,26 +1130,14 @@ exports.onboardVendor = async (req, res) => {
       console.log('-----------------------------------------');
     }
 
-    // Create vendor user
+    // Create vendor user (basic info only - business details added by admin later)
     const vendor = await User.create({
       name,
       email: email.toLowerCase(),
       phone,
+      position,
       password: temporaryPassword,
       role: 'vendor',
-      businessName,
-      businessTypeId,
-      specialization,
-      cacNumber,
-      govId,
-      certification,
-      businessAddress,
-      portfolio,
-      bio,
-      location,
-      operationalHours,
-      isVerifiedPro,
-      services,
       createdBy: req.user.id,
       emailVerified: false
     });
@@ -1186,13 +1147,10 @@ exports.onboardVendor = async (req, res) => {
       try {
         const { sendVendorWelcomeEmail } = require('../utils/emailService');
         await sendVendorWelcomeEmail(vendor, temporaryPassword, {
-          businessType: businessType?.name,
-          businessName,
-          specialization
+          position: position
         });
       } catch (error) {
         console.log('Failed to send welcome email:', error.message);
-        // Don't fail the request if email fails
       }
     }
 
@@ -1207,10 +1165,8 @@ exports.onboardVendor = async (req, res) => {
         name: vendor.name,
         email: vendor.email,
         phone: vendor.phone,
+        position: vendor.position,
         role: vendor.role,
-        businessType: businessType?.name,
-        businessName,
-        specialization,
         isActive: vendor.isActive,
         createdAt: vendor.createdAt
       }
@@ -1400,7 +1356,7 @@ exports.deleteVendor = async (req, res) => {
 // @access  Private (Admin/Super Admin)
 exports.onboardManager = async (req, res) => {
   try {
-    const { name, email, phone, estateIds = [], sendCredentials = true } = req.body;
+    const { name, email, phone, sendCredentials = true, position } = req.body;
 
     // Validate required fields
     if (!name || !email) {
@@ -1419,23 +1375,7 @@ exports.onboardManager = async (req, res) => {
       });
     }
 
-    // Validate estates if provided
-    const Estate = require('../models/Estate');
-    let assignedEstates = [];
-
-    if (estateIds.length > 0) {
-      assignedEstates = await Estate.find({
-        _id: { $in: estateIds },
-        isActive: true
-      });
-
-      if (assignedEstates.length !== estateIds.length) {
-        return res.status(400).json({
-          success: false,
-          message: 'One or more estates not found or inactive'
-        });
-      }
-    }
+    // Note: Estate assignment is done separately by admin after onboarding
 
     // Generate secure password
     const temporaryPassword = generateSecurePassword(12);
@@ -1448,14 +1388,15 @@ exports.onboardManager = async (req, res) => {
       console.log('-----------------------------------------');
     }
 
-    // Create manager user
+    // Create manager user (without estate assignment - admin assigns later)
     const manager = await User.create({
       name,
       email: email.toLowerCase(),
       phone,
+      position,
       password: temporaryPassword,
       role: 'manager',
-      assignedEstates: estateIds,
+      assignedEstates: [], // No estates assigned on onboarding - admin assigns later
       createdBy: req.user.id,
       emailVerified: false
     });
@@ -1464,10 +1405,9 @@ exports.onboardManager = async (req, res) => {
     if (sendCredentials) {
       try {
         const { sendManagerWelcomeEmail } = require('../utils/emailService');
-        await sendManagerWelcomeEmail(manager, temporaryPassword, assignedEstates);
+        await sendManagerWelcomeEmail(manager, temporaryPassword, []);
       } catch (error) {
         console.log('Failed to send welcome email:', error.message);
-        // Don't fail the request if email fails
       }
     }
 
@@ -1482,12 +1422,9 @@ exports.onboardManager = async (req, res) => {
         name: manager.name,
         email: manager.email,
         phone: manager.phone,
+        position: manager.position,
         role: manager.role,
-        assignedEstates: assignedEstates.map(e => ({
-          _id: e._id,
-          name: e.name,
-          totalUnits: e.totalUnits
-        })),
+        assignedEstates: [], // Admin should assign estates via PUT /api/auth/manager/:id
         isActive: manager.isActive,
         createdAt: manager.createdAt
       }

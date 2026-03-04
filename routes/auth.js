@@ -239,73 +239,11 @@ const validateOnboardVendor = [
     .optional()
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
-  body('businessTypeId')
-    .optional()
-    .isMongoId()
-    .withMessage('Please provide a valid business type ID'),
-  body('businessName')
+  body('position')
     .optional()
     .trim()
-    .isString()
-    .withMessage('Business name must be a string'),
-  body('specialization')
-    .optional()
-    .trim()
-    .isString()
-    .withMessage('Specialization must be a string'),
-  body('cacNumber')
-    .optional()
-    .trim()
-    .isString()
-    .withMessage('CAC Number must be a string'),
-  body('govId')
-    .optional()
-    .trim()
-    .isString()
-    .withMessage('Government ID must be a valid URL string'),
-  body('certification')
-    .optional()
-    .trim()
-    .isString()
-    .withMessage('Certification must be a valid URL string'),
-  body('businessAddress')
-    .optional()
-    .trim()
-    .isString()
-    .withMessage('Business address must be a string'),
-  body('portfolio')
-    .optional()
-    .isArray({ max: 5 })
-    .withMessage('Portfolio must be an array with a maximum of 5 images'),
-  body('bio')
-    .optional()
-    .trim()
-    .isLength({ max: 1000 })
-    .withMessage('Bio cannot exceed 1000 characters'),
-  body('location')
-    .optional()
-    .isObject()
-    .withMessage('Location must be an object'),
-  body('operationalHours')
-    .optional()
-    .isObject()
-    .withMessage('Operational hours must be an object'),
-  body('isVerifiedPro')
-    .optional()
-    .isBoolean()
-    .withMessage('isVerifiedPro must be a boolean'),
-  body('services')
-    .optional()
-    .isArray()
-    .withMessage('Services must be an array'),
-  body('services.*.name')
-    .if(body('services').exists())
-    .notEmpty()
-    .withMessage('Service name is required'),
-  body('services.*.price')
-    .if(body('services').exists())
-    .isNumeric()
-    .withMessage('Service price must be a number')
+    .isLength({ max: 100 })
+    .withMessage('Position cannot be more than 100 characters')
 ];
 
 router.post('/onboard-vendor', protect, validateOnboardVendor, handleValidationErrors, onboardVendor);
@@ -410,10 +348,11 @@ const validateOnboardManager = [
     .optional()
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
-  body('estateIds')
+  body('position')
     .optional()
-    .isArray()
-    .withMessage('Estate IDs must be an array')
+    .trim()
+    .isLength({ max: 100 })
+    .withMessage('Position cannot be more than 100 characters')
 ];
 
 router.post('/onboard-manager', protect, adminOrSuperAdmin, validateOnboardManager, handleValidationErrors, onboardManager);
