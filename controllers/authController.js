@@ -1270,13 +1270,29 @@ exports.updateVendor = async (req, res) => {
 // @access  Private (Admin/Super Admin)
 exports.getVendors = async (req, res) => {
   try {
-    const vendors = await User.find({ role: 'vendor' })
-      .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const [vendors, total] = await Promise.all([
+      User.find({ role: 'vendor' })
+        .populate('createdBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments({ role: 'vendor' })
+    ]);
 
     res.status(200).json({
       success: true,
       count: vendors.length,
+      total,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        limit
+      },
       data: vendors
     });
   } catch (error) {
@@ -1444,14 +1460,30 @@ exports.onboardManager = async (req, res) => {
 // @access  Private (Admin/Super Admin)
 exports.getManagers = async (req, res) => {
   try {
-    const managers = await User.find({ role: 'manager' })
-      .populate('createdBy', 'name email')
-      .populate('assignedEstates', 'name totalUnits')
-      .sort({ createdAt: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const [managers, total] = await Promise.all([
+      User.find({ role: 'manager' })
+        .populate('createdBy', 'name email')
+        .populate('assignedEstates', 'name totalUnits')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      User.countDocuments({ role: 'manager' })
+    ]);
 
     res.status(200).json({
       success: true,
       count: managers.length,
+      total,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(total / limit),
+        limit
+      },
       data: managers
     });
   } catch (error) {
