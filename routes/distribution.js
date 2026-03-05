@@ -4,10 +4,13 @@ const { validateObjectId, handleValidationErrors } = require('../middleware/vali
 const {
   getEstateWalletBalance,
   getEstateDistributionHistory,
-  withdrawOwnerFunds,
-  getMarketingAccountDetails,
-  getOwnerAccountDetails,
-  getOperationsAccountDetails
+  withdrawFamilySavings,
+  withdrawFromAnyWallet,
+  previewDistribution,
+  getGrowthEngineDetails,
+  getFulfillmentEngineDetails,
+  getInnovationEngineDetails,
+  getWalletSummary
 } = require('../controllers/distributionController');
 
 const router = express.Router({ mergeParams: true });
@@ -18,12 +21,21 @@ router.get('/:estateId/wallet/balance', protect, validateObjectId('estateId'), h
 // Get distribution history
 router.get('/:estateId/wallet/history', protect, validateObjectId('estateId'), handleValidationErrors, getEstateDistributionHistory);
 
-// Get individual account details
-router.get('/:estateId/wallet/marketing', protect, validateObjectId('estateId'), handleValidationErrors, getMarketingAccountDetails);
-router.get('/:estateId/wallet/owner', protect, validateObjectId('estateId'), handleValidationErrors, getOwnerAccountDetails);
-router.get('/:estateId/wallet/operations', protect, validateObjectId('estateId'), handleValidationErrors, getOperationsAccountDetails);
+// Preview distribution calculation
+router.get('/:estateId/wallet/preview', protect, handleValidationErrors, previewDistribution);
 
-// Withdraw from owner account
-router.post('/:estateId/wallet/withdraw', protect, validateObjectId('estateId'), handleValidationErrors, withdrawOwnerFunds);
+// Get wallet summary (totals)
+router.get('/:estateId/wallet/summary', protect, validateObjectId('estateId'), handleValidationErrors, getWalletSummary);
+
+// Get individual engine details
+router.get('/:estateId/wallet/growth-engine', protect, validateObjectId('estateId'), handleValidationErrors, getGrowthEngineDetails);
+router.get('/:estateId/wallet/fulfillment-engine', protect, validateObjectId('estateId'), handleValidationErrors, getFulfillmentEngineDetails);
+router.get('/:estateId/wallet/innovation-engine', protect, validateObjectId('estateId'), handleValidationErrors, getInnovationEngineDetails);
+
+// Withdraw from family savings (B-20%)
+router.post('/:estateId/wallet/family-withdraw', protect, validateObjectId('estateId'), handleValidationErrors, withdrawFamilySavings);
+
+// Withdraw from any wallet
+router.post('/:estateId/wallet/withdraw', protect, validateObjectId('estateId'), handleValidationErrors, withdrawFromAnyWallet);
 
 module.exports = router;

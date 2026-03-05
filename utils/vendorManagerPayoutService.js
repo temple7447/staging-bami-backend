@@ -168,16 +168,20 @@ const deductFromOperationsBalance = async (estateId, amount) => {
     throw new Error(`No wallet account found for estate ${estateId}`);
   }
   
-  if (walletAccount.operationsBalance < amount) {
-    throw new Error(`Insufficient operations balance for estate ${estateId}. Available: ${walletAccount.operationsBalance}, Required: ${amount}`);
+  // C-20% Savings (Innovation Engine) - where 20000 goes to managers/vendors
+  const innovationSavings = walletAccount.innovationEngineSavingsBalance;
+  
+  if (innovationSavings < amount) {
+    throw new Error(`Insufficient innovation engine savings for estate ${estateId}. Available: ${innovationSavings}, Required: ${amount}`);
   }
   
-  walletAccount.operationsBalance -= amount;
-  walletAccount.operationsDistributions.push({
+  walletAccount.innovationEngineSavingsBalance -= amount;
+  walletAccount.innovationEngineSavingsDistributions.push({
     amount: -amount,
-    description: `Monthly vendor/manager payout`,
+    description: `Monthly vendor/manager payout (Innovation Engine Savings C-20%)`,
     createdAt: new Date()
   });
+  
   walletAccount.lastUpdated = new Date();
   
   await walletAccount.save();

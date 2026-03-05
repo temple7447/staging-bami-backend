@@ -76,24 +76,51 @@ const getWalletInfo = async (estateId) => {
     const wallet = await WalletAccount.findOne({ estate: estateId });
     if (!wallet) {
       return {
-        marketingBalance: 0,
-        ownerBalance: 0,
-        operationsBalance: 0,
+        growthEngineMarketingBalance: 0,
+        growthEngineOperationsBalance: 0,
+        growthEngineSavingsBalance: 0,
+        fulfillmentEngineMarketingBalance: 0,
+        fulfillmentEngineOperationsBalance: 0,
+        fulfillmentEngineSavingsBalance: 0,
+        innovationEngineMarketingBalance: 0,
+        innovationEngineOperationsBalance: 0,
+        innovationEngineSavingsBalance: 0,
+        totalMarketing: 0,
+        totalOperations: 0,
+        totalSavings: 0,
         totalReceived: 0
       };
     }
     return {
-      marketingBalance: wallet.marketingBalance || 0,
-      ownerBalance: wallet.ownerBalance || 0,
-      operationsBalance: wallet.operationsBalance || 0,
+      growthEngineMarketingBalance: wallet.growthEngineMarketingBalance || 0,
+      growthEngineOperationsBalance: wallet.growthEngineOperationsBalance || 0,
+      growthEngineSavingsBalance: wallet.growthEngineSavingsBalance || 0,
+      fulfillmentEngineMarketingBalance: wallet.fulfillmentEngineMarketingBalance || 0,
+      fulfillmentEngineOperationsBalance: wallet.fulfillmentEngineOperationsBalance || 0,
+      fulfillmentEngineSavingsBalance: wallet.fulfillmentEngineSavingsBalance || 0,
+      innovationEngineMarketingBalance: wallet.innovationEngineMarketingBalance || 0,
+      innovationEngineOperationsBalance: wallet.innovationEngineOperationsBalance || 0,
+      innovationEngineSavingsBalance: wallet.innovationEngineSavingsBalance || 0,
+      totalMarketing: wallet.totalMarketing || 0,
+      totalOperations: wallet.totalOperations || 0,
+      totalSavings: wallet.totalSavings || 0,
       totalReceived: wallet.totalReceived || 0
     };
   } catch (error) {
     logError('getWalletInfo', error, { estateId });
     return {
-      marketingBalance: 0,
-      ownerBalance: 0,
-      operationsBalance: 0,
+      growthEngineMarketingBalance: 0,
+      growthEngineOperationsBalance: 0,
+      growthEngineSavingsBalance: 0,
+      fulfillmentEngineMarketingBalance: 0,
+      fulfillmentEngineOperationsBalance: 0,
+      fulfillmentEngineSavingsBalance: 0,
+      innovationEngineMarketingBalance: 0,
+      innovationEngineOperationsBalance: 0,
+      innovationEngineSavingsBalance: 0,
+      totalMarketing: 0,
+      totalOperations: 0,
+      totalSavings: 0,
       totalReceived: 0
     };
   }
@@ -159,9 +186,19 @@ const generateMonthlyReport = async (targetDate = new Date()) => {
       outstandingBalance: outstandingBalance > 0 ? outstandingBalance : 0,
       paymentMethods: paymentStats.paymentMethods,
       transactionIds: paymentStats.transactionIds,
-      marketingBalance: wallet.marketingBalance || 0,
-      ownerBalance: wallet.ownerBalance || 0,
-      operationsBalance: wallet.operationsBalance || 0,
+      // New wallet structure
+      growthEngineMarketing: wallet.growthEngineMarketingBalance || 0,
+      growthEngineOperations: wallet.growthEngineOperationsBalance || 0,
+      growthEngineSavings: wallet.growthEngineSavingsBalance || 0,
+      fulfillmentEngineMarketing: wallet.fulfillmentEngineMarketingBalance || 0,
+      fulfillmentEngineOperations: wallet.fulfillmentEngineOperationsBalance || 0,
+      fulfillmentEngineSavings: wallet.fulfillmentEngineSavingsBalance || 0,
+      innovationEngineMarketing: wallet.innovationEngineMarketingBalance || 0,
+      innovationEngineOperations: wallet.innovationEngineOperationsBalance || 0,
+      innovationEngineSavings: wallet.innovationEngineSavingsBalance || 0,
+      totalMarketing: wallet.totalMarketing || 0,
+      totalOperations: wallet.totalOperations || 0,
+      totalSavings: wallet.totalSavings || 0,
       totalWalletReceived: wallet.totalReceived || 0,
       profileImageUrl: tenant.profileImageUrl || '',
       createdAt: new Date(tenant.createdAt).toLocaleDateString('en-NG'),
@@ -191,9 +228,19 @@ const generateMonthlyReport = async (targetDate = new Date()) => {
     'outstandingBalance',
     'paymentMethods',
     'transactionIds',
-    'marketingBalance',
-    'ownerBalance',
-    'operationsBalance',
+    // New wallet structure
+    'growthEngineMarketing',
+    'growthEngineOperations',
+    'growthEngineSavings',
+    'fulfillmentEngineMarketing',
+    'fulfillmentEngineOperations',
+    'fulfillmentEngineSavings',
+    'innovationEngineMarketing',
+    'innovationEngineOperations',
+    'innovationEngineSavings',
+    'totalMarketing',
+    'totalOperations',
+    'totalSavings',
     'totalWalletReceived',
     'profileImageUrl',
     'createdAt',
@@ -210,9 +257,19 @@ const generateMonthlyReport = async (targetDate = new Date()) => {
     totalRentExpected: tenants.reduce((sum, t) => sum + (t.rentAmount || 0), 0),
     totalPaidThisMonth: reportData.reduce((sum, t) => sum + t.totalPaidThisMonth, 0),
     totalOutstanding: reportData.reduce((sum, t) => sum + t.outstandingBalance, 0),
-    totalMarketing: Object.values(walletsMap).reduce((sum, w) => sum + (w.marketingBalance || 0), 0),
-    totalOwner: Object.values(walletsMap).reduce((sum, w) => sum + (w.ownerBalance || 0), 0),
-    totalOperations: Object.values(walletsMap).reduce((sum, w) => sum + (w.operationsBalance || 0), 0)
+    // New wallet totals
+    totalGrowthEngineMarketing: Object.values(walletsMap).reduce((sum, w) => sum + (w.growthEngineMarketingBalance || 0), 0),
+    totalGrowthEngineOperations: Object.values(walletsMap).reduce((sum, w) => sum + (w.growthEngineOperationsBalance || 0), 0),
+    totalGrowthEngineSavings: Object.values(walletsMap).reduce((sum, w) => sum + (w.growthEngineSavingsBalance || 0), 0),
+    totalFulfillmentEngineMarketing: Object.values(walletsMap).reduce((sum, w) => sum + (w.fulfillmentEngineMarketingBalance || 0), 0),
+    totalFulfillmentEngineOperations: Object.values(walletsMap).reduce((sum, w) => sum + (w.fulfillmentEngineOperationsBalance || 0), 0),
+    totalFulfillmentEngineSavings: Object.values(walletsMap).reduce((sum, w) => sum + (w.fulfillmentEngineSavingsBalance || 0), 0),
+    totalInnovationEngineMarketing: Object.values(walletsMap).reduce((sum, w) => sum + (w.innovationEngineMarketingBalance || 0), 0),
+    totalInnovationEngineOperations: Object.values(walletsMap).reduce((sum, w) => sum + (w.innovationEngineOperationsBalance || 0), 0),
+    totalInnovationEngineSavings: Object.values(walletsMap).reduce((sum, w) => sum + (w.innovationEngineSavingsBalance || 0), 0),
+    totalMarketing: Object.values(walletsMap).reduce((sum, w) => sum + (w.totalMarketing || 0), 0),
+    totalOperations: Object.values(walletsMap).reduce((sum, w) => sum + (w.totalOperations || 0), 0),
+    totalSavings: Object.values(walletsMap).reduce((sum, w) => sum + (w.totalSavings || 0), 0)
   };
 
   logInfo('Monthly report generated', {
@@ -382,9 +439,19 @@ const getEstateSummary = async () => {
       pendingUnits: tenants.filter(t => t.status === 'pending').length,
       vacantUnits: estate.totalUnits - (tenants.filter(t => t.status !== 'vacant').length),
       totalRentExpected: tenants.reduce((sum, t) => sum + (t.rentAmount || 0), 0),
-      marketingBalance: wallet?.marketingBalance || 0,
-      ownerBalance: wallet?.ownerBalance || 0,
-      operationsBalance: wallet?.operationsBalance || 0,
+      // New wallet structure
+      growthEngineMarketing: wallet?.growthEngineMarketingBalance || 0,
+      growthEngineOperations: wallet?.growthEngineOperationsBalance || 0,
+      growthEngineSavings: wallet?.growthEngineSavingsBalance || 0,
+      fulfillmentEngineMarketing: wallet?.fulfillmentEngineMarketingBalance || 0,
+      fulfillmentEngineOperations: wallet?.fulfillmentEngineOperationsBalance || 0,
+      fulfillmentEngineSavings: wallet?.fulfillmentEngineSavingsBalance || 0,
+      innovationEngineMarketing: wallet?.innovationEngineMarketingBalance || 0,
+      innovationEngineOperations: wallet?.innovationEngineOperationsBalance || 0,
+      innovationEngineSavings: wallet?.innovationEngineSavingsBalance || 0,
+      totalMarketing: wallet?.totalMarketing || 0,
+      totalOperations: wallet?.totalOperations || 0,
+      totalSavings: wallet?.totalSavings || 0,
       totalReceived: wallet?.totalReceived || 0
     });
   }

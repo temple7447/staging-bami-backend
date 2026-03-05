@@ -1,4 +1,4 @@
-const { getWalletBalance, getDistributionHistory, withdrawFromOwner } = require('../utils/distributionService');
+const { getWalletBalance, getDistributionHistory, withdrawFromFamilySavings, withdrawFromWallet, calculateDistribution } = require('../utils/distributionService');
 const { logError, logInfo } = require('../utils/logger');
 
 /**
@@ -27,7 +27,7 @@ const getEstateWalletBalance = async (req, res) => {
 };
 
 /**
- * Get distribution history for all three accounts
+ * Get distribution history for all wallets
  */
 const getEstateDistributionHistory = async (req, res) => {
   try {
@@ -53,9 +53,9 @@ const getEstateDistributionHistory = async (req, res) => {
 };
 
 /**
- * Withdraw from owner account
+ * Withdraw from family savings (B-20% wallet)
  */
-const withdrawOwnerFunds = async (req, res) => {
+const withdrawFamilySavings = async (req, res) => {
   try {
     const { estateId } = req.params;
     const { amount, reason } = req.body;
@@ -68,17 +68,17 @@ const withdrawOwnerFunds = async (req, res) => {
       });
     }
 
-    logInfo('Processing owner withdrawal', { estateId, amount, reason });
+    logInfo('Processing family savings withdrawal', { estateId, amount, reason });
 
-    const result = await withdrawFromOwner(estateId, amount, reason, userId);
+    const result = await withdrawFromFamilySavings(estateId, amount, reason, userId);
 
     res.status(200).json({
       success: true,
-      message: 'Owner withdrawal processed successfully',
+      message: 'Family savings withdrawal processed successfully',
       data: result
     });
   } catch (error) {
-    logError('POST /api/estates/:estateId/wallet/withdraw', error, {
+    logError('POST /api/estates/:estateId/wallet/family-withdraw', error, {
       estateId: req.params.estateId,
       amount: req.body?.amount
     });
@@ -99,65 +99,115 @@ const withdrawOwnerFunds = async (req, res) => {
 };
 
 /**
- * Get marketing account details
+ * Withdraw from any wallet
  */
-const getMarketingAccountDetails = async (req, res) => {
+const withdrawFromAnyWallet = async (req, res) => {
   try {
     const { estateId } = req.params;
-    const balance = await getWalletBalance(estateId);
+    const { walletType, amount, reason } = req.body;
+    const userId = req.user?._id;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount must be greater than 0'
+      });
+    }
+
+    if (!walletType) {
+      return res.status(400).json({
+        success: false,
+        message: 'Wallet type is required'
+      });
+    }
+
+    const validWalletTypes = [
+      'growthEngineMarketing',
+      'growthEngineOperations',
+      'growthEngineSavings',
+      'fulfillmentEngineMarketing',
+      'fulfillmentEngineOperations',
+      'fulfillmentEngineSavings',
+      'innovationEngineMarketing',
+      'innovationEngineOperations',
+      'innovationEngineSavings'
+    ];
+
+    if (!validWalletTypes.includes(walletType)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid wallet type. Valid types: ${validWalletTypes.join(', ')}`
+      });
+    }
+
+    logInfo('Processing wallet withdrawal', { estateId, walletType, amount, reason });
+
+    const result = await withdrawFromWallet(estateId, walletType, amount, reason, userId);
 
     res.status(200).json({
       success: true,
-      data: {
-        account: 'Marketing & Investment',
-        percentage: 50,
-        balance: balance.marketing.balance,
-        totalReceived: balance.totalReceived,
-        lastUpdated: balance.lastUpdated
-      }
+      message: 'Wallet withdrawal processed successfully',
+      data: result
     });
   } catch (error) {
-    logError('GET /api/estates/:estateId/wallet/marketing', error, { estateId: req.params.estateId });
+    logError('POST /api/estates/:estateId/wallet/withdraw', error, {
+      estateId: req.params.estateId,
+      walletType: req.body?.walletType,
+      amount: req.body?.amount
+    });
+
+    if (error.message.includes('Insufficient') || error.message.includes('Invalid')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+
     res.status(500).json({
       success: false,
-      message: 'Error fetching marketing account details',
+      message: 'Error processing withdrawal',
       error: error.message
     });
   }
 };
 
 /**
- * Get owner account details
+ * Calculate distribution for a given amount (preview)
  */
-const getOwnerAccountDetails = async (req, res) => {
+const previewDistribution = async (req, res) => {
   try {
-    const { estateId } = req.params;
-    const balance = await getWalletBalance(estateId);
+    const { amount } = req.query;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Amount must be greater than 0'
+      });
+    }
+
+    const distribution = calculateDistribution(parseFloat(amount));
 
     res.status(200).json({
       success: true,
       data: {
-        account: 'Owner Withdraw',
-        percentage: 30,
-        balance: balance.owner.balance,
-        totalReceived: balance.totalReceived,
-        lastUpdated: balance.lastUpdated
+        amount: parseFloat(amount),
+        distribution
       }
     });
   } catch (error) {
-    logError('GET /api/estates/:estateId/wallet/owner', error, { estateId: req.params.estateId });
+    logError('GET /api/estates/:estateId/wallet/preview', error);
     res.status(500).json({
       success: false,
-      message: 'Error fetching owner account details',
+      message: 'Error calculating distribution',
       error: error.message
     });
   }
 };
 
 /**
- * Get operations account details
+ * Get Growth Engine wallet details
  */
-const getOperationsAccountDetails = async (req, res) => {
+const getGrowthEngineDetails = async (req, res) => {
   try {
     const { estateId } = req.params;
     const balance = await getWalletBalance(estateId);
@@ -165,18 +215,113 @@ const getOperationsAccountDetails = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        account: 'Operations & Maintenance',
-        percentage: 20,
-        balance: balance.operations.balance,
-        totalReceived: balance.totalReceived,
+        engine: 'Growth Engine',
+        description: 'Business Asset Operations (50%)',
+        wallets: balance.growthEngine,
+        totalPercentage: 50
+      }
+    });
+  } catch (error) {
+    logError('GET /api/estates/:estateId/wallet/growth-engine', error, { estateId: req.params.estateId });
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching Growth Engine details',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get Fulfillment Engine wallet details
+ */
+const getFulfillmentEngineDetails = async (req, res) => {
+  try {
+    const { estateId } = req.params;
+    const balance = await getWalletBalance(estateId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        engine: 'Fulfillment Engines',
+        description: 'Owners Asset Operations (30%)',
+        wallets: balance.fulfillmentEngine,
+        totalPercentage: 30
+      }
+    });
+  } catch (error) {
+    logError('GET /api/estates/:estateId/wallet/fulfillment-engine', error, { estateId: req.params.estateId });
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching Fulfillment Engine details',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get Innovation Engine wallet details
+ */
+const getInnovationEngineDetails = async (req, res) => {
+  try {
+    const { estateId } = req.params;
+    const balance = await getWalletBalance(estateId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        engine: 'Innovation Engines',
+        description: 'Savings & Emergency Asset Operations (20%)',
+        wallets: balance.innovationEngine,
+        totalPercentage: 20
+      }
+    });
+  } catch (error) {
+    logError('GET /api/estates/:estateId/wallet/innovation-engine', error, { estateId: req.params.estateId });
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching Innovation Engine details',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * Get total summary (Marketing, Operations, Savings)
+ */
+const getWalletSummary = async (req, res) => {
+  try {
+    const { estateId } = req.params;
+    const balance = await getWalletBalance(estateId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalBalance: balance.summary.totalBalance,
+        totalReceived: balance.summary.totalReceived,
+        marketing: {
+          name: 'Marketing & Sales/Affiliate Marketing',
+          balance: balance.summary.totalMarketing,
+          percentage: 50
+        },
+        operations: {
+          name: 'Operations',
+          balance: balance.summary.totalOperations,
+          percentage: 30
+        },
+        savings: {
+          name: 'Savings & Emergency',
+          balance: balance.summary.totalSavings,
+          percentage: 20,
+          familyPortion: balance.fulfillmentEngine.savings.balance
+        },
         lastUpdated: balance.lastUpdated
       }
     });
   } catch (error) {
-    logError('GET /api/estates/:estateId/wallet/operations', error, { estateId: req.params.estateId });
+    logError('GET /api/estates/:estateId/wallet/summary', error, { estateId: req.params.estateId });
     res.status(500).json({
       success: false,
-      message: 'Error fetching operations account details',
+      message: 'Error fetching wallet summary',
       error: error.message
     });
   }
@@ -185,8 +330,11 @@ const getOperationsAccountDetails = async (req, res) => {
 module.exports = {
   getEstateWalletBalance,
   getEstateDistributionHistory,
-  withdrawOwnerFunds,
-  getMarketingAccountDetails,
-  getOwnerAccountDetails,
-  getOperationsAccountDetails
+  withdrawFamilySavings,
+  withdrawFromAnyWallet,
+  previewDistribution,
+  getGrowthEngineDetails,
+  getFulfillmentEngineDetails,
+  getInnovationEngineDetails,
+  getWalletSummary
 };
