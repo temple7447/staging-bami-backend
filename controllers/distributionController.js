@@ -1,5 +1,134 @@
 const { getWalletBalance, getDistributionHistory, withdrawFromFamilySavings, withdrawFromWallet, calculateDistribution } = require('../utils/distributionService');
 const { logError, logInfo } = require('../utils/logger');
+const WalletAccount = require('../models/WalletAccount');
+
+/**
+ * Get global wallet summary across all estates (9 wallets aggregated)
+ */
+const getGlobalWalletSummary = async (req, res) => {
+  try {
+    logInfo('Fetching global wallet summary');
+
+    const result = await WalletAccount.aggregate([
+      {
+        $group: {
+          _id: null,
+          growthEngineMarketingBalance: { $sum: '$growthEngineMarketingBalance' },
+          growthEngineOperationsBalance: { $sum: '$growthEngineOperationsBalance' },
+          growthEngineSavingsBalance: { $sum: '$growthEngineSavingsBalance' },
+          fulfillmentEngineMarketingBalance: { $sum: '$fulfillmentEngineMarketingBalance' },
+          fulfillmentEngineOperationsBalance: { $sum: '$fulfillmentEngineOperationsBalance' },
+          fulfillmentEngineSavingsBalance: { $sum: '$fulfillmentEngineSavingsBalance' },
+          innovationEngineMarketingBalance: { $sum: '$innovationEngineMarketingBalance' },
+          innovationEngineOperationsBalance: { $sum: '$innovationEngineOperationsBalance' },
+          innovationEngineSavingsBalance: { $sum: '$innovationEngineSavingsBalance' },
+          totalReceived: { $sum: '$totalReceived' }
+        }
+      }
+    ]);
+
+    const data = result[0] || {
+      growthEngineMarketingBalance: 0,
+      growthEngineOperationsBalance: 0,
+      growthEngineSavingsBalance: 0,
+      fulfillmentEngineMarketingBalance: 0,
+      fulfillmentEngineOperationsBalance: 0,
+      fulfillmentEngineSavingsBalance: 0,
+      innovationEngineMarketingBalance: 0,
+      innovationEngineOperationsBalance: 0,
+      innovationEngineSavingsBalance: 0,
+      totalReceived: 0
+    };
+
+    const totalBalance = 
+      data.growthEngineMarketingBalance +
+      data.growthEngineOperationsBalance +
+      data.growthEngineSavingsBalance +
+      data.fulfillmentEngineMarketingBalance +
+      data.fulfillmentEngineOperationsBalance +
+      data.fulfillmentEngineSavingsBalance +
+      data.innovationEngineMarketingBalance +
+      data.innovationEngineOperationsBalance +
+      data.innovationEngineSavingsBalance;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        growthEngine: {
+          marketing: {
+            name: 'Growth Engine Marketing',
+            balance: data.growthEngineMarketingBalance,
+            percentage: 25
+          },
+          operations: {
+            name: 'Growth Engine Operations',
+            balance: data.growthEngineOperationsBalance,
+            percentage: 15
+          },
+          savings: {
+            name: 'Growth Engine Savings',
+            balance: data.growthEngineSavingsBalance,
+            percentage: 10
+          },
+          total: data.growthEngineMarketingBalance + data.growthEngineOperationsBalance + data.growthEngineSavingsBalance,
+          percentage: 50
+        },
+        fulfillmentEngine: {
+          marketing: {
+            name: 'Fulfillment Engine Marketing',
+            balance: data.fulfillmentEngineMarketingBalance,
+            percentage: 15
+          },
+          operations: {
+            name: 'Fulfillment Engine Operations',
+            balance: data.fulfillmentEngineOperationsBalance,
+            percentage: 9
+          },
+          savings: {
+            name: 'Fulfillment Engine Family Savings',
+            balance: data.fulfillmentEngineSavingsBalance,
+            percentage: 6
+          },
+          total: data.fulfillmentEngineMarketingBalance + data.fulfillmentEngineOperationsBalance + data.fulfillmentEngineSavingsBalance,
+          percentage: 30
+        },
+        innovationEngine: {
+          marketing: {
+            name: 'Innovation Engine Marketing',
+            balance: data.innovationEngineMarketingBalance,
+            percentage: 10
+          },
+          operations: {
+            name: 'Innovation Engine Operations',
+            balance: data.innovationEngineOperationsBalance,
+            percentage: 6
+          },
+          savings: {
+            name: 'Innovation Engine Savings',
+            balance: data.innovationEngineSavingsBalance,
+            percentage: 4
+          },
+          total: data.innovationEngineMarketingBalance + data.innovationEngineOperationsBalance + data.innovationEngineSavingsBalance,
+          percentage: 20
+        },
+        summary: {
+          totalBalance,
+          totalReceived: data.totalReceived,
+          totalMarketing: data.growthEngineMarketingBalance + data.fulfillmentEngineMarketingBalance + data.innovationEngineMarketingBalance,
+          totalOperations: data.growthEngineOperationsBalance + data.fulfillmentEngineOperationsBalance + data.innovationEngineOperationsBalance,
+          totalSavings: data.growthEngineSavingsBalance + data.fulfillmentEngineSavingsBalance + data.innovationEngineSavingsBalance
+        }
+      }
+    });
+  } catch (error) {
+    logError('GET /api/wallets/global-summary', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching global wallet summary',
+      error: error.message
+    });
+  }
+};
 
 /**
  * Get wallet account balances for an estate
@@ -285,49 +414,8 @@ const getInnovationEngineDetails = async (req, res) => {
   }
 };
 
-/**
- * Get total summary (Marketing, Operations, Savings)
- */
-const getWalletSummary = async (req, res) => {
-  try {
-    const { estateId } = req.params;
-    const balance = await getWalletBalance(estateId);
-
-    res.status(200).json({
-      success: true,
-      data: {
-        totalBalance: balance.summary.totalBalance,
-        totalReceived: balance.summary.totalReceived,
-        marketing: {
-          name: 'Marketing & Sales/Affiliate Marketing',
-          balance: balance.summary.totalMarketing,
-          percentage: 50
-        },
-        operations: {
-          name: 'Operations',
-          balance: balance.summary.totalOperations,
-          percentage: 30
-        },
-        savings: {
-          name: 'Savings & Emergency',
-          balance: balance.summary.totalSavings,
-          percentage: 20,
-          familyPortion: balance.fulfillmentEngine.savings.balance
-        },
-        lastUpdated: balance.lastUpdated
-      }
-    });
-  } catch (error) {
-    logError('GET /api/estates/:estateId/wallet/summary', error, { estateId: req.params.estateId });
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching wallet summary',
-      error: error.message
-    });
-  }
-};
-
 module.exports = {
+  getGlobalWalletSummary,
   getEstateWalletBalance,
   getEstateDistributionHistory,
   withdrawFamilySavings,
@@ -335,6 +423,5 @@ module.exports = {
   previewDistribution,
   getGrowthEngineDetails,
   getFulfillmentEngineDetails,
-  getInnovationEngineDetails,
-  getWalletSummary
+  getInnovationEngineDetails
 };

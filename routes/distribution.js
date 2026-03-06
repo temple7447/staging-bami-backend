@@ -2,6 +2,7 @@ const express = require('express');
 const { protect } = require('../middleware/auth');
 const { validateObjectId, handleValidationErrors } = require('../middleware/validation');
 const {
+  getGlobalWalletSummary,
   getEstateWalletBalance,
   getEstateDistributionHistory,
   withdrawFamilySavings,
@@ -9,11 +10,13 @@ const {
   previewDistribution,
   getGrowthEngineDetails,
   getFulfillmentEngineDetails,
-  getInnovationEngineDetails,
-  getWalletSummary
+  getInnovationEngineDetails
 } = require('../controllers/distributionController');
 
 const router = express.Router({ mergeParams: true });
+
+// Get global wallet summary across all estates (9 wallets aggregated)
+router.get('/global-summary', protect, getGlobalWalletSummary);
 
 // Get overall wallet balance for estate
 router.get('/:estateId/wallet/balance', protect, validateObjectId('estateId'), handleValidationErrors, getEstateWalletBalance);
@@ -23,9 +26,6 @@ router.get('/:estateId/wallet/history', protect, validateObjectId('estateId'), h
 
 // Preview distribution calculation
 router.get('/:estateId/wallet/preview', protect, handleValidationErrors, previewDistribution);
-
-// Get wallet summary (totals)
-router.get('/:estateId/wallet/summary', protect, validateObjectId('estateId'), handleValidationErrors, getWalletSummary);
 
 // Get individual engine details
 router.get('/:estateId/wallet/growth-engine', protect, validateObjectId('estateId'), handleValidationErrors, getGrowthEngineDetails);
