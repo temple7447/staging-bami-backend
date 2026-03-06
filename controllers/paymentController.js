@@ -1448,6 +1448,7 @@ const recordManualPayment = async (req, res) => {
       paymentStatus: 'completed',
       paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
       isDeposit: paymentType === 'deposit',
+      transactionId: `MANUAL-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
       createdBy: adminId,
       reconciled: true,
       reconciledDate: new Date(),

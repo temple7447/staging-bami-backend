@@ -17,6 +17,10 @@ const connectDatabase = async () => {
     console.log(`MongoDB Connected: ${conn.connection.host}`);
     console.log(`Connection pool: max=${conn.connection.client.s.options.maxPoolSize}, min=${conn.connection.client.s.options.minPoolSize}`);
 
+    // Sync indexes to ensure schema changes are applied
+    await mongoose.syncIndexes();
+    console.log('✅ MongoDB indexes synced');
+
     // Monitor connection pool
     mongoose.connection.on('connectionPoolCreated', () => {
       console.log('✅ Connection pool created');
