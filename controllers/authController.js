@@ -1098,6 +1098,7 @@ exports.onboardVendor = async (req, res) => {
       phone,
       position,
       managerId,
+      businessTypeId,
       sendCredentials = true
     } = req.body;
 
@@ -1164,12 +1165,16 @@ exports.onboardVendor = async (req, res) => {
       password: temporaryPassword,
       role: 'vendor',
       manager: managerId,
+      businessTypeId,
       createdBy: req.user.id,
       emailVerified: false
     });
 
     // Populate manager for response
     await vendor.populate('manager', 'name email position');
+    if (businessTypeId) {
+      await vendor.populate('businessTypeId', 'name');
+    }
 
     // Send welcome email with credentials
     if (sendCredentials) {
@@ -1197,6 +1202,7 @@ exports.onboardVendor = async (req, res) => {
         position: vendor.position,
         role: vendor.role,
         manager: vendor.manager,
+        businessTypeId: vendor.businessTypeId,
         isActive: vendor.isActive,
         createdAt: vendor.createdAt
       }

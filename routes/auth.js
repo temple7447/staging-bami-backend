@@ -243,7 +243,14 @@ const validateOnboardVendor = [
     .optional()
     .trim()
     .isLength({ max: 100 })
-    .withMessage('Position cannot be more than 100 characters')
+    .withMessage('Position cannot be more than 100 characters'),
+  body('managerId')
+    .notEmpty()
+    .withMessage('Manager is required'),
+  body('businessTypeId')
+    .optional()
+    .isMongoId()
+    .withMessage('Please provide a valid business type ID')
 ];
 
 router.post('/onboard-vendor', protect, validateOnboardVendor, handleValidationErrors, onboardVendor);
