@@ -1097,6 +1097,7 @@ exports.onboardVendor = async (req, res) => {
       email,
       phone,
       position,
+      managerId,
       sendCredentials = true
     } = req.body;
 
@@ -1105,6 +1106,30 @@ exports.onboardVendor = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Name and email are required'
+      });
+    }
+
+    // Validate manager is required
+    if (!managerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager is required. Please assign a manager to manage this vendor.'
+      });
+    }
+
+    // Validate manager exists and has correct role
+    const manager = await User.findById(managerId);
+    if (!manager) {
+      return res.status(400).json({
+        success: false,
+        message: 'Manager not found'
+      });
+    }
+
+    if (!['manager', 'super_manager'].includes(manager.role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected user is not a valid manager'
       });
     }
 
@@ -1138,9 +1163,13 @@ exports.onboardVendor = async (req, res) => {
       position,
       password: temporaryPassword,
       role: 'vendor',
+      manager: managerId,
       createdBy: req.user.id,
       emailVerified: false
     });
+
+    // Populate manager for response
+    await vendor.populate('manager', 'name email position');
 
     // Send welcome email with credentials
     if (sendCredentials) {
@@ -1167,6 +1196,7 @@ exports.onboardVendor = async (req, res) => {
         phone: vendor.phone,
         position: vendor.position,
         role: vendor.role,
+        manager: vendor.manager,
         isActive: vendor.isActive,
         createdAt: vendor.createdAt
       }
@@ -1189,7 +1219,8 @@ exports.updateVendor = async (req, res) => {
     const {
       name, email, phone, businessTypeId, businessName, specialization,
       cacNumber, govId, certification, businessAddress, portfolio,
-      bio, location, operationalHours, isVerifiedPro, services
+      bio, location, operationalHours, isVerifiedPro, services,
+      managerId
     } = req.body;
 
     const vendor = await User.findById(req.params.id);
@@ -1199,6 +1230,24 @@ exports.updateVendor = async (req, res) => {
         success: false,
         message: 'Vendor not found'
       });
+    }
+
+    // Validate manager if provided
+    if (managerId) {
+      const manager = await User.findById(managerId);
+      if (!manager) {
+        return res.status(400).json({
+          success: false,
+          message: 'Manager not found'
+        });
+      }
+      if (!['manager', 'super_manager'].includes(manager.role)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Selected user is not a valid manager'
+        });
+      }
+      vendor.manager = managerId;
     }
 
     // Validate business type if provided
@@ -1240,6 +1289,9 @@ exports.updateVendor = async (req, res) => {
 
     await vendor.save();
 
+    // Populate manager for response
+    await vendor.populate('manager', 'name email position');
+
     res.status(200).json({
       success: true,
       message: 'Vendor updated successfully',
@@ -1249,6 +1301,7 @@ exports.updateVendor = async (req, res) => {
         email: vendor.email,
         phone: vendor.phone,
         role: vendor.role,
+        manager: vendor.manager,
         businessType: businessType?.name,
         businessName,
         specialization,
@@ -1277,6 +1330,7 @@ exports.getVendors = async (req, res) => {
     const [vendors, total] = await Promise.all([
       User.find({ role: 'vendor' })
         .populate('createdBy', 'name email')
+        .populate('manager', 'name email position')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)

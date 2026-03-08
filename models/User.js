@@ -149,6 +149,11 @@ const UserSchema = new mongoose.Schema({
     accountNumber: { type: String, trim: true },
     bankName: { type: String, trim: true },
     bankCode: { type: String, trim: true }
+  },
+  // For vendor role - assigned manager who manages this vendor
+  manager: {
+    type: mongoose.Schema.ObjectId,
+    ref: 'User'
   }
 }, {
   timestamps: true
