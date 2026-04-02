@@ -21,16 +21,19 @@ const {
   getBusinessOwners,
   updateBusinessOwner,
   updateBusinessOwnerStatus,
+  resendBusinessOwnerCredentials,
   deleteBusinessOwner,
   onboardVendor,
   getVendors,
   updateVendor,
   updateVendorStatus,
+  resendVendorCredentials,
   deleteVendor,
   onboardManager,
   getManagers,
   updateManager,
   updateManagerStatus,
+  resendManagerCredentials,
   deleteManager,
   getPublicVendors,
   getPublicVendorDetail,
@@ -223,6 +226,7 @@ router.put('/business-owner/:id', protect, superAdminOnly, [
     .withMessage('Estate IDs must be an array')
 ], handleValidationErrors, updateBusinessOwner);
 router.put('/business-owner/:id/status', protect, superAdminOnly, updateBusinessOwnerStatus);
+router.post('/business-owner/:id/resend-credentials', protect, superAdminOnly, resendBusinessOwnerCredentials);
 router.delete('/business-owner/:id', protect, superAdminOnly, deleteBusinessOwner);
 
 // Vendor management routes (Admin and Super Admin)
@@ -339,6 +343,7 @@ router.put('/vendor/:id', protect, [
     .withMessage('Service price must be a number')
 ], handleValidationErrors, updateVendor);
 router.put('/vendor/:id/status', protect, updateVendorStatus);
+router.post('/vendor/:id/resend-credentials', protect, adminOrSuperAdmin, resendVendorCredentials);
 router.delete('/vendor/:id', protect, deleteVendor);
 
 // Manager management routes (Admin and Super Admin)
@@ -385,6 +390,7 @@ router.put('/manager/:id', protect, adminOrSuperAdmin, [
     .withMessage('Estate IDs must be an array')
 ], handleValidationErrors, updateManager);
 router.put('/manager/:id/status', protect, adminOrSuperAdmin, updateManagerStatus);
+router.post('/manager/:id/resend-credentials', protect, adminOrSuperAdmin, resendManagerCredentials);
 router.delete('/manager/:id', protect, adminOrSuperAdmin, deleteManager);
 
 // Public Vendor Routes

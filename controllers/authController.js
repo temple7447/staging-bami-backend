@@ -7,7 +7,9 @@ const {
   sendWelcomeEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
-  sendBusinessOwnerWelcomeEmail
+  sendBusinessOwnerWelcomeEmail,
+  sendVendorWelcomeEmail,
+  sendManagerWelcomeEmail
 } = require('../utils/emailService');
 const { sendPasswordResetOtpEmail } = require('../utils/emailService');
 const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
@@ -701,6 +703,62 @@ exports.deleteBusinessOwner = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete business owner error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Resend business owner credentials
+// @route   POST /api/auth/business-owner/:id/resend-credentials
+// @access  Private (Super Admin only)
+exports.resendBusinessOwnerCredentials = async (req, res) => {
+  try {
+    const businessOwner = await User.findById(req.params.id);
+
+    if (!businessOwner || businessOwner.role !== 'business_owner') {
+      return res.status(404).json({
+        success: false,
+        message: 'Business owner not found'
+      });
+    }
+
+    const Estate = require('../models/Estate');
+    const assignedEstates = await Estate.find({ owner: businessOwner._id });
+
+    const temporaryPassword = generateSecurePassword(12);
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Resending credentials for ${businessOwner.email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
+
+    try {
+      await sendBusinessOwnerWelcomeEmail(businessOwner, temporaryPassword, assignedEstates);
+    } catch (emailError) {
+      console.log('Failed to send welcome email:', emailError.message);
+    }
+
+    sendActivityToSlack('Business Owner Credentials Resent', {
+      owner: businessOwner.name,
+      email: businessOwner.email,
+      resentBy: req.user.name || req.user.email
+    }, '#36a64f', '📧');
+
+    res.status(200).json({
+      success: true,
+      message: `Credentials sent to ${businessOwner.email}`,
+      data: {
+        id: businessOwner._id,
+        email: businessOwner.email,
+        name: businessOwner.name
+      }
+    });
+  } catch (error) {
+    console.error('Resend business owner credentials error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -1428,6 +1486,61 @@ exports.deleteVendor = async (req, res) => {
   }
 };
 
+// @desc    Resend vendor credentials
+// @route   POST /api/auth/vendor/:id/resend-credentials
+// @access  Private (Admin/Super Admin)
+exports.resendVendorCredentials = async (req, res) => {
+  try {
+    const vendor = await User.findById(req.params.id);
+
+    if (!vendor || vendor.role !== 'vendor') {
+      return res.status(404).json({
+        success: false,
+        message: 'Vendor not found'
+      });
+    }
+
+    const temporaryPassword = generateSecurePassword(12);
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Resending credentials for ${vendor.email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
+
+    try {
+      await sendVendorWelcomeEmail(vendor, temporaryPassword, {
+        position: vendor.position
+      });
+    } catch (emailError) {
+      console.log('Failed to send welcome email:', emailError.message);
+    }
+
+    sendActivityToSlack('Vendor Credentials Resent', {
+      vendor: vendor.name,
+      email: vendor.email,
+      resentBy: req.user.name || req.user.email
+    }, '#36a64f', '📧');
+
+    res.status(200).json({
+      success: true,
+      message: `Credentials sent to ${vendor.email}`,
+      data: {
+        id: vendor._id,
+        email: vendor.email,
+        name: vendor.name
+      }
+    });
+  } catch (error) {
+    console.error('Resend vendor credentials error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
 // @desc    Onboard Manager (Admin/Super Admin)
 // @route   POST /api/auth/onboard-manager
 // @access  Private (Admin/Super Admin)
@@ -1674,6 +1787,59 @@ exports.deleteManager = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete manager error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// @desc    Resend manager credentials
+// @route   POST /api/auth/manager/:id/resend-credentials
+// @access  Private (Admin/Super Admin)
+exports.resendManagerCredentials = async (req, res) => {
+  try {
+    const manager = await User.findById(req.params.id);
+
+    if (!manager || manager.role !== 'manager') {
+      return res.status(404).json({
+        success: false,
+        message: 'Manager not found'
+      });
+    }
+
+    const temporaryPassword = generateSecurePassword(12);
+
+    if (process.env.NODE_ENV === 'development') {
+      console.log('-----------------------------------------');
+      console.log(`[DEV] Resending credentials for ${manager.email}:`);
+      console.log(`Password: ${temporaryPassword}`);
+      console.log('-----------------------------------------');
+    }
+
+    try {
+      await sendManagerWelcomeEmail(manager, temporaryPassword);
+    } catch (emailError) {
+      console.log('Failed to send welcome email:', emailError.message);
+    }
+
+    sendActivityToSlack('Manager Credentials Resent', {
+      manager: manager.name,
+      email: manager.email,
+      resentBy: req.user.name || req.user.email
+    }, '#36a64f', '📧');
+
+    res.status(200).json({
+      success: true,
+      message: `Credentials sent to ${manager.email}`,
+      data: {
+        id: manager._id,
+        email: manager.email,
+        name: manager.name
+      }
+    });
+  } catch (error) {
+    console.error('Resend manager credentials error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error'
