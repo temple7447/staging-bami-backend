@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const connectDatabase = async () => {
   try {
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
+      family: 4,
       serverSelectionTimeoutMS: 5000, // Faster timeout for connection failures
       // Connection pool configuration for better performance
       maxPoolSize: parseInt(process.env.MONGODB_MAX_POOL_SIZE) || 50, // Maximum connections
