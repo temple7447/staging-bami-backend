@@ -192,7 +192,7 @@ const validateOnboardBusinessOwner = [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('estateIds')
@@ -217,7 +217,7 @@ router.put('/business-owner/:id', protect, superAdminOnly, [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('estateIds')
@@ -240,7 +240,7 @@ const validateOnboardVendor = [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('position')
@@ -271,7 +271,7 @@ router.put('/vendor/:id', protect, [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('businessTypeId')
@@ -357,7 +357,7 @@ const validateOnboardManager = [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('position')
@@ -381,7 +381,7 @@ router.put('/manager/:id', protect, adminOrSuperAdmin, [
     .normalizeEmail()
     .withMessage('Please provide a valid email'),
   body('phone')
-    .optional()
+    .optional({ checkFalsy: true })
     .isMobilePhone()
     .withMessage('Please provide a valid phone number'),
   body('estateIds')

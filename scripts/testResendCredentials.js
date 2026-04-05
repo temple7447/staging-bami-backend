@@ -58,8 +58,8 @@ async function testResendCredentials() {
 
     try {
         console.log('1️⃣  Logging in as super admin...');
-        const response = await axios.post(`${API_BASE}/auth/login`, {
-            email: 'starukido@gmail.com',
+const response = await axios.post(`${API_BASE}/auth/login`, {
+            email: 'ebamieyituoyo@gmail.com',
             password: 'SuperAdmin123!'
         });
         console.log('Response data:', response.data);

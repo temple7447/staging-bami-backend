@@ -1,14 +1,87 @@
 const schedule = require('node-schedule');
+const mongoose = require('mongoose');
+const fs = require('fs');
+const path = require('path');
 const { checkAndSendReminders, checkAndSendOverdueReminders } = require('./reminderService');
 const { processPeriodicRentIncreases } = require('./rentIncreaseService');
 const { sendMonthlyReport } = require('./monthlyReportService');
 const { processMonthlyPayout, getPayoutStatus } = require('./vendorManagerPayoutService');
+const { uploadToGoogleDrive } = require('./googleDriveUpload');
 
 let reminderJob = null;
 let overdueReminderJob = null;
 let rentIncreaseJob = null;
 let monthlyReportJob = null;
 let vendorManagerPayoutJob = null;
+let backupJob = null;
+
+const backupDir = path.join(__dirname, '..', 'backups');
+
+const performBackup = async () => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dbName = mongoose.connection.name || 'bamihustle';
+    const backupFolderName = `${dbName}_backup_${timestamp}`;
+    const backupPath = path.join(backupDir, backupFolderName);
+
+    if (!fs.existsSync(backupPath)) {
+      fs.mkdirSync(backupPath, { recursive: true });
+    }
+
+    const db = mongoose.connection.db;
+    const collections = await db.listCollections().toArray();
+    const masterBackup = { 
+      timestamp: new Date().toISOString(), 
+      database: dbName, 
+      collections: {} 
+    };
+
+    console.log(`📦 Backing up ${collections.length} collections...`);
+
+    for (const col of collections) {
+      const name = col.name;
+      const collection = db.collection(name);
+      const data = await collection.find({}).toArray();
+      
+      // Save individual file
+      fs.writeFileSync(path.join(backupPath, `${name}.json`), JSON.stringify(data, null, 2));
+      
+      // Add to master backup
+      masterBackup.collections[name] = { count: data.length, data };
+      console.log(`   ✅ ${name}: ${data.length} documents`);
+    }
+
+    // Save master backup file
+    const masterFilePath = path.join(backupPath, 'all_collections.json');
+    fs.writeFileSync(masterFilePath, JSON.stringify(masterBackup, null, 2));
+
+    console.log(`✅ Local backup saved to: ${backupPath}`);
+
+    // Upload to Google Drive if configured
+    if (process.env.GOOGLE_REFRESH_TOKEN) {
+      console.log('☁️  Starting Google Drive upload...');
+      const targetFileName = `backup_${dbName}_${timestamp}.json`;
+      const uploadResult = await uploadToGoogleDrive(masterFilePath, targetFileName);
+      
+      if (uploadResult.success) {
+        console.log(`✅ Uploaded to Google Drive: ${uploadResult.link}`);
+      } else {
+        console.log(`⚠️  Google Drive upload failed: ${uploadResult.error}`);
+      }
+    } else {
+      console.log('ℹ️  Google Drive upload skipped (no refresh token configured)');
+    }
+
+    return { 
+      success: true, 
+      path: backupPath, 
+      masterFile: masterFilePath 
+    };
+  } catch (error) {
+    console.error('❌ Backup failed:', error.message);
+    return { success: false, error: error.message };
+  }
+};
 
 /**
  * Initialize the reminder scheduler
@@ -94,13 +167,31 @@ const initializeScheduler = () => {
       console.log('═'.repeat(60));
     });
 
+    // Schedule automatic database backup every day at 2 AM
+    // Cron pattern: "0 2 * * *" = 2:00 AM every day
+    backupJob = schedule.scheduleJob('0 2 * * *', async () => {
+      console.log('═'.repeat(60));
+      console.log('💾 AUTOMATIC DATABASE BACKUP STARTED');
+      console.log('═'.repeat(60));
+      const result = await performBackup();
+      if (result.success) {
+        console.log(`✅ Backup completed: ${result.path}`);
+      } else {
+        console.log(`❌ Backup failed: ${result.error}`);
+      }
+      console.log('═'.repeat(60));
+      console.log('💾 AUTOMATIC DATABASE BACKUP COMPLETED');
+      console.log('═'.repeat(60));
+    });
+
     console.log('✅ Reminder scheduler initialized successfully');
     console.log('⏰ Full reminders and Rent Increases checked daily at 08:00 AM');
     console.log('⚠️  Overdue reminders checked every 12 hours at 08:00 AM and 08:00 PM');
     console.log('📊 Monthly tenant report sent on the 1st of every month at 09:00 AM');
     console.log('💰 Vendor/Manager monthly payout on the 1st of every month at 10:00 AM');
+    console.log('💾 Automatic database backup daily at 02:00 AM');
 
-    return { reminderJob, overdueReminderJob, rentIncreaseJob, monthlyReportJob, vendorManagerPayoutJob };
+    return { reminderJob, overdueReminderJob, rentIncreaseJob, monthlyReportJob, vendorManagerPayoutJob, backupJob };
   } catch (error) {
     console.error('❌ Error initializing reminder scheduler:', error.message);
     throw error;
@@ -222,5 +313,6 @@ module.exports = {
   triggerReminderCheck,
   triggerMonthlyReport,
   getSchedulerStatus,
-  triggerVendorManagerPayout
+  triggerVendorManagerPayout,
+  performBackup
 };
