@@ -1,0 +1,667 @@
+{
+  "timestamp": "2026-04-12T21:00:01.323Z",
+  "database": "test",
+  "collections": {
+    "withdrawals": {
+      "count": 0,
+      "data": []
+    },
+    "wallets": {
+      "count": 16,
+      "data": [
+        {
+          "_id": "69ced25b20887f517736b376",
+          "userId": "69ced1f44b024355146de60e",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-02T20:32:27.653Z",
+          "createdAt": "2026-04-02T20:32:27.656Z",
+          "updatedAt": "2026-04-02T20:32:27.656Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffc8cc8cfca9e98d4452b",
+          "userId": "69cffc89c8cfca9e98d44528",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:44:44.099Z",
+          "createdAt": "2026-04-03T17:44:44.101Z",
+          "updatedAt": "2026-04-03T17:44:44.101Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffc8fc8cfca9e98d44532",
+          "userId": "69cffc8ec8cfca9e98d4452f",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:44:47.469Z",
+          "createdAt": "2026-04-03T17:44:47.470Z",
+          "updatedAt": "2026-04-03T17:44:47.470Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffca3c8cfca9e98d44546",
+          "userId": "69cffca1c8cfca9e98d44543",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:07.091Z",
+          "createdAt": "2026-04-03T17:45:07.091Z",
+          "updatedAt": "2026-04-03T17:45:07.091Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcb3c8cfca9e98d44553",
+          "userId": "69cffcb1c8cfca9e98d44550",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:23.918Z",
+          "createdAt": "2026-04-03T17:45:23.918Z",
+          "updatedAt": "2026-04-03T17:45:23.918Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcb6c8cfca9e98d4455a",
+          "userId": "69cffcb5c8cfca9e98d44557",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:26.383Z",
+          "createdAt": "2026-04-03T17:45:26.385Z",
+          "updatedAt": "2026-04-03T17:45:26.385Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcbac8cfca9e98d44566",
+          "userId": "69cffcb8c8cfca9e98d44563",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:30.493Z",
+          "createdAt": "2026-04-03T17:45:30.493Z",
+          "updatedAt": "2026-04-03T17:45:30.493Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffccac8cfca9e98d44571",
+          "userId": "69cffcc9c8cfca9e98d4456e",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:46.958Z",
+          "createdAt": "2026-04-03T17:45:46.960Z",
+          "updatedAt": "2026-04-03T17:45:46.960Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffccec8cfca9e98d44578",
+          "userId": "69cffcccc8cfca9e98d44575",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:50.102Z",
+          "createdAt": "2026-04-03T17:45:50.102Z",
+          "updatedAt": "2026-04-03T17:45:50.102Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcd0c8cfca9e98d44584",
+          "userId": "69cffccfc8cfca9e98d44581",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:45:52.690Z",
+          "createdAt": "2026-04-03T17:45:52.691Z",
+          "updatedAt": "2026-04-03T17:45:52.691Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffce9c8cfca9e98d4458f",
+          "userId": "69cffce8c8cfca9e98d4458c",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:17.816Z",
+          "createdAt": "2026-04-03T17:46:17.817Z",
+          "updatedAt": "2026-04-03T17:46:17.817Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcebc8cfca9e98d44596",
+          "userId": "69cffceac8cfca9e98d44593",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:19.905Z",
+          "createdAt": "2026-04-03T17:46:19.905Z",
+          "updatedAt": "2026-04-03T17:46:19.905Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffceec8cfca9e98d445a2",
+          "userId": "69cffceec8cfca9e98d4459f",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:22.925Z",
+          "createdAt": "2026-04-03T17:46:22.925Z",
+          "updatedAt": "2026-04-03T17:46:22.925Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcffc8cfca9e98d445ad",
+          "userId": "69cffcfec8cfca9e98d445aa",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:39.334Z",
+          "createdAt": "2026-04-03T17:46:39.334Z",
+          "updatedAt": "2026-04-03T17:46:39.334Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffd02c8cfca9e98d445b4",
+          "userId": "69cffd00c8cfca9e98d445b1",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:42.055Z",
+          "createdAt": "2026-04-03T17:46:42.055Z",
+          "updatedAt": "2026-04-03T17:46:42.055Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffd04c8cfca9e98d445c0",
+          "userId": "69cffd03c8cfca9e98d445bd",
+          "balance": 0,
+          "currency": "NGN",
+          "totalEarnings": 0,
+          "totalSpent": 0,
+          "transactions": [],
+          "isActive": true,
+          "lastUpdated": "2026-04-03T17:46:44.977Z",
+          "createdAt": "2026-04-03T17:46:44.977Z",
+          "updatedAt": "2026-04-03T17:46:44.977Z",
+          "__v": 0
+        }
+      ]
+    },
+    "tenants": {
+      "count": 0,
+      "data": []
+    },
+    "notifications": {
+      "count": 0,
+      "data": []
+    },
+    "estates": {
+      "count": 0,
+      "data": []
+    },
+    "settings": {
+      "count": 0,
+      "data": []
+    },
+    "reminderlogs": {
+      "count": 0,
+      "data": []
+    },
+    "transactions": {
+      "count": 0,
+      "data": []
+    },
+    "subscriptions": {
+      "count": 0,
+      "data": []
+    },
+    "units": {
+      "count": 0,
+      "data": []
+    },
+    "users": {
+      "count": 15,
+      "data": [
+        {
+          "_id": "69ced1f44b024355146de60e",
+          "name": "Super Admin",
+          "email": "ebamieyituoyo@gmail.com",
+          "password": "$2a$12$LlSvs4kq.pdlsLJdnJNC4OElK/fvMJ8HB5TbMZIxmGQvset3zgM9S",
+          "role": "super_admin",
+          "assignedEstates": [],
+          "isActive": true,
+          "emailVerified": true,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-02T20:30:44.124Z",
+          "updatedAt": "2026-04-09T09:32:16.593Z",
+          "__v": 0,
+          "lastLogin": "2026-04-09T09:32:16.590Z"
+        },
+        {
+          "_id": "69cffc89c8cfca9e98d44528",
+          "name": "Test Business Owner",
+          "email": "test.businessowner@test.com",
+          "password": "$2a$12$KjgTQv8OsgnqtU3OXDnFTeQfm6l0cZBGaX9z9oMr7/9DAe2NxP6hy",
+          "role": "business_owner",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:44:41.865Z",
+          "updatedAt": "2026-04-03T17:44:41.865Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffc8ec8cfca9e98d4452f",
+          "name": "Test Manager",
+          "email": "test.manager@test.com",
+          "password": "$2a$12$gkVMnMmxeMT1fo84U0BCb.nhO9FNd9X/eqfdHrl0Z3G18CUlicOOW",
+          "role": "manager",
+          "position": "Property Manager",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:44:46.281Z",
+          "updatedAt": "2026-04-03T17:44:46.281Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffca1c8cfca9e98d44543",
+          "name": "Test Vendor",
+          "email": "test.vendor@test.com",
+          "password": "$2a$12$HpLlaU8MKnxNxECqmY7wre3HhUmYBypejdDzMLrqKxT41U3wRkeZW",
+          "role": "vendor",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "manager": "69cffc8ec8cfca9e98d4452f",
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:05.691Z",
+          "updatedAt": "2026-04-03T17:45:05.691Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcb1c8cfca9e98d44550",
+          "name": "Test Business Owner",
+          "email": "bo.1775238319468@test.com",
+          "password": "$2a$12$1nvTtkN7MuSbAI.UDEx4kuvRZyu7rxiOCmFRcp/.oTiFED3w0NWky",
+          "role": "business_owner",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:21.860Z",
+          "updatedAt": "2026-04-03T17:45:21.860Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcb5c8cfca9e98d44557",
+          "name": "Test Manager",
+          "email": "mgr.1775238319468@test.com",
+          "password": "$2a$12$nUPmUdGbMCs4fKKIxpLtwOkTn05kwjsDQrXCb.dhObjCHVwsemhPS",
+          "role": "manager",
+          "position": "Property Manager",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:25.022Z",
+          "updatedAt": "2026-04-03T17:45:25.022Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcb8c8cfca9e98d44563",
+          "name": "Test Vendor",
+          "email": "vendor.1775238319468@test.com",
+          "password": "$2a$12$n3u3kUy0.6Ts5WmEIL85uuBd.Z/eyeEobdZe86ztCSRgJszwk80LK",
+          "role": "vendor",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "manager": "69cffcb5c8cfca9e98d44557",
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:28.166Z",
+          "updatedAt": "2026-04-03T17:45:28.166Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcc9c8cfca9e98d4456e",
+          "name": "Test Business Owner",
+          "email": "bo.1775238340472@test.com",
+          "password": "$2a$12$GAaRTB7NvFbxPbj53l6d7eaG8X46DDywJhYn0CGsGVFsBpJUEBSsu",
+          "role": "business_owner",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:45.462Z",
+          "updatedAt": "2026-04-03T17:45:45.462Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffcccc8cfca9e98d44575",
+          "name": "Test Manager",
+          "email": "mgr.1775238340472@test.com",
+          "password": "$2a$12$u7WSWiaKYDcnNEfrJDNlzOQZ0QgvvxBeqj7tkOxDn4ZQ0LW6N3bVO",
+          "role": "manager",
+          "position": "Property Manager",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:48.022Z",
+          "updatedAt": "2026-04-03T17:45:48.022Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffccfc8cfca9e98d44581",
+          "name": "Test Vendor",
+          "email": "vendor.1775238340472@test.com",
+          "password": "$2a$12$jIHpqbYIOFzDw6Lf4cY0IeCtBauCCjLUE0a8i2WBU3A9cIuXcMBSu",
+          "role": "vendor",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "manager": "69cffcccc8cfca9e98d44575",
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:45:51.823Z",
+          "updatedAt": "2026-04-03T17:45:51.823Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffce8c8cfca9e98d4458c",
+          "name": "Test Business Owner",
+          "email": "bo.1775238375020@test.com",
+          "password": "$2a$12$g7H8v9RBTx7Qzi2eQ7YZO.wg1ComdMaEvNVKS61ZshZlAbMxYv6qq",
+          "role": "business_owner",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:46:16.820Z",
+          "updatedAt": "2026-04-03T17:46:16.820Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffceac8cfca9e98d44593",
+          "name": "Test Manager",
+          "email": "mgr.1775238375020@test.com",
+          "password": "$2a$12$XnfVAEQULxZXvu3LdyEn5e1wwbXlXi4KeTcTxgKDT3ZYKKktCutJ.",
+          "role": "manager",
+          "position": "Property Manager",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:46:18.887Z",
+          "updatedAt": "2026-04-03T17:46:18.887Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffceec8cfca9e98d4459f",
+          "name": "Test Vendor",
+          "email": "vendor.1775238375020@test.com",
+          "password": "$2a$12$vF1fLO/3UrZaXU0Q/hZZl.rM6qs0j0JPdg88rg9p4qu6u.hO.ba6.",
+          "role": "vendor",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "manager": "69cffceac8cfca9e98d44593",
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:46:22.040Z",
+          "updatedAt": "2026-04-03T17:46:22.040Z",
+          "__v": 0
+        },
+        {
+          "_id": "69cffd00c8cfca9e98d445b1",
+          "name": "Test Manager",
+          "email": "starukido@gmail.com",
+          "password": "$2a$12$7/N/PBBtrTM17v6ivw79yevulCzDUEl0bloJWdYfzXH8td8H0iGPO",
+          "role": "manager",
+          "position": "Property Manager",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:46:40.535Z",
+          "updatedAt": "2026-04-05T06:17:24.547Z",
+          "__v": 0,
+          "phone": ""
+        },
+        {
+          "_id": "69cffd03c8cfca9e98d445bd",
+          "name": "Test Vendor",
+          "email": "vendor.1775238396534@test.com",
+          "password": "$2a$12$h32w9Q2KqGq886G3MIpAwOYp3hUnFeirwLj.Q/AgS2SK67iNdF8Wi",
+          "role": "vendor",
+          "assignedEstates": [],
+          "isActive": true,
+          "createdBy": "69ced1f44b024355146de60e",
+          "emailVerified": false,
+          "portfolio": [],
+          "rating": 0,
+          "reviewCount": 0,
+          "operationalHours": {
+            "start": "9:00 AM",
+            "end": "6:00 PM"
+          },
+          "isVerifiedPro": false,
+          "manager": "69cffd00c8cfca9e98d445b1",
+          "assignedBusinesses": [],
+          "services": [],
+          "createdAt": "2026-04-03T17:46:43.829Z",
+          "updatedAt": "2026-04-03T17:46:43.829Z",
+          "__v": 0
+        }
+      ]
+    },
+    "payments": {
+      "count": 0,
+      "data": []
+    },
+    "servicerequests": {
+      "count": 0,
+      "data": []
+    },
+    "walletaccounts": {
+      "count": 0,
+      "data": []
+    },
+    "businesstypes": {
+      "count": 0,
+      "data": []
+    },
+    "billingitems": {
+      "count": 0,
+      "data": []
+    }
+  }
+}
