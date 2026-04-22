@@ -55,7 +55,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       'http://localhost:3000', 
       'http://localhost:5173',
       'http://localhost:8080',
-      'https://www.bamihost.com'
+      'https://www.bamihost.com',
+      'https://staging-baminhost.vercel.app'
     ];
 
 const corsOptions = {
