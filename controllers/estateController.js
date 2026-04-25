@@ -354,10 +354,10 @@ const getEstateOverview = async (req, res) => {
           currency: 'NGN'
         },
         wallets: {
-          marketing: walletBalance.marketing.balance,
-          operations: walletBalance.operations.balance,
-          owner: walletBalance.owner.balance,
-          totalAvailable: walletBalance.totalBalance
+          marketing: walletBalance.summary?.totalMarketing || 0,
+          operations: walletBalance.summary?.totalOperations || 0,
+          owner: walletBalance.summary?.totalSavings || 0,
+          totalAvailable: walletBalance.summary?.totalBalance || 0
         },
         billing: {
           upcomingDueCount: tenantsDueSoon,
