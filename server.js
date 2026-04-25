@@ -270,6 +270,7 @@ app.use('/api/service-requests', require('./routes/serviceRequests'));
 app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/vendor-manager-payout', require('./routes/vendorManagerPayout'));
+app.use('/api/dashboard', require('./routes/dashboard'));
 
 // Test routes for manual triggers
 const { triggerMonthlyReport, getSchedulerStatus, triggerVendorManagerPayout } = require('./utils/scheduler');
