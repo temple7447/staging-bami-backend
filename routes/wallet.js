@@ -1,12 +1,15 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
 const { body } = require('express-validator');
+const { handleValidationErrors, validateWalletTransaction } = require('../middleware/validation');
 const {
   getWallet,
   createWallet,
   addFunds,
   deductFunds,
-  getTransactionHistory
+  getTransactionHistory,
+  getAllTransactions,
+  processWalletTransaction
 } = require('../controllers/walletController');
 const {
   initializeDeposit,
@@ -18,8 +21,11 @@ const router = express.Router();
 // Get current user's wallet
 router.get('/', protect, getWallet);
 
-// Get user's transaction history
+// Get user's own transaction history
 router.get('/transactions', protect, getTransactionHistory);
+
+// Get all transactions (role-based: admin sees all, others see own)
+router.get('/transactions/list', protect, getAllTransactions);
 
 // Create a new wallet
 router.post('/', protect, [
@@ -35,6 +41,9 @@ router.post('/add-funds', protect, [
 router.post('/deduct-funds', protect, [
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0')
 ], deductFunds);
+
+// Unified wallet transaction (deposit, withdraw, transfer)
+router.post('/transaction', protect, validateWalletTransaction, handleValidationErrors, processWalletTransaction);
 
 // Paystack deposit flows
 router.post('/paystack/initialize', protect, initializeDeposit);

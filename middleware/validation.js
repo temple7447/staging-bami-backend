@@ -160,6 +160,57 @@ const validateHistoryCreate = [
 ];
 
 
+// Unified wallet transaction validators
+const validateWalletTransaction = [
+  body('type')
+    .notEmpty().withMessage('Transaction type is required')
+    .isIn(['deposit', 'withdraw', 'transfer']).withMessage('Type must be deposit, withdraw, or transfer'),
+  body('amount')
+    .notEmpty().withMessage('Amount is required')
+    .isFloat({ min: 1 }).withMessage('Amount must be greater than 0'),
+  body('description')
+    .optional()
+    .isLength({ max: 500 }).withMessage('Description cannot exceed 500 characters'),
+  body('recipientEmail')
+    .optional()
+    .isEmail().withMessage('Invalid recipient email'),
+  body('recipientId')
+    .optional()
+    .isMongoId().withMessage('Invalid recipient ID'),
+  body('recipientType')
+    .optional()
+    .isIn(['user', 'estate']).withMessage('Recipient type must be user or estate'),
+  body().custom((value, { req }) => {
+    const { type, bankDetails, recipientEmail, recipientId, recipientType } = req.body;
+
+    if (type === 'withdraw') {
+      if (!bankDetails) {
+        throw new Error('Bank details are required for withdrawals');
+      }
+      if (!bankDetails.accountName) {
+        throw new Error('Account name is required');
+      }
+      if (!bankDetails.accountNumber) {
+        throw new Error('Account number is required');
+      }
+      if (!bankDetails.bankName) {
+        throw new Error('Bank name is required');
+      }
+    }
+
+    if (type === 'transfer') {
+      if (!recipientEmail && !recipientId) {
+        throw new Error('Recipient email or ID is required for transfers');
+      }
+      if (!recipientType) {
+        throw new Error('Recipient type is required for transfers');
+      }
+    }
+
+    return true;
+  })
+];
+
 module.exports = {
   handleValidationErrors,
   validateObjectId,
@@ -168,5 +219,6 @@ module.exports = {
   validateTenantCreate,
   validateTenantUpdate,
   validateTransactionCreate,
-  validateHistoryCreate
+  validateHistoryCreate,
+  validateWalletTransaction
 };

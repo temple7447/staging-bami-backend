@@ -1,6 +1,8 @@
 const Wallet = require('../models/Wallet');
+const WalletAccount = require('../models/WalletAccount');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
+const Withdrawal = require('../models/Withdrawal');
 const { validationResult } = require('express-validator');
 const { sendDepositEmail, sendWithdrawalEmail, sendTransactionNotificationEmail } = require('../utils/walletEmailService');
 
@@ -162,7 +164,249 @@ const deductFunds = async (req, res) => {
   }
 };
 
-// @desc    Get user's transaction history
+// @desc    Unified wallet transaction (deposit, withdraw, transfer)
+// @route   POST /api/wallet/transaction
+// @access  Private (all roles)
+const processWalletTransaction = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, message: 'Validation errors', errors: errors.array() });
+    }
+
+    const { type, amount, description, recipientEmail, recipientId, recipientType, bankDetails } = req.body;
+
+    const wallet = await Wallet.findOne({ userId: req.user.id });
+    if (!wallet) {
+      return res.status(404).json({ success: false, message: 'Wallet not found' });
+    }
+
+    let result;
+
+    switch (type) {
+      case 'deposit':
+        result = await handleDeposit(wallet, amount, description, req.user);
+        break;
+      case 'withdraw':
+        result = await handleWithdraw(wallet, amount, description, bankDetails, req.user);
+        break;
+      case 'transfer':
+        result = await handleTransfer(wallet, amount, description, recipientEmail, recipientId, recipientType, req.user);
+        break;
+      default:
+        return res.status(400).json({ success: false, message: 'Invalid transaction type' });
+    }
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Wallet transaction error:', err);
+
+    if (err.message.includes('Insufficient') || err.message.includes('not found') || err.message.includes('Invalid')) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+
+    res.status(500).json({ success: false, message: 'Server error occurred while processing transaction' });
+  }
+};
+
+const handleDeposit = async (wallet, amount, description, user) => {
+  wallet.balance += amount;
+  wallet.totalEarnings += amount;
+  wallet.lastUpdated = new Date();
+  await wallet.save();
+
+  const transaction = await Transaction.create({
+    user: user._id,
+    walletId: wallet._id,
+    amount,
+    type: 'deposit',
+    method: 'other',
+    status: 'completed',
+    reference: 'DEP-' + Date.now(),
+    description: description || 'Wallet deposit',
+    createdBy: user._id
+  });
+
+  wallet.transactions.push(transaction._id);
+  await wallet.save();
+
+  try {
+    await sendDepositEmail(user, amount, { _id: transaction._id, newBalance: wallet.balance }, 'Wallet Deposit');
+  } catch (emailError) {
+    console.error('Failed to send deposit email:', emailError.message);
+  }
+
+  return {
+    success: true,
+    message: 'Deposit successful',
+    data: {
+      transaction: transaction._id,
+      amount,
+      newBalance: wallet.balance,
+      type: 'deposit'
+    }
+  };
+};
+
+const handleWithdraw = async (wallet, amount, description, bankDetails, user) => {
+  if (wallet.balance < amount) {
+    throw new Error('Insufficient balance');
+  }
+
+  const withdrawal = await Withdrawal.create({
+    user: user._id,
+    amount,
+    bankDetails: bankDetails || {
+      accountName: user.bankDetails?.accountName || '',
+      accountNumber: user.bankDetails?.accountNumber || '',
+      bankName: user.bankDetails?.bankName || ''
+    },
+    status: 'pending',
+    reference: 'WD-' + Date.now()
+  });
+
+  wallet.balance -= amount;
+  wallet.totalSpent += amount;
+  wallet.lastUpdated = new Date();
+  await wallet.save();
+
+  const transaction = await Transaction.create({
+    user: user._id,
+    walletId: wallet._id,
+    amount,
+    type: 'withdrawal',
+    method: 'bank',
+    status: 'completed',
+    reference: withdrawal.reference,
+    description: description || 'Wallet withdrawal',
+    createdBy: user._id
+  });
+
+  wallet.transactions.push(transaction._id);
+  await wallet.save();
+
+  try {
+    await sendWithdrawalEmail(user, amount, { _id: withdrawal._id, newBalance: wallet.balance });
+  } catch (emailError) {
+    console.error('Failed to send withdrawal email:', emailError.message);
+  }
+
+  return {
+    success: true,
+    message: 'Withdrawal request submitted successfully',
+    data: {
+      withdrawal: withdrawal._id,
+      amount,
+      newBalance: wallet.balance,
+      status: withdrawal.status,
+      type: 'withdraw'
+    }
+  };
+};
+
+const handleTransfer = async (wallet, amount, description, recipientEmail, recipientId, recipientType, user) => {
+  if (wallet.balance < amount) {
+    throw new Error('Insufficient balance');
+  }
+
+  let recipientWallet, recipientUser, estateWallet;
+
+  if (recipientType === 'estate') {
+    const targetId = recipientId || recipientEmail;
+    if (!targetId) {
+      throw new Error('Estate ID is required for estate transfers');
+    }
+    estateWallet = await WalletAccount.findOne({ estate: targetId });
+    if (!estateWallet) {
+      throw new Error('Estate wallet not found');
+    }
+  } else {
+    if (recipientEmail) {
+      recipientUser = await User.findOne({ email: recipientEmail });
+    } else if (recipientId) {
+      recipientUser = await User.findById(recipientId);
+    }
+
+    if (!recipientUser) {
+      throw new Error('Recipient not found');
+    }
+
+    if (recipientUser._id.toString() === user._id.toString()) {
+      throw new Error('Cannot transfer to yourself');
+    }
+
+    recipientWallet = await Wallet.findOne({ userId: recipientUser._id });
+    if (!recipientWallet) {
+      recipientWallet = await Wallet.create({
+        userId: recipientUser._id,
+        currency: 'NGN'
+      });
+    }
+  }
+
+  wallet.balance -= amount;
+  wallet.totalSpent += amount;
+  wallet.lastUpdated = new Date();
+  await wallet.save();
+
+  if (recipientType === 'estate') {
+    estateWallet.totalReceived += amount;
+    await estateWallet.distributeAmount(amount);
+    estateWallet.lastUpdated = new Date();
+    await estateWallet.save();
+  } else {
+    recipientWallet.balance += amount;
+    recipientWallet.totalEarnings += amount;
+    recipientWallet.lastUpdated = new Date();
+    await recipientWallet.save();
+
+    const recipientTransaction = await Transaction.create({
+      user: recipientUser._id,
+      walletId: recipientWallet._id,
+      amount,
+      type: 'deposit',
+      method: 'transfer',
+      status: 'completed',
+      reference: 'TRF-IN-' + Date.now(),
+      description: `Transfer received from ${user.name}`,
+      createdBy: user._id
+    });
+
+    recipientWallet.transactions.push(recipientTransaction._id);
+    await recipientWallet.save();
+  }
+
+  const reference = 'TRF-' + Date.now();
+  const transaction = await Transaction.create({
+    user: user._id,
+    walletId: wallet._id,
+    amount,
+    type: 'transfer',
+    method: 'transfer',
+    status: 'completed',
+    reference,
+    description: description || `Transfer to ${recipientType === 'estate' ? 'estate' : recipientUser.name}`,
+    createdBy: user._id
+  });
+
+  wallet.transactions.push(transaction._id);
+  await wallet.save();
+
+  return {
+    success: true,
+    message: 'Transfer successful',
+    data: {
+      transaction: transaction._id,
+      amount,
+      newBalance: wallet.balance,
+      recipient: recipientType === 'estate' ? recipientId : recipientUser.name,
+      recipientType,
+      type: 'transfer'
+    }
+  };
+};
+
+// @desc    Get user's transaction history (own transactions only)
 // @route   GET /api/wallet/transactions
 // @access  Private
 const getTransactionHistory = async (req, res) => {
@@ -183,10 +427,94 @@ const getTransactionHistory = async (req, res) => {
   }
 };
 
+// @desc    Unified transaction list - role-based access
+// @route   GET /api/wallet/transactions/list
+// @access  Private (all roles)
+const getAllTransactions = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, type, status, search, startDate, endDate } = req.query;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    let filter = { isActive: true };
+
+    const role = req.user.role;
+
+    if (['super_admin'].includes(role)) {
+      // Super admin: see all transactions
+      if (type) filter.type = type;
+      if (status) filter.status = status;
+      if (search) {
+        filter.$or = [
+          { description: { $regex: search, $options: 'i' } },
+          { reference: { $regex: search, $options: 'i' } }
+        ];
+      }
+    } else if (['admin', 'super_manager', 'business_owner'].includes(role)) {
+      // Admins/owners: see transactions for their assigned estates OR their own
+      const estateFilter = role === 'business_owner'
+        ? { estate: { $in: req.user.assignedEstates || [] } }
+        : { estate: { $in: req.user.assignedEstates || [] } };
+
+      filter.$or = [
+        estateFilter,
+        { user: req.user.id }
+      ];
+
+      if (type) filter.type = type;
+      if (status) filter.status = status;
+      if (search) {
+        filter.$or.push(
+          { description: { $regex: search, $options: 'i' } },
+          { reference: { $regex: search, $options: 'i' } }
+        );
+      }
+    } else {
+      // All other roles: only their own transactions
+      filter.user = req.user.id;
+      if (type) filter.type = type;
+      if (status) filter.status = status;
+    }
+
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(filter)
+        .populate('user', 'name email role')
+        .populate('walletId', 'balance')
+        .populate('estate', 'name')
+        .populate('tenant', 'tenantName')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum),
+      Transaction.countDocuments(filter)
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: transactions.length,
+      total,
+      page: pageNum,
+      pages: Math.ceil(total / limitNum),
+      data: transactions
+    });
+  } catch (err) {
+    console.error('Get all transactions error:', err);
+    res.status(500).json({ success: false, message: 'Server error occurred while fetching transactions' });
+  }
+};
+
 module.exports = {
   getWallet,
   createWallet,
   addFunds,
   deductFunds,
-  getTransactionHistory
+  getTransactionHistory,
+  getAllTransactions,
+  processWalletTransaction
 };
