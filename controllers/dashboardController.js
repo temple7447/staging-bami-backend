@@ -107,6 +107,13 @@ const getTenantOverview = async (userId) => {
   };
 
   if (tenant) {
+    // Auto-calculate nextDueDate if missing (backward compatibility)
+    let nextDueDate = tenant.nextDueDate;
+    if (!nextDueDate && tenant.entryDate) {
+      nextDueDate = new Date(tenant.entryDate);
+      nextDueDate.setMonth(nextDueDate.getMonth() + 12);
+    }
+
     // Apartment info
     overview.apartment = {
       id: tenant._id,
@@ -117,7 +124,7 @@ const getTenantOverview = async (userId) => {
       rentAmount: tenant.rentAmount,
       serviceChargeAmount: tenant.serviceChargeAmount,
       entryDate: tenant.entryDate,
-      nextDueDate: tenant.nextDueDate,
+      nextDueDate: nextDueDate,
       status: tenant.status,
       leaseEndsOn: tenant.leaseEndDate
     };

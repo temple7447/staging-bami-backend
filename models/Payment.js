@@ -64,7 +64,7 @@ const PaymentSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['paystack', 'bank_transfer', 'cash', 'check'],
+    enum: ['paystack', 'bank_transfer', 'cash', 'check', 'wallet'],
     default: 'paystack'
   },
   // Transaction Details

@@ -6,6 +6,7 @@ const Transaction = require('../models/Transaction');
 const Payment = require('../models/Payment');
 const BillingItem = require('../models/BillingItem');
 const User = require('../models/User');
+const Wallet = require('../models/Wallet');
 const crypto = require('crypto');
 const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
@@ -1292,9 +1293,22 @@ async function getMyBillingItems(req, res) {
 // @access  Private (Tenant)
 async function paySelectedBillingItems(req, res) {
   try {
-    const { itemIds } = req.body;
+    const { itemIds, paymentMethod = 'wallet' } = req.body;
 
-    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+    // Support legacy format with billingCode and paymentType
+    let items = itemIds;
+    if (!items) {
+      items = [];
+      if (req.body.billingCode) {
+        items.push(req.body.billingCode);
+      }
+      if (req.body.paymentType) {
+        const typeItems = req.body.paymentType.split(',').map(s => s.trim());
+        items.push(...typeItems);
+      }
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'Please select at least one item to pay' });
     }
 
@@ -1306,7 +1320,7 @@ async function paySelectedBillingItems(req, res) {
     let totalAmount = 0;
     const itemsToProcess = [];
 
-    for (const itemId of itemIds) {
+    for (const itemId of items) {
       // 1. Check if it's a BillingItem ID (Works for ALL users)
       if (mongoose.Types.ObjectId.isValid(itemId)) {
         const billingItem = await BillingItem.findOne({
@@ -1391,7 +1405,101 @@ async function paySelectedBillingItems(req, res) {
       return res.status(400).json({ success: false, message: 'Total amount must be greater than zero' });
     }
 
-    // Initialize Paystack payment
+    // Handle wallet payment
+    if (paymentMethod === 'wallet') {
+      const wallet = await Wallet.findOne({ userId: req.user.id });
+      if (!wallet) {
+        return res.status(404).json({ success: false, message: 'Wallet not found' });
+      }
+
+      if (wallet.balance < totalAmount) {
+        return res.status(400).json({
+          success: false,
+          message: 'Insufficient wallet balance',
+          data: {
+            balance: wallet.balance,
+            required: totalAmount
+          }
+        });
+      }
+
+      // Deduct from wallet
+      wallet.balance -= totalAmount;
+      wallet.totalSpent += totalAmount;
+      wallet.lastUpdated = new Date();
+      await wallet.save();
+
+      // Create completed payment record
+      const reference = `wallet_billing_${req.user.id}_${Date.now()}`;
+      const description = itemsToProcess.map(item => item.label).join(', ');
+
+      const payment = await Payment.create({
+        user: req.user.id,
+        tenant: tenant?._id,
+        estate: tenant?.estate?._id,
+        admin: req.user.id,
+        paymentType: 'other',
+        amount: totalAmount,
+        description,
+        paystackReference: reference,
+        paymentStatus: 'completed',
+        paymentMethod: 'wallet',
+        createdBy: req.user.id
+      });
+
+      // Mark billing items as paid and update nextDueDate
+      for (const item of itemsToProcess) {
+        if (item.type === 'billing_item') {
+          await BillingItem.findByIdAndUpdate(item.id, {
+            isPaid: true,
+            paidAt: new Date(),
+            payment: payment._id
+          });
+        }
+      }
+
+      // Auto-advance nextDueDate for rent/service_charge payments
+      if (tenant && (items.includes('rent') || items.includes('service_charge'))) {
+        const maxMonths = items.includes('rent') && tenant.rentAmount > 0 ? 12 : 0;
+        if (maxMonths > 0) {
+          const baseDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
+          const newDueDate = new Date(baseDate);
+          newDueDate.setMonth(newDueDate.getMonth() + maxMonths);
+          tenant.nextDueDate = newDueDate;
+          await tenant.save();
+        }
+      }
+
+      // Send receipt email
+      try {
+        const { calculateReceiptData } = require('../utils/rentCalculator');
+        const { sendReceiptEmail } = require('../utils/emailService');
+        const receiptData = calculateReceiptData(tenant, payment, wallet);
+        await sendReceiptEmail(receiptData, tenant, tenant.estate);
+      } catch (emailError) {
+        console.error('Failed to send receipt email:', emailError.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment successful from wallet',
+        data: {
+          payment: {
+            id: payment._id,
+            reference: payment.paystackReference,
+            amount: payment.amount,
+            description: payment.description,
+            paymentMethod: 'wallet',
+            paymentStatus: 'completed',
+            createdAt: payment.createdAt
+          },
+          newBalance: wallet.balance,
+          items: itemsToProcess
+        }
+      });
+    }
+
+    // Initialize Paystack payment (default)
     const paystack = require('../config/paystack');
     const reference = `billing_${req.user.id}_${Date.now()}`;
 
@@ -1427,7 +1535,7 @@ async function paySelectedBillingItems(req, res) {
       user: req.user.id,
       tenant: tenant?._id,
       estate: tenant?.estate?._id,
-      admin: req.user.id, // For self-paid, admin is the user
+      admin: req.user.id,
       paymentType: 'other',
       amount: totalAmount,
       description,
