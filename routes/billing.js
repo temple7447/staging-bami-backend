@@ -8,10 +8,14 @@ const {
     createBillingItem,
     getBillingItems,
     updateBillingItem,
-    deleteBillingItem
+    deleteBillingItem,
+    getBillingSummary
 } = require('../controllers/billingController');
 
 const router = express.Router();
+
+// Unified billing summary — all roles, single endpoint
+router.get('/summary', protect, getBillingSummary);
 
 // Admin routes for managing billing items
 router.post('/tenants/:tenantId/billing', protect, adminOrSuperAdmin, validateObjectId('tenantId'), handleValidationErrors, createBillingItem);

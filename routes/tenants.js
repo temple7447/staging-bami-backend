@@ -28,7 +28,6 @@ const {
   uploadMyAvatar,
   getMyTenant,
   listMyHistory,
-  getMyBillingItems,
   paySelectedBillingItems,
   getQuarterlyRentByDueMonth,
 } = require('../controllers/tenantController');
@@ -40,7 +39,6 @@ router.post('/', protect, validateTenantCreate, handleValidationErrors, createTe
 
 // Special routes (must be before /:id routes)
 router.get('/me/history', protect, listMyHistory);
-router.get('/me/billing', protect, getMyBillingItems);
 router.post('/me/billing/pay', protect, paySelectedBillingItems);
 
 // Single tenant ops - parameterized routes
