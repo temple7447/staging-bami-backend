@@ -860,11 +860,13 @@ const verifyPayment = async (req, res) => {
       });
     }
 
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
+
     // Find payment record
     const payment = await Payment.findOne({ paystackReference: reference }).populate('tenant estate admin');
     if (!payment) {
       if (redirect) {
-        return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=pending`);
+        return res.redirect(`${frontendUrl}/dashboard/payment/success?reference=${reference}&status=pending`);
       }
       return res.status(404).json({
         success: false,
@@ -877,7 +879,7 @@ const verifyPayment = async (req, res) => {
 
     if (!verificationResult.success) {
       if (redirect) {
-        return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=failed`);
+        return res.redirect(`${frontendUrl}/dashboard/payment/success?reference=${reference}&status=failed`);
       }
       return res.status(400).json({
         success: false,
@@ -1051,7 +1053,7 @@ const verifyPayment = async (req, res) => {
 
       // If browser redirect requested, redirect to dashboard success page
       if (redirect) {
-        return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=success`);
+        return res.redirect(`${frontendUrl}/dashboard/payment/success?reference=${reference}&status=success`);
       }
     } else {
       payment.paymentStatus = 'failed';
@@ -1063,7 +1065,7 @@ const verifyPayment = async (req, res) => {
 
       // If browser redirect requested, redirect to dashboard with failure status
       if (redirect) {
-        return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=failed`);
+        return res.redirect(`${frontendUrl}/dashboard/payment/success?reference=${reference}&status=failed`);
       }
     }
 
@@ -1093,10 +1095,11 @@ const verifyPayment = async (req, res) => {
   } catch (error) {
     console.error('Payment verification error:', error);
     const reference = req.params.reference || 'unknown';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:8080';
 
     // If browser redirect requested, redirect to dashboard with error
     if (req.query.redirect) {
-      return res.redirect(`http://localhost:8080/dashboard/payment/success?reference=${reference}&status=error`);
+      return res.redirect(`${frontendUrl}/dashboard/payment/success?reference=${reference}&status=error`);
     }
 
     res.status(500).json({
@@ -1531,6 +1534,7 @@ const recordManualPayment = async (req, res) => {
 };
 
 module.exports = {
+  calculateReceiptData,
   initiateInitialPayment,
   initiateDepositPayment,
   initiateRentPayment,

@@ -12,6 +12,8 @@ const { sendTenantWelcomeEmail } = require('../utils/emailService');
 const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
 const { sendActivityToSlack } = require('../utils/slackService');
+const { distributePayment } = require('../utils/distributionService');
+const paystackService = require('../utils/paystackService');
 
 // Generate a random alphanumeric password of given length (at least one letter and one digit)
 function generateTempPassword(len = 6) {
@@ -1405,6 +1407,18 @@ async function paySelectedBillingItems(req, res) {
       return res.status(400).json({ success: false, message: 'Total amount must be greater than zero' });
     }
 
+    // Derive paymentType from actual items selected
+    const predefinedCodes = itemsToProcess.filter(i => i.type === 'predefined').map(i => i.code);
+    const hasBillingItems = itemsToProcess.some(i => i.type === 'billing_item');
+    let resolvedPaymentType;
+    if (!hasBillingItems && predefinedCodes.length === 1) {
+      resolvedPaymentType = predefinedCodes[0]; // rent | service_charge | caution_fee | legal_fee
+    } else if (predefinedCodes.length > 0) {
+      resolvedPaymentType = 'bundle';
+    } else {
+      resolvedPaymentType = 'other';
+    }
+
     // Handle wallet payment
     if (paymentMethod === 'wallet') {
       const wallet = await Wallet.findOne({ userId: req.user.id });
@@ -1438,41 +1452,78 @@ async function paySelectedBillingItems(req, res) {
         tenant: tenant?._id,
         estate: tenant?.estate?._id,
         admin: req.user.id,
-        paymentType: 'other',
+        paymentType: resolvedPaymentType,
         amount: totalAmount,
         description,
         paystackReference: reference,
         paymentStatus: 'completed',
+        paymentDate: new Date(),
         paymentMethod: 'wallet',
         createdBy: req.user.id
       });
 
-      // Mark billing items as paid and update nextDueDate
+      // Mark billing items as paid
       for (const item of itemsToProcess) {
         if (item.type === 'billing_item') {
           await BillingItem.findByIdAndUpdate(item.id, {
             isPaid: true,
-            paidAt: new Date(),
-            payment: payment._id
+            paidDate: new Date(),
+            paymentReference: payment._id
           });
         }
       }
 
       // Auto-advance nextDueDate for rent/service_charge payments
-      if (tenant && (items.includes('rent') || items.includes('service_charge'))) {
-        const maxMonths = items.includes('rent') && tenant.rentAmount > 0 ? 12 : 0;
+      if (tenant) {
+        const rentMonths = items.includes('rent') && tenant.rentAmount > 0 ? 12 : 0;
+        const serviceMonths = items.includes('service_charge') && tenant.unit?.serviceChargeMonthly > 0 ? 1 : 0;
+        const maxMonths = Math.max(rentMonths, serviceMonths);
         if (maxMonths > 0) {
           const baseDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
           const newDueDate = new Date(baseDate);
           newDueDate.setMonth(newDueDate.getMonth() + maxMonths);
+          const oldDueDate = tenant.nextDueDate;
           tenant.nextDueDate = newDueDate;
-          await tenant.save();
+          tenant.history.push({
+            event: 'payment',
+            note: `Wallet payment (${description}). Due date advanced to ${newDueDate.toISOString().split('T')[0]}`,
+            meta: { rentMonths, serviceMonths, oldDueDate, newDueDate, paymentId: payment._id },
+            createdBy: req.user.id
+          });
+          await tenant.save({ validateBeforeSave: false });
+        }
+      }
+
+      // Create Transaction record for history
+      try {
+        await Transaction.create({
+          user: req.user.id,
+          tenant: tenant?._id,
+          estate: tenant?.estate?._id,
+          amount: totalAmount,
+          type: resolvedPaymentType,
+          method: 'wallet',
+          status: 'completed',
+          reference,
+          description,
+          createdBy: req.user.id
+        });
+      } catch (txErr) {
+        logError('Failed to create transaction record for wallet billing payment', txErr);
+      }
+
+      // Distribute funds (50/30/20) if tenant has an estate
+      if (tenant?.estate?._id) {
+        try {
+          await distributePayment(tenant.estate._id, totalAmount, payment._id, resolvedPaymentType);
+        } catch (distErr) {
+          logError('Failed to distribute wallet billing payment', distErr, { paymentId: payment._id });
         }
       }
 
       // Send receipt email
       try {
-        const { calculateReceiptData } = require('../utils/rentCalculator');
+        const { calculateReceiptData } = require('./paymentController');
         const { sendReceiptEmail } = require('../utils/emailService');
         const receiptData = calculateReceiptData(tenant, payment, wallet);
         await sendReceiptEmail(receiptData, tenant, tenant.estate);
@@ -1500,9 +1551,6 @@ async function paySelectedBillingItems(req, res) {
     }
 
     // Initialize Paystack payment (default)
-    const paystack = require('../config/paystack');
-    const reference = `billing_${req.user.id}_${Date.now()}`;
-
     const description = itemsToProcess.map(item => item.label).join(', ');
 
     const metadata = {
@@ -1519,15 +1567,18 @@ async function paySelectedBillingItems(req, res) {
       metadata.unit_label = tenant.unit?.label;
     }
 
-    const paystackResponse = await paystack.transaction.initialize({
-      email: (tenant && tenant.tenantEmail) || req.user.email,
-      amount: Math.round(totalAmount * 100), // Convert to kobo
-      reference,
+    const paystackResponse = await paystackService.initiatePayment({
+      amount: totalAmount,
+      customerEmail: (tenant && tenant.tenantEmail) || req.user.email,
+      customerName: tenant?.tenantName || req.user.name || req.user.email,
+      description,
+      tenantId: tenant?._id?.toString(),
+      estateId: tenant?.estate?._id?.toString(),
       metadata
     });
 
-    if (!paystackResponse.status) {
-      return res.status(500).json({ success: false, message: 'Failed to initialize payment' });
+    if (!paystackResponse.success) {
+      return res.status(500).json({ success: false, message: 'Failed to initialize payment', error: paystackResponse.error });
     }
 
     // Create pending payment record
@@ -1536,11 +1587,11 @@ async function paySelectedBillingItems(req, res) {
       tenant: tenant?._id,
       estate: tenant?.estate?._id,
       admin: req.user.id,
-      paymentType: 'other',
+      paymentType: resolvedPaymentType,
       amount: totalAmount,
       description,
-      paystackReference: reference,
-      paystackAccessCode: paystackResponse.data.access_code,
+      paystackReference: paystackResponse.reference,
+      paystackAccessCode: paystackResponse.accessCode,
       paymentStatus: 'initiated',
       paymentMethod: 'paystack',
       createdBy: req.user.id
@@ -1550,9 +1601,9 @@ async function paySelectedBillingItems(req, res) {
       success: true,
       message: 'Payment initialized successfully',
       data: {
-        authorizationUrl: paystackResponse.data.authorization_url,
-        accessCode: paystackResponse.data.access_code,
-        reference,
+        authorizationUrl: paystackResponse.authorizationUrl,
+        accessCode: paystackResponse.accessCode,
+        reference: paystackResponse.reference,
         amount: totalAmount,
         items: itemsToProcess
       }

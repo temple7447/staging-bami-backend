@@ -1,3 +1,4 @@
+const axios = require('axios');
 const Wallet = require('../models/Wallet');
 const WalletAccount = require('../models/WalletAccount');
 const User = require('../models/User');
@@ -74,7 +75,7 @@ const createWallet = async (req, res) => {
   }
 };
 
-// Add funds to wallet
+// Add funds to wallet (via Paystack)
 const addFunds = async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -84,36 +85,46 @@ const addFunds = async (req, res) => {
 
     const { amount } = req.body;
 
-    const wallet = await Wallet.findOne({ userId: req.user.id });
-    if (!wallet) {
-      return res.status(404).json({ success: false, message: 'Wallet not found' });
+    if (!amount || amount < 100) {
+      return res.status(400).json({ success: false, message: 'Minimum deposit is ₦100' });
     }
 
-    wallet.balance += amount;
-    wallet.totalEarnings += amount;
-    wallet.lastUpdated = new Date();
-    await wallet.save();
+    const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
+    const callback_url = `${process.env.FRONTEND_URL}/wallet/verify`;
 
-    // Send deposit email notification
-    try {
-      const user = await User.findById(req.user.id);
-      await sendDepositEmail(user, amount, { _id: 'WALLET-DEP-' + Date.now(), newBalance: wallet.balance }, 'Wallet Deposit');
-    } catch (emailError) {
-      console.error('Failed to send deposit email:', emailError.message);
-    }
+    const payload = {
+      email: req.user.email,
+      amount: amount * 100,
+      callback_url,
+      metadata: {
+        user_id: req.user.id,
+        payment_type: 'wallet_deposit'
+      }
+    };
+
+    const response = await axios.post(
+      'https://api.paystack.co/transaction/initialize',
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
     res.status(200).json({
       success: true,
-      message: 'Funds added successfully',
-      data: {
-        ...wallet.toObject(),
-        currencySymbol: '₦',
-        currency: 'NGN'
-      }
+      message: 'Paystack payment initialized',
+      data: response.data.data
     });
-  } catch (err) {
-    console.error('Add funds error:', err);
-    res.status(500).json({ success: false, message: 'Server error occurred while adding funds' });
+  } catch (error) {
+    console.error('Add funds error:', error.response ? error.response.data : error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to initialize Paystack payment',
+      error: error.response ? error.response.data.message : error.message
+    });
   }
 };
 
