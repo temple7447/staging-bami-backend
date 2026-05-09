@@ -286,8 +286,7 @@ const getTenants = async (req, res) => {
         endDate = new Date(targetYear + 1, 0, 1);
       }
 
-      filter.nextDueDate = { $gte: startDate, $lt: endDate };
-      filter.status = { $in: ['occupied', 'pending'] };
+      filter.entryDate = { $gte: startDate, $lt: endDate };
     }
 
     // Helper to process tenant and add fees/metadata
