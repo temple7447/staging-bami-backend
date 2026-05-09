@@ -126,7 +126,8 @@ const getTenantOverview = async (userId) => {
       entryDate: tenant.entryDate,
       nextDueDate: nextDueDate,
       status: tenant.status,
-      leaseEndsOn: tenant.leaseEndDate
+      leaseEndsOn: tenant.leaseEndDate,
+      meterNumber: tenant.electricMeterNumber || 'N/A'
     };
 
     // Billing Overview

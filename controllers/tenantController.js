@@ -1348,12 +1348,21 @@ async function paySelectedBillingItems(req, res) {
       // 2. Check predefined codes (Only if user has a Tenant record)
       if (tenant) {
         if (itemId === 'rent' && tenant.rentAmount > 0) {
-          totalAmount += tenant.rentAmount;
+          const { calculateEffectiveRent } = require('../utils/rentCalculator');
+          const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+          const rentResult = calculateEffectiveRent(
+            tenant.baseRent2024 || tenant.rentAmount,
+            tenant.entryDate || new Date(),
+            12,
+            false,
+            rentOrigin
+          );
+          totalAmount += rentResult.totalAmount;
           itemsToProcess.push({
             type: 'predefined',
             code: 'rent',
-            label: 'Rent',
-            amount: tenant.rentAmount
+            label: 'Rent (12 months)',
+            amount: rentResult.totalAmount
           });
         } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
           totalAmount += tenant.unit.serviceChargeMonthly;

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/billingController.js)",
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/models/Issue.js)",
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/issueController.js)",
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/routes/issues.js)"
+    ]
+  }
+}

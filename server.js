@@ -271,6 +271,7 @@ app.use('/api/withdrawals', require('./routes/withdrawals'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/vendor-manager-payout', require('./routes/vendorManagerPayout'));
 app.use('/api/dashboard', require('./routes/dashboard'));
+app.use('/api/issues', require('./routes/issues'));
 
 // Test routes for manual triggers
 const { triggerMonthlyReport, getSchedulerStatus, triggerVendorManagerPayout } = require('./utils/scheduler');

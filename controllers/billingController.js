@@ -3,7 +3,7 @@ const Tenant = require('../models/Tenant');
 const Estate = require('../models/Estate');
 const Payment = require('../models/Payment');
 const { sendActivityToSlack } = require('../utils/slackService');
-const { getCurrentRent } = require('../utils/rentCalculator');
+const { getCurrentRent, calculateEffectiveRent } = require('../utils/rentCalculator');
 
 // @desc    Create a new billing item for a tenant
 // @route   POST /api/billing/tenants/:tenantId/billing
@@ -325,6 +325,55 @@ async function buildTenantDetail(tenant) {
     const overdueUtility = utilityBills.filter(i => i.isOverdue).reduce((s, i) => s + i.amount, 0);
     const overdueRecurring = isOverdue ? recurringMonthly : 0;
 
+    // ── 5. Initial payment check for new tenants ─────────────────────────────
+    let requiresInitialPayment = false;
+    let initialPayment = null;
+
+    if (tenant.tenantType === 'new') {
+        const hasCompletedPayment = await Payment.exists({
+            tenant: tenant._id,
+            paymentStatus: 'completed',
+            isActive: true,
+            paymentType: { $in: ['initial', 'rent', 'bundle'] }
+        });
+
+        if (!hasCompletedPayment) {
+            requiresInitialPayment = true;
+
+            const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+            const rentResult = calculateEffectiveRent(
+                tenant.baseRent2024 || tenant.rentAmount || 0,
+                tenant.entryDate || now,
+                12,
+                false,
+                rentOrigin
+            );
+
+            const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
+            let serviceTotal = 0;
+            if (serviceBase > 0) {
+                const svcOrigin = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt;
+                serviceTotal = calculateEffectiveRent(serviceBase, tenant.entryDate || now, 12, false, svcOrigin).totalAmount;
+            }
+
+            const cautionAmount = unit?.cautionFee > 0
+                ? getCurrentRent(tenant.baseCaution2024 || unit.cautionFee, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false)
+                : 0;
+            const legalAmount = unit?.legalFee > 0
+                ? getCurrentRent(tenant.baseLegal2024 || unit.legalFee, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false)
+                : 0;
+
+            initialPayment = {
+                rent12Months: rentResult.totalAmount,
+                serviceCharge12Months: serviceTotal,
+                cautionFee: cautionAmount,
+                legalFee: legalAmount,
+                total: rentResult.totalAmount + serviceTotal + cautionAmount + legalAmount,
+                note: 'New tenant: 12-month rent + one-time fees required as initial payment'
+            };
+        }
+    }
+
     return {
         tenant: {
             id: tenant._id,
@@ -352,7 +401,9 @@ async function buildTenantDetail(tenant) {
             totalOutstanding: unpaidOneTime + unpaidUtility + overdueRecurring,
             overdueAmount: overdueUtility + overdueRecurring,
             isOverdue,
-            daysUntilDue: dueIn
+            daysUntilDue: dueIn,
+            requiresInitialPayment,
+            initialPayment
         }
     };
 }
