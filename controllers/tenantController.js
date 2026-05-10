@@ -125,14 +125,10 @@ const createTenant = async (req, res) => {
       });
     }
 
-    let effectiveNextDueDate = parsedNextDueDate;
-    if (Number.isInteger(durationMonths) && durationMonths > 0) {
-      const baseDate = parsedEntryDate || new Date();
-      const due = new Date(baseDate.getTime());
-      // Add N months while letting JS handle year rollover
-      due.setMonth(due.getMonth() + durationMonths);
-      effectiveNextDueDate = due;
-    }
+    // Use admin-provided nextDueDate if given; otherwise default to entryDate.
+    // durationMonths is validated above but does NOT pre-advance the due date —
+    // the payment flow handles advancement when the tenant actually pays.
+    const effectiveNextDueDate = parsedNextDueDate || parsedEntryDate || new Date();
 
     // Optionally create or link a user account for tenant
     let userId = undefined;
@@ -1364,19 +1360,24 @@ async function paySelectedBillingItems(req, res) {
             amount: rentResult.totalAmount
           });
         } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
-          totalAmount += tenant.unit.serviceChargeMonthly;
+          const serviceChargeTotal = tenant.unit.serviceChargeMonthly * 12;
+          totalAmount += serviceChargeTotal;
           itemsToProcess.push({
             type: 'predefined',
             code: 'service_charge',
-            label: 'Service Charge',
-            amount: tenant.unit.serviceChargeMonthly
+            label: 'Service Charge (12 months)',
+            amount: serviceChargeTotal
           });
         } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
           const paidCaution = await Payment.exists({
             tenant: tenant._id,
-            paymentType: 'caution_fee',
             paymentStatus: 'completed',
             isActive: true,
+            $or: [
+              { paymentType: 'caution_fee' },
+              { paymentType: { $in: ['initial', 'bundle'] }, 'paystackResponse.data.metadata.billing_items.code': 'caution_fee' },
+              { paymentType: { $in: ['initial', 'bundle'] }, 'paystackResponse.data.metadata.billing_items.type': 'caution_fee' }
+            ]
           });
           if (!paidCaution) {
             totalAmount += tenant.unit.cautionFee;
@@ -1390,9 +1391,13 @@ async function paySelectedBillingItems(req, res) {
         } else if (itemId === 'legal_fee' && tenant.unit?.legalFee > 0) {
           const paidLegal = await Payment.exists({
             tenant: tenant._id,
-            paymentType: 'legal_fee',
             paymentStatus: 'completed',
             isActive: true,
+            $or: [
+              { paymentType: 'legal_fee' },
+              { paymentType: { $in: ['initial', 'bundle'] }, 'paystackResponse.data.metadata.billing_items.code': 'legal_fee' },
+              { paymentType: { $in: ['initial', 'bundle'] }, 'paystackResponse.data.metadata.billing_items.type': 'legal_fee' }
+            ]
           });
           if (!paidLegal) {
             totalAmount += tenant.unit.legalFee;
@@ -1467,7 +1472,15 @@ async function paySelectedBillingItems(req, res) {
         paymentStatus: 'completed',
         paymentDate: new Date(),
         paymentMethod: 'wallet',
-        createdBy: req.user.id
+        createdBy: req.user.id,
+        paystackResponse: {
+          data: {
+            metadata: {
+              payment_type: 'multiple_billing_items',
+              billing_items: itemsToProcess
+            }
+          }
+        }
       });
 
       // Mark billing items as paid
@@ -1483,8 +1496,8 @@ async function paySelectedBillingItems(req, res) {
 
       // Auto-advance nextDueDate for rent/service_charge payments
       if (tenant) {
-        const rentMonths = items.includes('rent') && tenant.rentAmount > 0 ? 12 : 0;
-        const serviceMonths = items.includes('service_charge') && tenant.unit?.serviceChargeMonthly > 0 ? 1 : 0;
+        const rentMonths = itemsToProcess.some(i => i.code === 'rent') ? 12 : 0;
+        const serviceMonths = itemsToProcess.some(i => i.code === 'service_charge') ? 12 : 0;
         const maxMonths = Math.max(rentMonths, serviceMonths);
         if (maxMonths > 0) {
           const baseDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();

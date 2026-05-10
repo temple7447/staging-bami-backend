@@ -5,7 +5,8 @@
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/models/Issue.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/issueController.js)",
-      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/routes/issues.js)"
+      "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/routes/issues.js)",
+      "Bash(mongosh mongodb+srv://samfredglobal7_db_user:26tauI4tuo0BnNn7@staging-bami.wryxzjv.mongodb.net/ --eval ' *)"
     ]
   }
 }
