@@ -39,8 +39,9 @@ router.post('/legal-fee', protect, initiateLegalFeePayment);
 
 // Manual payment recording (Admin only)
 router.post('/manual-record', protect, recordManualPayment);
-// Get payment status
-router.get('/:paymentId', protect, handleValidationErrors, getPaymentStatus);
+
+// Verify payment (called from frontend after Paystack checkout) — MUST be before /:paymentId
+router.get('/verify/:reference', protect, verifyPayment);
 
 // Get all payments for a tenant
 router.get('/tenant/:tenantId', protect, validateObjectId('tenantId'), handleValidationErrors, getTenantPayments);
@@ -50,12 +51,11 @@ router.get('/estate/:estateId', protect, validateObjectId('estateId'), handleVal
 
 // Payment callback (webhook)
 router.post('/callback', (req, res) => {
-  // Paystack webhook callback - can be extended for multiple payment providers
   res.status(200).json({ success: true, message: 'Callback received' });
 });
 
-// Verify payment (called from frontend after Paystack checkout)
-router.get('/verify/:reference', verifyPayment);
+// Get payment status — generic param route MUST come after all specific routes
+router.get('/:paymentId', protect, handleValidationErrors, getPaymentStatus);
 
 // Refund deposit
 router.post('/:paymentId/refund', protect, handleValidationErrors, refundDeposit);
