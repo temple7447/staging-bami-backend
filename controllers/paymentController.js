@@ -1533,6 +1533,132 @@ const recordManualPayment = async (req, res) => {
   }
 };
 
+/**
+ * Get all receipts for the currently logged-in tenant user.
+ * Returns one receipt entry per completed payment, with full breakdown.
+ * GET /api/payments/receipts
+ */
+const getTenantReceipts = async (req, res) => {
+  try {
+    const tenant = await Tenant.findOne({ user: req.user.id, isActive: true })
+      .populate('unit')
+      .populate('estate')
+      .lean();
+
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant profile not found' });
+    }
+
+    const payments = await Payment.find({
+      tenant: tenant._id,
+      paymentStatus: 'completed'
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const wallet = await Wallet.findOne({ tenant: tenant._id }).lean();
+
+    const receipts = payments.map(payment => {
+      const receiptData = calculateReceiptData(tenant, payment, wallet);
+
+      // Extract per-payment breakdown from billing_items metadata
+      const billingItems = payment.paystackResponse?.data?.metadata?.billing_items || [];
+      let paidRent = 0, paidServiceCharge = 0, paidCaution = 0, paidLegal = 0, paidOther = 0;
+
+      if (billingItems.length > 0) {
+        for (const item of billingItems) {
+          const code = item.code || item.type || '';
+          const amount = item.amount || 0;
+          if (code === 'rent') paidRent += amount;
+          else if (code === 'service_charge') paidServiceCharge += amount;
+          else if (code === 'caution_fee') paidCaution += amount;
+          else if (code === 'legal_fee') paidLegal += amount;
+          else paidOther += amount;
+        }
+      } else {
+        if (payment.paymentType === 'rent') paidRent = payment.amount;
+        else if (payment.paymentType === 'service_charge') paidServiceCharge = payment.amount;
+        else if (payment.paymentType === 'caution_fee') paidCaution = payment.amount;
+        else if (payment.paymentType === 'legal_fee') paidLegal = payment.amount;
+        else paidRent = payment.amount; // initial/bundle fallback
+      }
+
+      // Outstanding per category: annual rate minus what this payment covered
+      const rentOutstanding = paidRent > 0 ? Math.max(0, receiptData.rentAmount - paidRent) : 0;
+      const serviceChargeOutstanding = paidServiceCharge > 0
+        ? Math.max(0, receiptData.serviceCharge - paidServiceCharge)
+        : 0;
+
+      return {
+        receiptId: payment._id,
+        reference: payment.paystackReference || payment.transactionId,
+        paymentDate: receiptData.paymentDate,
+        paymentMethod: payment.paymentMethod,
+        paymentType: payment.paymentType,
+        description: payment.description,
+
+        // Tenant & property info
+        tenantName: tenant.tenantName,
+        phone: tenant.tenantPhone,
+        meterNo: tenant.unit?.meterNumber || null,
+        bedroomType: tenant.unit?.bedrooms ? `${tenant.unit.bedrooms} BED ROOM` : tenant.unitLabel,
+        flatType: tenant.unit?.label || tenant.unitLabel,
+
+        // Dates
+        moveInDate: receiptData.moveInDate,
+        expiryDate: receiptData.expiryDate,
+
+        // What was paid in this specific payment
+        amountPaid: payment.amount,
+        breakdown: {
+          rent: paidRent,
+          serviceCharge: paidServiceCharge,
+          ...(paidCaution > 0 && { cautionFee: paidCaution }),
+          ...(paidLegal > 0 && { legalFee: paidLegal }),
+          ...(paidOther > 0 && { other: paidOther })
+        },
+
+        // Annual/period rates at current pricing
+        rent: receiptData.rentAmount,
+        serviceCharge: receiptData.serviceCharge,
+        cautionFee: receiptData.cautionFee,
+        legalFee: receiptData.legalFee,
+
+        // Outstanding
+        rentOutstanding,
+        serviceChargeOutstanding,
+        outstandingBalance: receiptData.outstandingBalance,
+
+        // Totals
+        currentTotalTenancyRate: receiptData.currentTotalTenancyRate,
+        nextTotalTenancyRate: receiptData.nextTotalTenancyRate,
+
+        // Period labels
+        tenancyDuration: receiptData.tenancyDuration,
+        tenantTotalStay: receiptData.tenantTotalStay,
+        yearDuration: receiptData.yearDuration,
+        currentYear: receiptData.currentYear,
+        nextYear: receiptData.nextYear,
+
+        // Next 26% increase projection
+        nextIncreaseDate: receiptData.nextIncreaseDate,
+        nextRentIncrease: receiptData.nextRentIncrease,
+        nextServiceChargeIncrease: receiptData.nextServiceChargeIncrease,
+        totalTenancyRateIncrease: receiptData.totalTenancyRateIncrease
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: receipts.length,
+      receipts
+    });
+  } catch (error) {
+    logError('getTenantReceipts error', error);
+    return res.status(500).json({ success: false, message: 'Error fetching receipts' });
+  }
+};
+
 module.exports = {
   calculateReceiptData,
   initiateInitialPayment,
@@ -1549,5 +1675,6 @@ module.exports = {
   downloadPaymentReceipt,
   refundDeposit,
   sendPaymentReceipt,
-  sendTenantReceipt
+  sendTenantReceipt,
+  getTenantReceipts
 };

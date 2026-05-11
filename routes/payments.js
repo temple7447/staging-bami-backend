@@ -19,7 +19,8 @@ const {
   downloadPaymentReceipt,
   refundDeposit,
   sendPaymentReceipt,
-  sendTenantReceipt
+  sendTenantReceipt,
+  getTenantReceipts
 } = require('../controllers/paymentController');
 
 const router = express.Router();
@@ -53,6 +54,9 @@ router.get('/estate/:estateId', protect, validateObjectId('estateId'), handleVal
 router.post('/callback', (req, res) => {
   res.status(200).json({ success: true, message: 'Callback received' });
 });
+
+// Get all receipts for the logged-in tenant — MUST come before /:paymentId
+router.get('/receipts', protect, getTenantReceipts);
 
 // Get payment status — generic param route MUST come after all specific routes
 router.get('/:paymentId', protect, handleValidationErrors, getPaymentStatus);
