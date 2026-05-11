@@ -126,9 +126,9 @@ const createTenant = async (req, res) => {
     }
 
     // Use admin-provided nextDueDate if given; otherwise default to entryDate.
-    // durationMonths is validated above but does NOT pre-advance the due date —
-    // the payment flow handles advancement when the tenant actually pays.
-    const effectiveNextDueDate = parsedNextDueDate || parsedEntryDate || new Date();
+    // Normalize to midnight UTC so the time component never drifts across payments.
+    const _rawDue = parsedNextDueDate || parsedEntryDate || new Date();
+    const effectiveNextDueDate = new Date(Date.UTC(_rawDue.getUTCFullYear(), _rawDue.getUTCMonth(), _rawDue.getUTCDate()));
 
     // Optionally create or link a user account for tenant
     let userId = undefined;
@@ -863,11 +863,12 @@ const addTransaction = async (req, res) => {
         : (tenant.tenantType === 'new' ? 12 : 6);
 
       if (appliedMonths > 0) {
-        const baseDate = tenant.nextDueDate
+        const _base = tenant.nextDueDate
           ? new Date(tenant.nextDueDate)
           : (tenant.entryDate ? new Date(tenant.entryDate) : new Date());
+        const baseDate = new Date(Date.UTC(_base.getUTCFullYear(), _base.getUTCMonth(), _base.getUTCDate()));
         newDueDate = new Date(baseDate);
-        newDueDate.setMonth(newDueDate.getMonth() + appliedMonths);
+        newDueDate.setUTCMonth(newDueDate.getUTCMonth() + appliedMonths);
 
         const oldDueDate = tenant.nextDueDate;
         tenant.nextDueDate = newDueDate;
@@ -1290,7 +1291,11 @@ async function getMyBillingItems(req, res) {
 // @access  Private (Tenant)
 async function paySelectedBillingItems(req, res) {
   try {
-    const { itemIds, paymentMethod = 'wallet' } = req.body;
+    const { itemIds, paymentMethod = 'wallet', durationMonths: rawDuration } = req.body;
+    const durationMonths = rawDuration ? parseInt(rawDuration, 10) : 12;
+    if (![6, 12].includes(durationMonths)) {
+      return res.status(400).json({ success: false, message: 'Payment duration must be 6 or 12 months' });
+    }
 
     // Support legacy format with billingCode and paymentType
     let items = itemIds;
@@ -1348,7 +1353,7 @@ async function paySelectedBillingItems(req, res) {
           const rentResult = calculateEffectiveRent(
             tenant.baseRent2024 || tenant.rentAmount,
             tenant.entryDate || new Date(),
-            12,
+            durationMonths,
             false,
             rentOrigin
           );
@@ -1356,16 +1361,16 @@ async function paySelectedBillingItems(req, res) {
           itemsToProcess.push({
             type: 'predefined',
             code: 'rent',
-            label: 'Rent (12 months)',
+            label: `Rent (${durationMonths} months)`,
             amount: rentResult.totalAmount
           });
         } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
-          const serviceChargeTotal = tenant.unit.serviceChargeMonthly * 12;
+          const serviceChargeTotal = tenant.unit.serviceChargeMonthly * durationMonths;
           totalAmount += serviceChargeTotal;
           itemsToProcess.push({
             type: 'predefined',
             code: 'service_charge',
-            label: 'Service Charge (12 months)',
+            label: `Service Charge (${durationMonths} months)`,
             amount: serviceChargeTotal
           });
         } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
@@ -1477,6 +1482,7 @@ async function paySelectedBillingItems(req, res) {
           data: {
             metadata: {
               payment_type: 'multiple_billing_items',
+              duration_months: durationMonths,
               billing_items: itemsToProcess
             }
           }
@@ -1496,13 +1502,15 @@ async function paySelectedBillingItems(req, res) {
 
       // Auto-advance nextDueDate for rent/service_charge payments
       if (tenant) {
-        const rentMonths = itemsToProcess.some(i => i.code === 'rent') ? 12 : 0;
-        const serviceMonths = itemsToProcess.some(i => i.code === 'service_charge') ? 12 : 0;
+        const rentMonths = itemsToProcess.some(i => i.code === 'rent') ? durationMonths : 0;
+        const serviceMonths = itemsToProcess.some(i => i.code === 'service_charge') ? durationMonths : 0;
         const maxMonths = Math.max(rentMonths, serviceMonths);
         if (maxMonths > 0) {
-          const baseDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
+          const _base = tenant.nextDueDate ? new Date(tenant.nextDueDate) : new Date();
+          // Normalize base to midnight UTC so time never drifts
+          const baseDate = new Date(Date.UTC(_base.getUTCFullYear(), _base.getUTCMonth(), _base.getUTCDate()));
           const newDueDate = new Date(baseDate);
-          newDueDate.setMonth(newDueDate.getMonth() + maxMonths);
+          newDueDate.setUTCMonth(newDueDate.getUTCMonth() + maxMonths);
           const oldDueDate = tenant.nextDueDate;
           tenant.nextDueDate = newDueDate;
           tenant.history.push({
