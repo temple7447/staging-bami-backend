@@ -9,6 +9,7 @@ const Wallet = require('../models/Wallet');
 const ServiceRequest = require('../models/ServiceRequest');
 const Notification = require('../models/Notification');
 const { logError, logInfo } = require('../utils/logger');
+const { calculateEffectiveRent } = require('../utils/rentCalculator');
 
 /**
  * Unified Overview Endpoint
@@ -99,6 +100,7 @@ const getTenantOverview = async (userId) => {
       recentPayments: [],
       totalPaid: 0
     },
+    yearlyPayment: null,
     wallet: {
       balance: 0,
       currency: 'NGN'
@@ -202,6 +204,120 @@ const getTenantOverview = async (userId) => {
     ]);
 
     overview.payments.totalPaid = totalPaymentAmount.length > 0 ? totalPaymentAmount[0].total : 0;
+
+    // Yearly payment summary
+    const thisYear = new Date().getFullYear();
+    const nextYear = thisYear + 1;
+
+    // Fetch all completed payments this calendar year with metadata
+    const currentYearPayments = await Payment.find({
+      tenant: tenant._id,
+      paymentStatus: 'completed',
+      createdAt: {
+        $gte: new Date(`${thisYear}-01-01T00:00:00.000Z`),
+        $lt: new Date(`${nextYear}-01-01T00:00:00.000Z`)
+      }
+    }).lean();
+
+    // Break down current-year payments by code using billing_items metadata
+    let cyRent = 0, cyServiceCharge = 0, cyOther = 0;
+    for (const p of currentYearPayments) {
+      const items = p.paystackResponse?.data?.metadata?.billing_items;
+      if (items && items.length > 0) {
+        for (const item of items) {
+          const code = item.code || item.type || '';
+          if (code === 'rent') cyRent += item.amount || 0;
+          else if (code === 'service_charge') cyServiceCharge += item.amount || 0;
+          else cyOther += item.amount || 0;
+        }
+      } else {
+        // Fallback for payments without item-level breakdown
+        if (p.paymentType === 'rent') cyRent += p.amount;
+        else if (p.paymentType === 'service_charge') cyServiceCharge += p.amount;
+        else if (['caution_fee', 'legal_fee'].includes(p.paymentType)) cyOther += p.amount;
+        else {
+          // Unclassified bundle — attribute entirely to rent as best-effort fallback
+          cyRent += p.amount;
+        }
+      }
+    }
+    const cyTotal = cyRent + cyServiceCharge + cyOther;
+    const isFirstTime = cyOther > 0;
+
+    // Check if caution/legal fees are still unpaid (for next-year projection)
+    const paidFeePayments = await Payment.find({
+      tenant: tenant._id,
+      paymentStatus: 'completed',
+      paymentType: { $in: ['caution_fee', 'legal_fee', 'initial', 'bundle'] }
+    }).lean();
+    const paidFees = new Set();
+    for (const p of paidFeePayments) {
+      if (p.paymentType === 'caution_fee') paidFees.add('caution_fee');
+      if (p.paymentType === 'legal_fee') paidFees.add('legal_fee');
+      const items = p.paystackResponse?.data?.metadata?.billing_items || [];
+      for (const item of items) {
+        const code = item.code || item.type || '';
+        if (code === 'caution_fee') paidFees.add('caution_fee');
+        if (code === 'legal_fee') paidFees.add('legal_fee');
+      }
+    }
+
+    // Projected cost for 12 months starting from nextDueDate
+    const renewalStart = nextDueDate ? new Date(nextDueDate) : new Date();
+    const rentOrigin = tenant.entryDate || new Date();
+
+    const projectedRent = calculateEffectiveRent(
+      tenant.baseRent2024 || tenant.rentAmount || 0,
+      renewalStart,
+      12,
+      false,
+      rentOrigin
+    );
+    const projectedServiceCharge = calculateEffectiveRent(
+      tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || 0,
+      renewalStart,
+      12,
+      false,
+      rentOrigin
+    );
+
+    // Include unpaid one-time fees in next-year projection if still outstanding
+    const unit = tenant.unit || {};
+    let nyOther = 0;
+    const nyOtherBreakdown = [];
+    if (!paidFees.has('caution_fee') && (unit.cautionFee || tenant.baseCaution2024) > 0) {
+      const fee = unit.cautionFee || tenant.baseCaution2024 || 0;
+      nyOther += fee;
+      nyOtherBreakdown.push({ code: 'caution_fee', label: 'Caution Fee', amount: fee });
+    }
+    if (!paidFees.has('legal_fee') && (unit.legalFee || tenant.baseLegal2024) > 0) {
+      const fee = unit.legalFee || tenant.baseLegal2024 || 0;
+      nyOther += fee;
+      nyOtherBreakdown.push({ code: 'legal_fee', label: 'Legal Fee', amount: fee });
+    }
+    const nyIsFirstTime = nyOther > 0;
+
+    overview.yearlyPayment = {
+      currentYear: {
+        year: thisYear,
+        isFirstTime,
+        rent: cyRent,
+        serviceCharge: cyServiceCharge,
+        ...(isFirstTime && { other: cyOther }),
+        totalPaid: cyTotal
+      },
+      nextYear: {
+        year: nextYear,
+        isFirstTime: nyIsFirstTime,
+        renewalStartDate: renewalStart,
+        monthlyRent: projectedRent.finalRent,
+        monthlyServiceCharge: projectedServiceCharge.finalRent,
+        projectedRent: projectedRent.totalAmount,
+        projectedServiceCharge: projectedServiceCharge.totalAmount,
+        ...(nyIsFirstTime && { projectedOther: nyOther, otherBreakdown: nyOtherBreakdown }),
+        projectedTotal: projectedRent.totalAmount + projectedServiceCharge.totalAmount + nyOther
+      }
+    };
   }
 
   // Wallet info
