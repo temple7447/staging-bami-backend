@@ -42,6 +42,15 @@ const createUnit = async (req, res) => {
     } = req.body;
     const adminId = req.user?._id;
 
+    const normalizeImages = (raw) => {
+      if (!Array.isArray(raw)) return [];
+      return raw.map(img =>
+        typeof img === 'string'
+          ? { url: img }
+          : { url: img.url || img.secure_url, publicId: img.publicId || img.public_id || undefined, caption: img.caption || undefined }
+      ).filter(img => img.url);
+    };
+
     if (!label || !monthlyPrice) {
       return res.status(400).json({
         success: false,
@@ -110,7 +119,7 @@ const createUnit = async (req, res) => {
       area,
       amenities,
       streetAddress,
-      images,
+      images: normalizeImages(images),
       createdBy: adminId,
       // Initialize base pricing for 26% rule
       basePrice2024: monthlyPrice,
@@ -588,7 +597,13 @@ const updateUnit = async (req, res) => {
     if (area !== undefined) unit.area = area;
     if (amenities !== undefined) unit.amenities = amenities;
     if (streetAddress !== undefined) unit.streetAddress = streetAddress;
-    if (images !== undefined) unit.images = images;
+    if (images !== undefined) {
+      unit.images = Array.isArray(images) ? images.map(img =>
+        typeof img === 'string'
+          ? { url: img }
+          : { url: img.url || img.secure_url, publicId: img.publicId || img.public_id || undefined, caption: img.caption || undefined }
+      ).filter(img => img.url) : [];
+    }
 
     unit.updatedBy = req.user?._id;
     await unit.save();
@@ -1124,6 +1139,232 @@ const removeUnitMedia = async (req, res) => {
   }
 };
 
+// ─── Condition Report Functions ───────────────────────────────────────────────
+
+/**
+ * POST /api/units/unit/:unitId/condition
+ * Create a new condition report with files uploaded directly (multipart).
+ * Fields: "images" (up to 20), "video" (optional, 1 file)
+ * Body fields: type, overallCondition, notes, tenantId, date, caption[]
+ */
+const createConditionReport = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { unitId } = req.params;
+    const { type, overallCondition, notes, tenantId, date } = req.body;
+
+    if (!type) {
+      return res.status(400).json({ success: false, message: 'Condition report type is required (move_in, move_out, routine, maintenance, pre_listing)' });
+    }
+
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    const imageFolder = `${process.env.CLOUDINARY_FOLDER || 'bamihustle'}/units/${unitId}/condition/images`;
+    const videoFolder = `${process.env.CLOUDINARY_FOLDER || 'bamihustle'}/units/${unitId}/condition/videos`;
+
+    const imageFiles = req.files?.images || [];
+    const videoFile = req.files?.video?.[0] || null;
+
+    const IMAGE_MAX = 10 * 1024 * 1024;
+    const oversized = imageFiles.find(f => f.size > IMAGE_MAX);
+    if (oversized) {
+      return res.status(400).json({ success: false, message: `Image "${oversized.originalname}" exceeds the 10MB limit` });
+    }
+
+    // Upload images
+    const uploadedImages = [];
+    for (const file of imageFiles) {
+      const result = await uploadBufferToCloudinary(file.buffer, {
+        folder: imageFolder,
+        resource_type: 'image',
+        transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+      });
+      uploadedImages.push({ url: result.secure_url, publicId: result.public_id, caption: file.originalname || null });
+    }
+
+    // Upload video if provided
+    const uploadedVideos = [];
+    if (videoFile) {
+      const result = await uploadBufferToCloudinary(videoFile.buffer, {
+        folder: videoFolder,
+        resource_type: 'video',
+        eager: [{ format: 'jpg', transformation: [{ start_offset: '0' }] }]
+      });
+      uploadedVideos.push({
+        url: result.secure_url,
+        publicId: result.public_id,
+        thumbnail: result.eager?.[0]?.secure_url || null
+      });
+    }
+
+    const report = {
+      type,
+      overallCondition: overallCondition || 'good',
+      notes: notes || null,
+      date: date ? new Date(date) : new Date(),
+      images: uploadedImages,
+      videos: uploadedVideos,
+      tenant: tenantId || null,
+      recordedBy: req.user._id
+    };
+
+    unit.conditionReports.push(report);
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    const saved = unit.conditionReports[unit.conditionReports.length - 1];
+
+    return res.status(201).json({
+      success: true,
+      message: 'Condition report created',
+      conditionReport: saved
+    });
+  } catch (err) {
+    logError('createConditionReport error', err);
+    return res.status(err.http_code || 500).json({ success: false, message: err.message || 'Failed to create condition report' });
+  }
+};
+
+/**
+ * POST /api/units/unit/:unitId/condition/json
+ * Create a condition report from JSON (Cloudinary URLs already obtained separately).
+ * Body: { type, overallCondition, notes, tenantId, date, images: [{url, publicId, caption}], videos: [{url, publicId, thumbnail}] }
+ */
+const createConditionReportFromJson = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const { type, overallCondition, notes, tenantId, date, images = [], videos = [] } = req.body;
+
+    if (!type) {
+      return res.status(400).json({ success: false, message: 'Condition report type is required (move_in, move_out, routine, maintenance, pre_listing)' });
+    }
+
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    const mappedImages = images.map(img => ({
+      url: img.url || img.secure_url,
+      publicId: img.publicId || img.public_id || null,
+      caption: img.caption || null
+    })).filter(i => i.url);
+
+    const mappedVideos = videos.map(vid => ({
+      url: vid.url || vid.secure_url,
+      publicId: vid.publicId || vid.public_id || null,
+      thumbnail: vid.thumbnail || null,
+      caption: vid.caption || null
+    })).filter(v => v.url);
+
+    const report = {
+      type,
+      overallCondition: overallCondition || 'good',
+      notes: notes || null,
+      date: date ? new Date(date) : new Date(),
+      images: mappedImages,
+      videos: mappedVideos,
+      tenant: tenantId || null,
+      recordedBy: req.user._id
+    };
+
+    unit.conditionReports.push(report);
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    const saved = unit.conditionReports[unit.conditionReports.length - 1];
+
+    return res.status(201).json({
+      success: true,
+      message: 'Condition report created',
+      conditionReport: saved
+    });
+  } catch (err) {
+    logError('createConditionReportFromJson error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to create condition report' });
+  }
+};
+
+/**
+ * GET /api/units/unit/:unitId/condition
+ * Get all condition reports for a unit, newest first.
+ * Query: type (filter by move_in|move_out|routine|maintenance|pre_listing)
+ */
+const getConditionReports = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const { type } = req.query;
+
+    const unit = await Unit.findById(unitId)
+      .populate('conditionReports.recordedBy', 'name email')
+      .populate('conditionReports.tenant', 'tenantName unitLabel')
+      .lean();
+
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    let reports = (unit.conditionReports || []).sort((a, b) => new Date(b.date) - new Date(a.date));
+    if (type) reports = reports.filter(r => r.type === type);
+
+    return res.status(200).json({
+      success: true,
+      unit: { id: unit._id, label: unit.label, status: unit.status },
+      count: reports.length,
+      conditionReports: reports
+    });
+  } catch (err) {
+    logError('getConditionReports error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to fetch condition reports' });
+  }
+};
+
+/**
+ * DELETE /api/units/unit/:unitId/condition/:reportId
+ * Delete a specific condition report and its Cloudinary assets.
+ */
+const deleteConditionReport = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { unitId, reportId } = req.params;
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    const report = unit.conditionReports.id(reportId);
+    if (!report) {
+      return res.status(404).json({ success: false, message: 'Condition report not found' });
+    }
+
+    // Delete assets from Cloudinary
+    for (const img of report.images) {
+      if (img.publicId) {
+        try { await cloudinary.uploader.destroy(img.publicId, { resource_type: 'image' }); } catch (_) {}
+      }
+    }
+    for (const vid of report.videos) {
+      if (vid.publicId) {
+        try { await cloudinary.uploader.destroy(vid.publicId, { resource_type: 'video' }); } catch (_) {}
+      }
+    }
+
+    report.deleteOne();
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    return res.status(200).json({ success: true, message: 'Condition report deleted' });
+  } catch (err) {
+    logError('deleteConditionReport error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to delete condition report' });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
@@ -1139,4 +1380,8 @@ module.exports = {
   uploadUnitVideo,
   updateUnitMedia,
   removeUnitMedia,
+  createConditionReport,
+  createConditionReportFromJson,
+  getConditionReports,
+  deleteConditionReport,
 };

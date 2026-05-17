@@ -157,7 +157,38 @@ const UnitSchema = new mongoose.Schema({
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'
-  }
+  },
+
+  // Condition reports — snapshots of the physical state of the unit over time.
+  // Separate from listing images which show how the apartment looks for marketing.
+  conditionReports: [{
+    type: {
+      type: String,
+      enum: ['move_in', 'move_out', 'routine', 'maintenance', 'pre_listing'],
+      required: true
+    },
+    date: { type: Date, default: Date.now },
+    overallCondition: {
+      type: String,
+      enum: ['excellent', 'good', 'fair', 'poor'],
+      default: 'good'
+    },
+    notes: { type: String, maxlength: 2000 },
+    images: [{
+      url: { type: String, required: true },
+      publicId: { type: String },
+      caption: { type: String }
+    }],
+    videos: [{
+      url: { type: String, required: true },
+      publicId: { type: String },
+      thumbnail: { type: String },
+      caption: { type: String }
+    }],
+    tenant: { type: mongoose.Schema.ObjectId, ref: 'Tenant' },
+    recordedBy: { type: mongoose.Schema.ObjectId, ref: 'User', required: true },
+    createdAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 });

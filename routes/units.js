@@ -20,6 +20,10 @@ const {
   uploadUnitVideo,
   updateUnitMedia,
   removeUnitMedia,
+  createConditionReport,
+  createConditionReportFromJson,
+  getConditionReports,
+  deleteConditionReport,
 } = require('../controllers/unitController');
 
 const storage = multer.memoryStorage();
@@ -41,6 +45,19 @@ const videoUpload = multer({
     const allowed = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo', 'video/x-matroska'];
     if (allowed.includes(file.mimetype)) return cb(null, true);
     cb(new Error('Only video files are allowed (mp4, mov, webm, avi, mkv)'));
+  }
+});
+
+// Mixed upload for condition reports: accepts "images" (multiple) + "video" (single)
+// Global limit is 200MB to accommodate video; controller enforces 10MB per image.
+const conditionUpload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const allowedVideos = ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo', 'video/x-matroska'];
+    if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype)) return cb(null, true);
+    cb(new Error('Only image or video files are allowed'));
   }
 });
 
@@ -86,6 +103,22 @@ router.patch('/unit/:unitId/media', protect, validateObjectId('unitId'), handleV
 
 // Remove specific images/videos by publicId (also deletes from Cloudinary)
 router.delete('/unit/:unitId/media', protect, validateObjectId('unitId'), handleValidationErrors, removeUnitMedia);
+
+// --- Condition Report Endpoints ---
+// Upload files directly with condition details (images field + video field in one request)
+router.post('/unit/:unitId/condition', protect, validateObjectId('unitId'), handleValidationErrors,
+  conditionUpload.fields([{ name: 'images', maxCount: 20 }, { name: 'video', maxCount: 1 }]),
+  createConditionReport
+);
+
+// Create condition report from JSON (URLs already uploaded via /api/upload/*)
+router.post('/unit/:unitId/condition/json', protect, validateObjectId('unitId'), handleValidationErrors, createConditionReportFromJson);
+
+// Get all condition reports for a unit (?type=move_in|move_out|routine|maintenance|pre_listing)
+router.get('/unit/:unitId/condition', protect, validateObjectId('unitId'), handleValidationErrors, getConditionReports);
+
+// Delete a specific condition report (also removes Cloudinary assets)
+router.delete('/unit/:unitId/condition/:reportId', protect, validateObjectId('unitId'), handleValidationErrors, deleteConditionReport);
 
 // Multer error handler
 router.use((err, req, res, next) => {
