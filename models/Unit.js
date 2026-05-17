@@ -92,7 +92,15 @@ const UnitSchema = new mongoose.Schema({
     maxlength: [200, 'Street address cannot be more than 200 characters']
   },
   images: [{
-    type: String
+    url: { type: String, required: true },
+    publicId: { type: String },
+    caption: { type: String }
+  }],
+  videos: [{
+    url: { type: String, required: true },
+    publicId: { type: String },
+    thumbnail: { type: String },
+    caption: { type: String }
   }],
   status: {
     type: String,

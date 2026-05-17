@@ -735,52 +735,121 @@ const getPaymentStatus = async (req, res) => {
 };
 
 /**
- * Get all payments for a tenant
+ * GET /api/payments/tenant/:tenantId
+ * Full transaction history for a single tenant.
+ * Filters: status, type, paymentMethod, from, to
  */
 const getTenantPayments = async (req, res) => {
   try {
     const { tenantId } = req.params;
-    const { page = 1, limit = 20, status } = req.query;
+    const { page = 1, limit = 20, status, type, paymentMethod, from, to } = req.query;
 
-    const filter = { tenant: tenantId, isActive: true };
-    if (status) {
-      filter.paymentStatus = status;
+    // Verify tenant exists and pull profile info
+    const tenant = await Tenant.findById(tenantId)
+      .populate('estate', 'name')
+      .populate('unit', 'label unitType')
+      .lean();
+
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    const filter = { tenant: tenantId };
+    if (status) filter.paymentStatus = status;
+    if (type) filter.paymentType = type;
+    if (paymentMethod) filter.paymentMethod = paymentMethod;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = toDate;
+      }
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const [payments, total] = await Promise.all([
+
+    const [payments, total, summary] = await Promise.all([
       Payment.find(filter)
         .populate('admin', 'name email')
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
-      Payment.countDocuments(filter)
+        .limit(parseInt(limit))
+        .lean(),
+      Payment.countDocuments(filter),
+      Payment.aggregate([
+        { $match: { tenant: new mongoose.Types.ObjectId(tenantId) } },
+        {
+          $group: {
+            _id: '$paymentType',
+            totalPaid: {
+              $sum: { $cond: [{ $eq: ['$paymentStatus', 'completed'] }, '$amount', 0] }
+            },
+            totalPending: {
+              $sum: { $cond: [{ $in: ['$paymentStatus', ['pending', 'initiated']] }, '$amount', 0] }
+            },
+            count: { $sum: 1 }
+          }
+        }
+      ])
     ]);
 
-    res.status(200).json({
+    // Build per-type summary map
+    const byType = {};
+    let grandTotalPaid = 0;
+    let grandTotalPending = 0;
+    for (const row of summary) {
+      byType[row._id] = { totalPaid: row.totalPaid, totalPending: row.totalPending, count: row.count };
+      grandTotalPaid += row.totalPaid;
+      grandTotalPending += row.totalPending;
+    }
+
+    return res.status(200).json({
       success: true,
+      tenant: {
+        id: tenant._id,
+        name: tenant.tenantName,
+        email: tenant.tenantEmail,
+        phone: tenant.tenantPhone,
+        unit: tenant.unit?.label || tenant.unitLabel,
+        estate: tenant.estate?.name,
+        status: tenant.status,
+        entryDate: tenant.entryDate,
+        nextDueDate: tenant.nextDueDate,
+        rentAmount: tenant.rentAmount,
+        serviceChargeAmount: tenant.serviceChargeAmount
+      },
+      summary: {
+        totalPaid: grandTotalPaid,
+        totalPending: grandTotalPending,
+        totalTransactions: total,
+        byType
+      },
       data: payments.map(p => ({
         paymentId: p._id,
-        type: p.paymentType,
+        reference: p.paystackReference || p.transactionId || null,
+        paymentType: p.paymentType,
+        paymentMethod: p.paymentMethod,
         amount: p.amount,
         status: p.paymentStatus,
+        description: p.description || null,
         isDeposit: p.isDeposit,
+        recordedBy: p.admin ? { id: p.admin._id, name: p.admin.name, email: p.admin.email } : null,
+        paymentDate: p.paymentDate || p.createdAt,
         createdAt: p.createdAt,
-        paymentDate: p.paymentDate
+        notes: p.notes || null
       })),
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(total / parseInt(limit)),
-        totalItems: total
+        totalItems: total,
+        limit: parseInt(limit)
       }
     });
   } catch (error) {
-    console.error('Error fetching tenant payments:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching payments',
-      error: error.message
-    });
+    logError('getTenantPayments error', error);
+    return res.status(500).json({ success: false, message: 'Error fetching tenant payments', error: error.message });
   }
 };
 
@@ -1659,6 +1728,155 @@ const getTenantReceipts = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/payments
+ * Admin/business_owner: all payments across estates they manage.
+ * Supports filters: estateId, tenantId, type, status, paymentMethod, from, to, search
+ * Supports pagination: page, limit
+ */
+const getAllPayments = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const role = req.user.role;
+
+    const {
+      page = 1,
+      limit = 20,
+      estateId,
+      tenantId,
+      type,
+      status,
+      paymentMethod,
+      from,
+      to,
+      search
+    } = req.query;
+
+    // Build estate scope for this admin
+    let estateIds;
+    if (['super_admin'].includes(role)) {
+      // Super admin sees everything — no estate restriction
+      estateIds = null;
+    } else {
+      const user = await User.findById(userId).select('assignedEstates');
+      const owned = await Estate.find({ createdBy: userId, isActive: true }).select('_id');
+      const assigned = user?.assignedEstates || [];
+      const ownedIds = owned.map(e => e._id);
+      estateIds = [...new Set([...ownedIds.map(String), ...assigned.map(String)])].map(id => new mongoose.Types.ObjectId(id));
+
+      if (estateIds.length === 0) {
+        return res.status(200).json({ success: true, data: [], summary: { totalAmount: 0, totalCount: 0, completedAmount: 0, pendingAmount: 0 }, pagination: { currentPage: 1, totalPages: 0, totalItems: 0 } });
+      }
+    }
+
+    // Build filter
+    const filter = {};
+    if (estateIds) filter.estate = { $in: estateIds };
+    if (estateId) filter.estate = new mongoose.Types.ObjectId(estateId);
+    if (tenantId) filter.tenant = new mongoose.Types.ObjectId(tenantId);
+    if (type) filter.paymentType = type;
+    if (status) filter.paymentStatus = status;
+    if (paymentMethod) filter.paymentMethod = paymentMethod;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        filter.createdAt.$lte = toDate;
+      }
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // If search is provided, first find matching tenants
+    let tenantFilter = {};
+    if (search) {
+      const matchingTenants = await Tenant.find({
+        $or: [
+          { tenantName: new RegExp(search, 'i') },
+          { unitLabel: new RegExp(search, 'i') },
+          { tenantEmail: new RegExp(search, 'i') }
+        ]
+      }).select('_id');
+      tenantFilter = { $or: [
+        { tenant: { $in: matchingTenants.map(t => t._id) } },
+        { paystackReference: new RegExp(search, 'i') },
+        { transactionId: new RegExp(search, 'i') },
+        { description: new RegExp(search, 'i') }
+      ]};
+    }
+
+    const finalFilter = search ? { ...filter, ...tenantFilter } : filter;
+
+    const [payments, total, summary] = await Promise.all([
+      Payment.find(finalFilter)
+        .populate('tenant', 'tenantName unitLabel tenantEmail tenantPhone')
+        .populate('estate', 'name')
+        .populate('admin', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Payment.countDocuments(finalFilter),
+      Payment.aggregate([
+        { $match: finalFilter },
+        {
+          $group: {
+            _id: null,
+            totalAmount: { $sum: '$amount' },
+            completedAmount: {
+              $sum: { $cond: [{ $eq: ['$paymentStatus', 'completed'] }, '$amount', 0] }
+            },
+            pendingAmount: {
+              $sum: { $cond: [{ $in: ['$paymentStatus', ['pending', 'initiated']] }, '$amount', 0] }
+            },
+            failedCount: {
+              $sum: { $cond: [{ $eq: ['$paymentStatus', 'failed'] }, 1, 0] }
+            }
+          }
+        }
+      ])
+    ]);
+
+    const summaryData = summary[0] || { totalAmount: 0, completedAmount: 0, pendingAmount: 0, failedCount: 0 };
+
+    return res.status(200).json({
+      success: true,
+      data: payments.map(p => ({
+        paymentId: p._id,
+        reference: p.paystackReference || p.transactionId || null,
+        tenant: p.tenant ? { id: p.tenant._id, name: p.tenant.tenantName, unit: p.tenant.unitLabel, email: p.tenant.tenantEmail } : null,
+        estate: p.estate ? { id: p.estate._id, name: p.estate.name } : null,
+        recordedBy: p.admin ? { id: p.admin._id, name: p.admin.name } : null,
+        paymentType: p.paymentType,
+        paymentMethod: p.paymentMethod,
+        amount: p.amount,
+        status: p.paymentStatus,
+        description: p.description,
+        paymentDate: p.paymentDate || p.createdAt,
+        createdAt: p.createdAt
+      })),
+      summary: {
+        totalAmount: summaryData.totalAmount,
+        completedAmount: summaryData.completedAmount,
+        pendingAmount: summaryData.pendingAmount,
+        failedCount: summaryData.failedCount,
+        totalCount: total
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / parseInt(limit)),
+        totalItems: total,
+        limit: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    logError('getAllPayments error', error);
+    return res.status(500).json({ success: false, message: 'Error fetching payments', error: error.message });
+  }
+};
+
 module.exports = {
   calculateReceiptData,
   initiateInitialPayment,
@@ -1671,6 +1889,7 @@ module.exports = {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
+  getAllPayments,
   recordManualPayment,
   downloadPaymentReceipt,
   refundDeposit,

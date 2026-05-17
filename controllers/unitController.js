@@ -2,6 +2,17 @@ const Unit = require('../models/Unit');
 const Estate = require('../models/Estate');
 const Tenant = require('../models/Tenant');
 const { logError, logInfo, logWarning } = require('../utils/logger');
+const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
+
+function uploadBufferToCloudinary(buffer, options) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(options, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+    stream.end(buffer);
+  });
+}
 
 /**
  * Create a new unit for an estate
@@ -916,6 +927,203 @@ const deleteUnit = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/units/unit/:unitId/media/images
+ * Upload one or more images (multipart) to Cloudinary and attach to unit.
+ * Field name: "images" (up to 10 files)
+ */
+const uploadUnitImages = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { unitId } = req.params;
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No image files uploaded' });
+    }
+
+    const folder = `${process.env.CLOUDINARY_FOLDER || 'bamihustle'}/units/${unitId}/images`;
+    const uploaded = [];
+
+    for (const file of req.files) {
+      const result = await uploadBufferToCloudinary(file.buffer, {
+        folder,
+        resource_type: 'image',
+        transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+      });
+      uploaded.push({ url: result.secure_url, publicId: result.public_id });
+    }
+
+    unit.images.push(...uploaded);
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `${uploaded.length} image(s) uploaded and attached to unit`,
+      uploaded,
+      images: unit.images
+    });
+  } catch (err) {
+    logError('uploadUnitImages error', err);
+    return res.status(err.http_code || 500).json({ success: false, message: err.message || 'Image upload failed' });
+  }
+};
+
+/**
+ * POST /api/units/unit/:unitId/media/videos
+ * Upload a single video (multipart) to Cloudinary and attach to unit.
+ * Field name: "video"
+ */
+const uploadUnitVideo = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { unitId } = req.params;
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No video file uploaded' });
+    }
+
+    const folder = `${process.env.CLOUDINARY_FOLDER || 'bamihustle'}/units/${unitId}/videos`;
+    const result = await uploadBufferToCloudinary(req.file.buffer, {
+      folder,
+      resource_type: 'video',
+      eager: [{ format: 'jpg', transformation: [{ start_offset: '0' }] }] // auto-generate thumbnail
+    });
+
+    const thumbnail = result.eager?.[0]?.secure_url || null;
+    const entry = { url: result.secure_url, publicId: result.public_id, thumbnail };
+
+    unit.videos.push(entry);
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Video uploaded and attached to unit',
+      video: entry,
+      videos: unit.videos
+    });
+  } catch (err) {
+    logError('uploadUnitVideo error', err);
+    return res.status(err.http_code || 500).json({ success: false, message: err.message || 'Video upload failed' });
+  }
+};
+
+/**
+ * PATCH /api/units/unit/:unitId/media
+ * Update unit media from JSON — use after uploading files via /api/upload/image or /api/upload/video.
+ * Body: { images: [{url, publicId, caption}], videos: [{url, publicId, thumbnail, caption}], replace: true/false }
+ * replace=true  → replaces all existing media
+ * replace=false → appends to existing media (default)
+ */
+const updateUnitMedia = async (req, res) => {
+  try {
+    const { unitId } = req.params;
+    const { images, videos, replace = false } = req.body;
+
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    if (!images && !videos) {
+      return res.status(400).json({ success: false, message: 'Provide at least images or videos in the request body' });
+    }
+
+    if (images !== undefined) {
+      if (!Array.isArray(images)) {
+        return res.status(400).json({ success: false, message: 'images must be an array' });
+      }
+      const mapped = images.map(img => ({
+        url: img.url || img.secure_url,
+        publicId: img.publicId || img.public_id || null,
+        caption: img.caption || null
+      })).filter(img => img.url);
+
+      unit.images = replace ? mapped : [...unit.images, ...mapped];
+    }
+
+    if (videos !== undefined) {
+      if (!Array.isArray(videos)) {
+        return res.status(400).json({ success: false, message: 'videos must be an array' });
+      }
+      const mapped = videos.map(vid => ({
+        url: vid.url || vid.secure_url,
+        publicId: vid.publicId || vid.public_id || null,
+        thumbnail: vid.thumbnail || null,
+        caption: vid.caption || null
+      })).filter(vid => vid.url);
+
+      unit.videos = replace ? mapped : [...unit.videos, ...mapped];
+    }
+
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Unit media updated',
+      images: unit.images,
+      videos: unit.videos
+    });
+  } catch (err) {
+    logError('updateUnitMedia error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update unit media' });
+  }
+};
+
+/**
+ * DELETE /api/units/unit/:unitId/media
+ * Remove specific images or videos from a unit (and from Cloudinary if publicId is stored).
+ * Body: { imageIds: ['publicId1', ...], videoIds: ['publicId1', ...] }
+ */
+const removeUnitMedia = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { unitId } = req.params;
+    const { imageIds = [], videoIds = [] } = req.body;
+
+    const unit = await Unit.findById(unitId);
+    if (!unit || !unit.isActive) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    // Delete from Cloudinary and remove from unit
+    for (const publicId of imageIds) {
+      try { await cloudinary.uploader.destroy(publicId, { resource_type: 'image' }); } catch (_) {}
+      unit.images = unit.images.filter(img => img.publicId !== publicId);
+    }
+    for (const publicId of videoIds) {
+      try { await cloudinary.uploader.destroy(publicId, { resource_type: 'video' }); } catch (_) {}
+      unit.videos = unit.videos.filter(vid => vid.publicId !== publicId);
+    }
+
+    unit.updatedBy = req.user._id;
+    await unit.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Media removed',
+      images: unit.images,
+      videos: unit.videos
+    });
+  } catch (err) {
+    logError('removeUnitMedia error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to remove media' });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
@@ -927,4 +1135,8 @@ module.exports = {
   getPublicListings,
   getPublicListingDetail,
   deleteUnit,
+  uploadUnitImages,
+  uploadUnitVideo,
+  updateUnitMedia,
+  removeUnitMedia,
 };

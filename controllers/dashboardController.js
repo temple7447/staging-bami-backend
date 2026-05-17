@@ -266,15 +266,26 @@ const getTenantOverview = async (userId) => {
     const renewalStart = nextDueDate ? new Date(nextDueDate) : new Date();
     const rentOrigin = tenant.entryDate || new Date();
 
+    // Derive effective monthly rate from actual payments this year (ground truth).
+    // Falls back to stored tenant rates when no payments exist yet.
+    // This ensures the renewal projection matches what was actually charged,
+    // even if baseRent2024 was set differently from the rate the admin used.
+    const baseMonthlyRent = cyRent > 0
+      ? Math.round(cyRent / 12)
+      : (tenant.rentAmount || tenant.baseRent2024 || 0);
+    const baseMonthlyService = cyServiceCharge > 0
+      ? Math.round(cyServiceCharge / 12)
+      : (tenant.serviceChargeAmount || tenant.baseServiceCharge2024 || 0);
+
     const projectedRent = calculateEffectiveRent(
-      tenant.baseRent2024 || tenant.rentAmount || 0,
+      baseMonthlyRent,
       renewalStart,
       12,
       false,
       rentOrigin
     );
     const projectedServiceCharge = calculateEffectiveRent(
-      tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || 0,
+      baseMonthlyService,
       renewalStart,
       12,
       false,

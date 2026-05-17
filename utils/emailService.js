@@ -196,33 +196,108 @@ exports.sendVerificationEmail = async (user, verificationToken) => {
 };
 
 // Tenant welcome with credentials and key details
-exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate) => {
+exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate, walletBalance = 0) => {
   const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
-  const rentAmountFormatted = formatCurrency(tenant?.rentAmount || 0);
+
+  const rent = tenant?.rentAmount || 0;
+  const serviceCharge = tenant?.serviceChargeAmount || 0;
+  const cautionFee = tenant?.baseCaution2024 || tenant?.cautionFee || 0;
+  const legalFee = tenant?.baseLegal2024 || tenant?.legalFee || 0;
+  const totalMonthly = rent + serviceCharge;
+  const isNewTenant = tenant?.tenantType === 'new' || !tenant?.tenantType;
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
+
+  const oneTimeFeeRows = (isNewTenant && (cautionFee > 0 || legalFee > 0)) ? `
+    <tr><td colspan="2" style="padding:8px 12px;font-size:12px;color:#888;background:#f9f9f9;">One-Time Fees (new tenant)</td></tr>
+    ${cautionFee > 0 ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;">Caution Fee</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(cautionFee)}</td></tr>` : ''}
+    ${legalFee > 0 ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;">Legal Fee</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(legalFee)}</td></tr>` : ''}
+  ` : '';
 
   const message = `
-    <h2>Welcome to ${estate?.name || 'BamiHustle'}</h2>
-    <p>Hello ${user.name},</p>
-    <p>Your tenant portal account has been created. Use the details below to login:</p>
-    <ul>
-      <li><strong>Email:</strong> ${user.email}</li>
-      <li><strong>Temporary Password:</strong> ${temporaryPassword}</li>
-    </ul>
-    <p><strong>Unit Details:</strong></p>
-    <ul>
-      <li>Estate: ${estate?.name || '-'}</li>
-      <li>Unit: ${tenant?.unitLabel || '-'}</li>
-      <li>Rent Amount: ${rentAmountFormatted}</li>
-      <li>Next Due Date: ${tenant?.nextDueDate ? new Date(tenant.nextDueDate).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-'}</li>
-    </ul>
-    <p>Login: <a href="${loginUrl}">${loginUrl}</a></p>
-    <p><strong>Important:</strong> Please change your password after first login.</p>
-    <p>Best regards,<br>BamiHustle Team</p>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <style>
+        body{font-family:Arial,sans-serif;line-height:1.6;color:#333;margin:0;padding:0;}
+        .container{max-width:600px;margin:0 auto;padding:20px;}
+        .header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);color:white;padding:30px;text-align:center;border-radius:10px 10px 0 0;}
+        .header h1{margin:0;font-size:24px;}
+        .content{background:#f9f9f9;padding:30px;border-radius:0 0 10px 10px;}
+        .section{background:white;border-radius:8px;margin:16px 0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08);}
+        .section-title{background:#1a1a2e;color:white;padding:10px 16px;font-size:13px;font-weight:bold;letter-spacing:0.5px;text-transform:uppercase;}
+        table{width:100%;border-collapse:collapse;}
+        td{padding:10px 16px;border-bottom:1px solid #f0f0f0;font-size:14px;}
+        td:last-child{text-align:right;font-weight:600;}
+        .total-row td{background:#f0f4ff;font-weight:bold;font-size:15px;}
+        .cred-box{background:#fff8e1;border-left:4px solid #ffc107;padding:16px 20px;border-radius:6px;margin:16px 0;}
+        .cred-box p{margin:4px 0;font-size:14px;}
+        .wallet-box{background:#e8f5e9;border-left:4px solid #4caf50;padding:16px 20px;border-radius:6px;margin:16px 0;}
+        .btn{display:inline-block;background:#1a1a2e;color:white;padding:12px 32px;text-decoration:none;border-radius:6px;margin-top:16px;font-size:14px;}
+        .footer{text-align:center;margin-top:20px;color:#999;font-size:12px;}
+        .important{color:#d32f2f;font-size:13px;margin-top:8px;}
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="header">
+          <h1>Welcome to ${estate?.name || 'BamiHustle'}</h1>
+          <p style="margin:6px 0 0;opacity:0.85;font-size:14px;">Your tenant account is ready</p>
+        </div>
+        <div class="content">
+          <p>Hello <strong>${user.name || tenant?.tenantName || 'Tenant'}</strong>,</p>
+          <p>Your tenant portal account has been set up. Below is everything you need to get started.</p>
+
+          <div class="cred-box">
+            <p><strong>Login Email:</strong> ${user.email}</p>
+            <p><strong>Temporary Password:</strong> <span style="font-family:monospace;font-size:16px;letter-spacing:2px;">${temporaryPassword}</span></p>
+            <p class="important">Please change your password after your first login.</p>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Unit Details</div>
+            <table>
+              <tr><td>Estate</td><td>${estate?.name || '-'}</td></tr>
+              <tr><td>Unit / Flat</td><td>${tenant?.unitLabel || '-'}</td></tr>
+              <tr><td>Meter Number</td><td>${tenant?.electricMeterNumber || '-'}</td></tr>
+              <tr><td>Move-In Date</td><td>${fmtDate(tenant?.entryDate)}</td></tr>
+              <tr><td>Next Due Date</td><td>${fmtDate(tenant?.nextDueDate)}</td></tr>
+            </table>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Financial Summary</div>
+            <table>
+              <tr><td>Monthly Rent</td><td>${formatCurrency(rent)}</td></tr>
+              <tr><td>Service Charge (monthly)</td><td>${formatCurrency(serviceCharge)}</td></tr>
+              <tr class="total-row"><td>Total Monthly Payment</td><td>${formatCurrency(totalMonthly)}</td></tr>
+              ${oneTimeFeeRows}
+            </table>
+          </div>
+
+          <div class="wallet-box">
+            <p style="margin:0 0 4px;font-weight:bold;">Your Wallet</p>
+            <p style="margin:0;font-size:14px;">A BamiHustle wallet has been set up for you. Current balance: <strong>${formatCurrency(walletBalance)}</strong></p>
+            <p style="margin:4px 0 0;font-size:13px;color:#555;">You can top up your wallet and use it to pay rent and service charges through the portal.</p>
+          </div>
+
+          <div style="text-align:center;margin-top:20px;">
+            <a href="${loginUrl}" class="btn">Log In to Tenant Portal</a>
+          </div>
+
+          <div class="footer">
+            <p>For any questions, please contact your estate management.</p>
+            <p>&copy; ${new Date().getFullYear()} BamiHustle. All rights reserved.</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
   `;
 
   return await exports.sendEmail({
     email: user.email,
-    subject: 'Your Tenant Portal Account',
+    subject: `Welcome to ${estate?.name || 'BamiHustle'} – Your Tenant Account Details`,
     html: message,
   });
 };

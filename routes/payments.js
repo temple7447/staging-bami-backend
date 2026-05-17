@@ -15,6 +15,7 @@ const {
   getPaymentStatus,
   getTenantPayments,
   getEstatePayments,
+  getAllPayments,
   recordManualPayment,
   downloadPaymentReceipt,
   refundDeposit,
@@ -25,7 +26,8 @@ const {
 
 const router = express.Router();
 
-// ... existing routes ...
+// Admin: all payments across managed estates (must be before /:paymentId)
+router.get('/', protect, getAllPayments);
 
 // Download receipt directly
 router.get('/:paymentId/download', protect, handleValidationErrors, downloadPaymentReceipt);

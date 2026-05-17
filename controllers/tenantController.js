@@ -137,6 +137,15 @@ const createTenant = async (req, res) => {
       let existingUser = await User.findOne({ email: emailAddr });
       if (existingUser) {
         userId = existingUser._id;
+        // Reactivate if previously deactivated (e.g. tenant was vacated before)
+        if (!existingUser.isActive) {
+          existingUser.isActive = true;
+          await existingUser.save({ validateBeforeSave: false });
+        }
+        // Generate a fresh temp password and send credentials so they can log in again
+        generatedPassword = generateTempPassword(6);
+        existingUser.password = generatedPassword;
+        await existingUser.save({ validateBeforeSave: false });
       } else {
         generatedPassword = generateTempPassword(6);
         const newUser = await User.create({
@@ -197,11 +206,13 @@ const createTenant = async (req, res) => {
     unit.updatedBy = req.user?._id;
     await unit.save();
 
-    // If we created a brand new user and have an email, send credentials
+    // Send welcome email with full credentials and tenancy details
     if (emailAddr && generatedPassword) {
       try {
         const userDoc = await User.findById(userId);
-        await sendTenantWelcomeEmail(userDoc, generatedPassword, tenant.toObject(), { name: estate.name });
+        const tenantWallet = await Wallet.findOne({ userId });
+        const walletBalance = tenantWallet ? tenantWallet.balance : 0;
+        await sendTenantWelcomeEmail(userDoc, generatedPassword, tenant.toObject(), { name: estate.name }, walletBalance);
       } catch (e) {
         console.log('Failed to send tenant welcome email:', e?.message || e);
       }
@@ -721,7 +732,16 @@ const updateTenant = async (req, res) => {
       if (tenantType !== tenant.tenantType) historyMeta.tenantType = tenantType;
       tenant.tenantType = tenantType;
     }
-    if (status !== undefined) tenant.status = status;
+    if (status !== undefined) {
+      tenant.status = status;
+      if (tenant.user) {
+        if (status === 'vacant') {
+          await User.findByIdAndUpdate(tenant.user, { isActive: false });
+        } else if (status === 'occupied') {
+          await User.findByIdAndUpdate(tenant.user, { isActive: true });
+        }
+      }
+    }
     if (electricMeterNumber !== undefined) tenant.electricMeterNumber = electricMeterNumber;
 
     if (entryDate !== undefined) {
@@ -1064,6 +1084,11 @@ const deleteTenant = async (req, res) => {
 
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    // Deactivate linked user account so they can no longer log in
+    if (tenant.user) {
+      await User.findByIdAndUpdate(tenant.user, { isActive: false });
     }
 
     // NOTE: We deliberately do NOT touch the linked unit here.
