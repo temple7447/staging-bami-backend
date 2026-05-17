@@ -520,6 +520,123 @@ const getAllTransactions = async (req, res) => {
   }
 };
 
+/**
+ * Admin: look up a user by email before crediting their wallet.
+ * Returns name, email, role, and current wallet balance for confirmation.
+ * Query: ?email=tenant@mail.com
+ */
+const adminLookupUser = async (req, res) => {
+  try {
+    const adminRole = req.user?.role;
+    if (!['admin', 'super_admin', 'super_manager', 'business_owner'].includes(adminRole)) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const email = req.query.email?.toLowerCase().trim();
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email query parameter is required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'No user found with that email address' });
+    }
+
+    const wallet = await Wallet.findOne({ userId: user._id });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        userId: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone || null,
+        walletBalance: wallet ? wallet.balance : 0,
+        currency: 'NGN'
+      }
+    });
+  } catch (err) {
+    console.error('adminLookupUser error:', err);
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+};
+
+/**
+ * Admin: credit any user's wallet directly without going through Paystack.
+ * Body: { email, amount, reason? }
+ */
+const adminCreditWallet = async (req, res) => {
+  try {
+    const adminRole = req.user?.role;
+    if (!['admin', 'super_admin', 'super_manager', 'business_owner'].includes(adminRole)) {
+      return res.status(403).json({ success: false, message: 'Not authorized to credit wallets' });
+    }
+
+    const { email, amount, reason } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Recipient email is required' });
+    }
+
+    const creditAmount = Number(amount);
+    if (!creditAmount || creditAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Amount must be a positive number' });
+    }
+
+    const recipient = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!recipient) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Find or create wallet
+    let wallet = await Wallet.findOne({ userId: recipient._id });
+    if (!wallet) {
+      wallet = await Wallet.create({ userId: recipient._id });
+    }
+
+    wallet.balance += creditAmount;
+    wallet.totalEarnings += creditAmount;
+    wallet.lastUpdated = new Date();
+    await wallet.save();
+
+    const transaction = await Transaction.create({
+      user: recipient._id,
+      walletId: wallet._id,
+      amount: creditAmount,
+      type: 'deposit',
+      method: 'other',
+      status: 'completed',
+      reference: 'ADM-' + Date.now(),
+      description: reason || `Admin wallet credit by ${req.user.name || req.user.email}`,
+      createdBy: req.user._id
+    });
+
+    wallet.transactions.push(transaction._id);
+    await wallet.save();
+
+    try {
+      await sendDepositEmail(recipient, creditAmount, { _id: transaction._id, newBalance: wallet.balance }, 'Admin Wallet Credit');
+    } catch (emailErr) {
+      console.error('Failed to send credit notification email:', emailErr.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully credited ₦${creditAmount.toLocaleString()} to ${recipient.name || recipient.email}'s wallet`,
+      data: {
+        transactionId: transaction._id,
+        recipient: { id: recipient._id, name: recipient.name, email: recipient.email },
+        amountCredited: creditAmount,
+        newBalance: wallet.balance
+      }
+    });
+  } catch (err) {
+    console.error('adminCreditWallet error:', err);
+    res.status(500).json({ success: false, message: 'Failed to credit wallet', error: err.message });
+  }
+};
+
 module.exports = {
   getWallet,
   createWallet,
@@ -527,5 +644,7 @@ module.exports = {
   deductFunds,
   getTransactionHistory,
   getAllTransactions,
-  processWalletTransaction
+  processWalletTransaction,
+  adminLookupUser,
+  adminCreditWallet
 };

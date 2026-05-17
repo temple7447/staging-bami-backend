@@ -9,7 +9,9 @@ const {
   deductFunds,
   getTransactionHistory,
   getAllTransactions,
-  processWalletTransaction
+  processWalletTransaction,
+  adminLookupUser,
+  adminCreditWallet
 } = require('../controllers/walletController');
 const {
   initializeDeposit,
@@ -44,6 +46,15 @@ router.post('/deduct-funds', protect, [
 
 // Unified wallet transaction (deposit, withdraw, transfer)
 router.post('/transaction', protect, validateWalletTransaction, handleValidationErrors, processWalletTransaction);
+
+// Admin: look up a user by email before crediting (Step 1)
+router.get('/admin/lookup', protect, adminLookupUser);
+
+// Admin: credit any user's wallet directly (Step 2)
+router.post('/admin/credit', protect, [
+  body('email').isEmail().withMessage('A valid recipient email is required'),
+  body('amount').isFloat({ min: 1 }).withMessage('Amount must be greater than 0')
+], handleValidationErrors, adminCreditWallet);
 
 // Paystack deposit flows
 router.post('/paystack/initialize', protect, initializeDeposit);
