@@ -199,20 +199,7 @@ exports.sendVerificationEmail = async (user, verificationToken) => {
 exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate, walletBalance = 0) => {
   const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
 
-  const rent = tenant?.rentAmount || 0;
-  const serviceCharge = tenant?.serviceChargeAmount || 0;
-  const cautionFee = tenant?.baseCaution2024 || tenant?.cautionFee || 0;
-  const legalFee = tenant?.baseLegal2024 || tenant?.legalFee || 0;
-  const totalMonthly = rent + serviceCharge;
-  const isNewTenant = tenant?.tenantType === 'new' || !tenant?.tenantType;
-
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
-
-  const oneTimeFeeRows = (isNewTenant && (cautionFee > 0 || legalFee > 0)) ? `
-    <tr><td colspan="2" style="padding:8px 12px;font-size:12px;color:#888;background:#f9f9f9;">One-Time Fees (new tenant)</td></tr>
-    ${cautionFee > 0 ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;">Caution Fee</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(cautionFee)}</td></tr>` : ''}
-    ${legalFee > 0 ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;">Legal Fee</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(legalFee)}</td></tr>` : ''}
-  ` : '';
 
   const message = `
     <!DOCTYPE html>
@@ -262,16 +249,6 @@ exports.sendTenantWelcomeEmail = async (user, temporaryPassword, tenant, estate,
               <tr><td>Meter Number</td><td>${tenant?.electricMeterNumber || '-'}</td></tr>
               <tr><td>Move-In Date</td><td>${fmtDate(tenant?.entryDate)}</td></tr>
               <tr><td>Next Due Date</td><td>${fmtDate(tenant?.nextDueDate)}</td></tr>
-            </table>
-          </div>
-
-          <div class="section">
-            <div class="section-title">Financial Summary</div>
-            <table>
-              <tr><td>Monthly Rent</td><td>${formatCurrency(rent)}</td></tr>
-              <tr><td>Service Charge (monthly)</td><td>${formatCurrency(serviceCharge)}</td></tr>
-              <tr class="total-row"><td>Total Monthly Payment</td><td>${formatCurrency(totalMonthly)}</td></tr>
-              ${oneTimeFeeRows}
             </table>
           </div>
 

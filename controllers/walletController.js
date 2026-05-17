@@ -447,51 +447,40 @@ const getAllTransactions = async (req, res) => {
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
-
-    let filter = { isActive: true };
-
     const role = req.user.role;
 
+    const filter = { isActive: true };
+
     if (['super_admin'].includes(role)) {
-      // Super admin: see all transactions
-      if (type) filter.type = type;
-      if (status) filter.status = status;
-      if (search) {
-        filter.$or = [
-          { description: { $regex: search, $options: 'i' } },
-          { reference: { $regex: search, $options: 'i' } }
-        ];
-      }
-    } else if (['admin', 'super_manager', 'business_owner'].includes(role)) {
-      // Admins/owners: see transactions for their assigned estates OR their own
-      const estateFilter = role === 'business_owner'
-        ? { estate: { $in: req.user.assignedEstates || [] } }
-        : { estate: { $in: req.user.assignedEstates || [] } };
-
-      filter.$or = [
-        estateFilter,
-        { user: req.user.id }
-      ];
-
-      if (type) filter.type = type;
-      if (status) filter.status = status;
-      if (search) {
-        filter.$or.push(
-          { description: { $regex: search, $options: 'i' } },
-          { reference: { $regex: search, $options: 'i' } }
-        );
-      }
+      // Super admin sees everything — no estate scoping needed
+    } else if (['admin', 'super_manager'].includes(role)) {
+      // Admins are linked to estates via Estate.managers — look them up
+      const managedEstates = await require('../models/Estate').find(
+        { managers: req.user.id, isActive: true }, '_id'
+      ).lean();
+      const estateIds = managedEstates.map(e => e._id);
+      filter.estate = { $in: estateIds };
+    } else if (role === 'business_owner') {
+      // Business owners are linked via User.assignedEstates
+      const estateIds = req.user.assignedEstates || [];
+      filter.estate = { $in: estateIds };
     } else {
       // All other roles: only their own transactions
       filter.user = req.user.id;
-      if (type) filter.type = type;
-      if (status) filter.status = status;
     }
 
+    if (type) filter.type = type;
+    if (status) filter.status = status;
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+    if (search) {
+      filter.$or = [
+        { description: { $regex: search, $options: 'i' } },
+        { reference: { $regex: search, $options: 'i' } }
+      ];
     }
 
     const [transactions, total] = await Promise.all([

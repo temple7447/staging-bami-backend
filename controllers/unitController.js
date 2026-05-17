@@ -31,7 +31,6 @@ const createUnit = async (req, res) => {
       legalFee,
       category,
       listingType,
-      securityDeposit,
       availableDate,
       bedrooms,
       bathrooms,
@@ -112,7 +111,6 @@ const createUnit = async (req, res) => {
       legalFee: lf != null ? lf : undefined,
       category,
       listingType,
-      securityDeposit,
       availableDate,
       bedrooms,
       bathrooms,
@@ -149,7 +147,6 @@ const createUnit = async (req, res) => {
         status: unit.status,
         category: unit.category,
         listingType: unit.listingType,
-        securityDeposit: unit.securityDeposit,
         availableDate: unit.availableDate,
         bedrooms: unit.bedrooms,
         bathrooms: unit.bathrooms,
@@ -263,7 +260,6 @@ const getEstateUnits = async (req, res) => {
           status: unit.status,
           category: unit.category,
           listingType: unit.listingType,
-          securityDeposit: unit.securityDeposit,
           availableDate: unit.availableDate,
           bedrooms: unit.bedrooms,
           bathrooms: unit.bathrooms,
@@ -443,7 +439,6 @@ const getUnitDetails = async (req, res) => {
         status: unit.status,
         category: unit.category,
         listingType: unit.listingType,
-        securityDeposit: unit.securityDeposit,
         availableDate: unit.availableDate,
         bedrooms: unit.bedrooms,
         bathrooms: unit.bathrooms,
@@ -487,7 +482,6 @@ const updateUnit = async (req, res) => {
       status,
       category,
       listingType,
-      securityDeposit,
       availableDate,
       bedrooms,
       bathrooms,
@@ -590,7 +584,6 @@ const updateUnit = async (req, res) => {
     if (status !== undefined) unit.status = status;
     if (category !== undefined) unit.category = category;
     if (listingType !== undefined) unit.listingType = listingType;
-    if (securityDeposit !== undefined) unit.securityDeposit = securityDeposit;
     if (availableDate !== undefined) unit.availableDate = availableDate;
     if (bedrooms !== undefined) unit.bedrooms = bedrooms;
     if (bathrooms !== undefined) unit.bathrooms = bathrooms;

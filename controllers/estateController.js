@@ -384,8 +384,12 @@ const getEstateOverview = async (req, res) => {
 const deleteEstate = async (req, res) => {
   try {
     const estate = await Estate.findById(req.params.id);
-    if (!estate || !estate.isActive) {
+    if (!estate) {
       return res.status(404).json({ success: false, message: 'Estate not found' });
+    }
+    // Already deleted — treat as success so the UI can move on
+    if (!estate.isActive) {
+      return res.status(200).json({ success: true, message: 'Estate deleted successfully' });
     }
 
     estate.isActive = false;
@@ -522,55 +526,63 @@ const getOverallEstateOverview = async (req, res) => {
       }
     }
 
-    // Build unit filter
+    // Resolve the estates this user can access first — everything else is scoped to these IDs
     const Unit = require('../models/Unit');
-    const unitFilter = { isActive: true };
-    if (estateIds) {
-      const ids = estateIds.split(',').map(id => id.trim());
-      unitFilter.estate = { $in: ids };
-    }
-    if (unitStatus) {
-      unitFilter.status = unitStatus;
+    const Payment = require('../models/Payment');
+
+    const accessibleEstates = await Estate.find(estateFilter, '_id').lean();
+    const accessibleEstateIds = accessibleEstates.map(e => e._id);
+
+    // If the user manages no estates, return zeroes immediately
+    if (accessibleEstateIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        data: {
+          period: {
+            label: 'Last 30 Days',
+            startDate: filterStartDate,
+            endDate: filterEndDate
+          },
+          estates: { totalEstates: 0, activeEstates: 0 },
+          units: { totalUnits: 0, occupiedUnits: 0, vacantUnits: 0, maintenanceUnits: 0, reservedUnits: 0, occupancyRate: 0 },
+          tenants: { totalActiveTenants: 0, dueSoon7Days: 0, dueSoon30Days: 0 },
+          revenue: { amount: 0, transactionCount: 0 },
+          payments: { pendingCount: 0, completedInPeriod: 0 }
+        }
+      });
     }
 
-    // Build tenant filter
-    const tenantFilter = { isActive: true };
-    if (estateIds) {
-      const ids = estateIds.split(',').map(id => id.trim());
-      tenantFilter.estate = { $in: ids };
-    }
+    // Narrow to specific estateIds if requested (intersection with accessible)
+    const scopedEstateIds = estateIds
+      ? accessibleEstateIds.filter(id => estateIds.split(',').map(s => s.trim()).includes(id.toString()))
+      : accessibleEstateIds;
+
+    // Build unit filter scoped to accessible estates
+    const unitFilter = { isActive: true, estate: { $in: scopedEstateIds } };
+    if (unitStatus) unitFilter.status = unitStatus;
+
+    // Build tenant filter scoped to accessible estates
+    const tenantFilter = { isActive: true, estate: { $in: scopedEstateIds } };
     if (tenantStatus) {
       tenantFilter.status = tenantStatus;
     } else {
-      // Default: active tenants
       tenantFilter.status = { $in: ['occupied', 'pending'] };
     }
 
-    // Build transaction filter
+    // Build transaction filter scoped to accessible estates
     const transactionFilter = {
       isActive: true,
       status: 'paid',
+      estate: { $in: scopedEstateIds },
       createdAt: { $gte: filterStartDate, $lte: filterEndDate }
     };
-    if (estateIds) {
-      const ids = estateIds.split(',').map(id => id.trim());
-      transactionFilter.estate = { $in: ids };
-    }
 
-    // Build payment filter
-    const Payment = require('../models/Payment');
-    const paymentFilter = { isActive: true };
-    if (estateIds) {
-      const ids = estateIds.split(',').map(id => id.trim());
-      paymentFilter.estate = { $in: ids };
-    }
-    if (paymentStatus) {
-      paymentFilter.paymentStatus = paymentStatus;
-    }
+    // Build payment filter scoped to accessible estates
+    const paymentFilter = { isActive: true, estate: { $in: scopedEstateIds } };
+    if (paymentStatus) paymentFilter.paymentStatus = paymentStatus;
 
     // Get all data in parallel
     const [
-      totalEstates,
       unitsAgg,
       activeTenantCount,
       dueSoon7Count,
@@ -579,8 +591,6 @@ const getOverallEstateOverview = async (req, res) => {
       pendingPaymentCount,
       completedPaymentCount
     ] = await Promise.all([
-      // Total estates (with filter)
-      Estate.countDocuments(estateFilter),
 
       // Aggregate unit statistics (with filters)
       Unit.aggregate([
@@ -687,8 +697,8 @@ const getOverallEstateOverview = async (req, res) => {
           endDate: filterEndDate
         },
         estates: {
-          totalEstates,
-          activeEstates: totalEstates
+          totalEstates: scopedEstateIds.length,
+          activeEstates: scopedEstateIds.length
         },
         units: {
           totalUnits,

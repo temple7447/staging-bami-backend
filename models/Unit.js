@@ -52,11 +52,6 @@ const UnitSchema = new mongoose.Schema({
     enum: ['Rent', 'Sale'],
     default: 'Rent'
   },
-  securityDeposit: {
-    type: Number,
-    default: 0,
-    min: [0, 'Security deposit cannot be negative']
-  },
   availableDate: {
     type: Date
   },

@@ -192,8 +192,7 @@ router.get('/', protect, cache(120), getEstates); // Cache for 2 minutes
  */
 router.post('/', protect, validateEstateCreate, handleValidationErrors, async (req, res, next) => {
   await createEstate(req, res);
-  // Invalidate estate list cache after creation
-  invalidateCache('cache:/api/estates');
+  invalidateCache('/api/estates');
 });
 
 /**
@@ -303,9 +302,8 @@ router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, cach
  */
 router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handleValidationErrors, async (req, res, next) => {
   await updateEstate(req, res);
-  // Invalidate related caches
-  invalidateCache(`cache:/api/estates/${req.params.id}`);
-  invalidateCache('cache:/api/estates\\?');
+  invalidateCache(`/api/estates/${req.params.id}`);
+  invalidateCache('/api/estates');
 });
 
 /**
@@ -330,8 +328,7 @@ router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handle
  */
 router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, async (req, res, next) => {
   await deleteEstate(req, res);
-  // Invalidate all estate caches
-  invalidateCache('cache:/api/estates');
+  invalidateCache('/api/estates');
 });
 
 module.exports = router;
