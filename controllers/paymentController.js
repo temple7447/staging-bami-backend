@@ -22,7 +22,7 @@ const { sendTransactionToSlack } = require('../utils/slackService');
  * @param {Object} wallet - Wallet document (or null)
  * @returns {Object} receiptData - Pre-calculated values for PDF/email
  */
-const calculateReceiptData = (tenant, payment, wallet) => {
+const calculateReceiptData = async (tenant, payment, wallet) => {
   const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
 
   const formatDate = (date) => new Date(date).toLocaleDateString('en-NG', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -46,16 +46,35 @@ const calculateReceiptData = (tenant, payment, wallet) => {
     false // Occupied
   );
 
-  // Caution & Legal fees (only for new tenants within first year)
+  // Caution & Legal fees: only for NEW tenants AND only if not already paid (one-time fees).
   const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
 
-  const effectiveCautionFee = isApplicable ? getCurrentRent(
+  let cautionAlreadyPaid = false;
+  let legalAlreadyPaid = false;
+  if (isApplicable && tenant._id) {
+    const paid = await Payment.aggregate([
+      {
+        $match: {
+          tenant: new mongoose.Types.ObjectId(tenant._id),
+          paymentStatus: 'completed',
+          paymentType: { $in: ['caution_fee', 'legal_fee'] }
+        }
+      },
+      { $group: { _id: '$paymentType', count: { $sum: 1 } } }
+    ]);
+    for (const p of paid) {
+      if (p._id === 'caution_fee' && p.count > 0) cautionAlreadyPaid = true;
+      if (p._id === 'legal_fee' && p.count > 0) legalAlreadyPaid = true;
+    }
+  }
+
+  const effectiveCautionFee = (isApplicable && !cautionAlreadyPaid) ? getCurrentRent(
     tenant.baseCaution2024 || tenant.unit?.cautionFee || 0,
     tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
     false
   ) : 0;
 
-  const effectiveLegalFee = isApplicable ? getCurrentRent(
+  const effectiveLegalFee = (isApplicable && !legalAlreadyPaid) ? getCurrentRent(
     tenant.baseLegal2024 || tenant.unit?.legalFee || 0,
     tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
     false
@@ -77,17 +96,16 @@ const calculateReceiptData = (tenant, payment, wallet) => {
     totalStayYears = Math.max(1, Math.ceil(((now.getFullYear() - entry.getFullYear()) * 12 + (now.getMonth() - entry.getMonth())) / 12));
   }
 
-  // Service charge for the full duration
-  const serviceChargeTotal = effectiveServiceMonthly * durationMonths;
-
-  // Rent is annual (already the yearly amount from the model)
-  const rentAmount = effectiveRent;
+  // Samfred receipts always show YEARLY figures (× 12 months) regardless of lease length.
+  const annualMultiplier = 12;
+  const rentAmount = effectiveRent * annualMultiplier;
+  const serviceChargeTotal = effectiveServiceMonthly * annualMultiplier;
 
   // Outstanding
   const walletBalance = wallet?.balance || 0;
   const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
 
-  // Current total tenancy rate = rent + service charge total
+  // Current total tenancy rate = yearly rent + yearly service charge
   const currentTotalTenancyRate = rentAmount + serviceChargeTotal;
 
   // Future projections (26% increase)
@@ -97,10 +115,13 @@ const calculateReceiptData = (tenant, payment, wallet) => {
   const nextTotalTenancyRate = nextRentIncrease + nextServiceChargeIncrease;
   const totalTenancyRateIncrease = nextTotalTenancyRate;
 
-  // Next increase date (2 years from last increase or entry)
-  const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
-  const nextIncreaseDate = rentOrigin
-    ? new Date(new Date(rentOrigin).setFullYear(new Date(rentOrigin).getFullYear() + 2)).toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' })
+  // Next increase date = the day after current lease expires (start of next lease).
+  const nextIncreaseDate = tenant.nextDueDate
+    ? (() => {
+      const d = new Date(tenant.nextDueDate);
+      d.setDate(d.getDate() + 1);
+      return d.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
+    })()
     : '-';
 
   // Year calculations
@@ -1284,7 +1305,7 @@ const sendPaymentReceipt = async (req, res) => {
         }
 
         // Calculate correct receipt data
-        const receiptData = calculateReceiptData(payment.tenant, payment, wallet);
+        const receiptData = await calculateReceiptData(payment.tenant, payment, wallet);
 
         // Send the receipt email
         await sendReceiptEmail(receiptData, payment.tenant, payment.estate);
@@ -1337,7 +1358,7 @@ const downloadPaymentReceipt = async (req, res) => {
     }
 
     // Calculate correct receipt data
-    const receiptData = calculateReceiptData(payment.tenant, payment, wallet);
+    const receiptData = await calculateReceiptData(payment.tenant, payment, wallet);
 
     // Generate PDF
     const { generateReceiptPdf } = require('../utils/emailService');
@@ -1429,7 +1450,7 @@ const sendTenantReceipt = async (req, res) => {
         };
 
         // Calculate correct receipt data
-        const receiptData = calculateReceiptData(tenant, mockPayment, wallet);
+        const receiptData = await calculateReceiptData(tenant, mockPayment, wallet);
 
         console.log(`📄 Generating PDF and sending email to ${tenant.tenantEmail}...`);
 
@@ -1581,7 +1602,7 @@ const recordManualPayment = async (req, res) => {
         let wallet = null;
         if (tenant.user) wallet = await Wallet.findOne({ userId: tenant.user });
         // Build the pre-calculated receipt data (sendReceiptEmail expects this, not the raw payment)
-        const receiptData = calculateReceiptData(tenant, payment, wallet);
+        const receiptData = await calculateReceiptData(tenant, payment, wallet);
         await sendReceiptEmail(receiptData, tenant, tenant.estate, wallet);
       } catch (emailError) {
         logError('Manual payment receipt failure', emailError);
@@ -1627,8 +1648,8 @@ const getTenantReceipts = async (req, res) => {
 
     const wallet = await Wallet.findOne({ tenant: tenant._id }).lean();
 
-    const receipts = payments.map(payment => {
-      const receiptData = calculateReceiptData(tenant, payment, wallet);
+    const receipts = await Promise.all(payments.map(async payment => {
+      const receiptData = await calculateReceiptData(tenant, payment, wallet);
 
       // Extract per-payment breakdown from billing_items metadata
       const billingItems = payment.paystackResponse?.data?.metadata?.billing_items || [];
@@ -1715,7 +1736,7 @@ const getTenantReceipts = async (req, res) => {
         nextServiceChargeIncrease: receiptData.nextServiceChargeIncrease,
         totalTenancyRateIncrease: receiptData.totalTenancyRateIncrease
       };
-    });
+    }));
 
     return res.status(200).json({
       success: true,

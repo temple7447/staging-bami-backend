@@ -17,6 +17,8 @@ const processPeriodicRentIncreases = async () => {
 
         for (const unit of vacantUnits) {
             let updated = false;
+            // Anchor = original/creation date; never overwrite this after applying an increase,
+            // otherwise the next cycle never elapses and compound increases stop triggering.
             const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
             const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
 
@@ -24,7 +26,6 @@ const processPeriodicRentIncreases = async () => {
             const currentPrice = getCurrentRent(unit.basePrice2024 || unit.monthlyPrice, effectiveOriginRent, true);
             if (currentPrice > unit.monthlyPrice) {
                 unit.monthlyPrice = currentPrice;
-                unit.lastRentIncreaseDate = new Date();
                 updated = true;
             }
 
@@ -32,7 +33,6 @@ const processPeriodicRentIncreases = async () => {
             const currentService = getCurrentRent(unit.baseServiceCharge2024 || unit.serviceChargeMonthly, effectiveOriginService, true);
             if (currentService > unit.serviceChargeMonthly) {
                 unit.serviceChargeMonthly = currentService;
-                unit.lastServiceIncreaseDate = new Date();
                 updated = true;
             }
 
@@ -48,6 +48,8 @@ const processPeriodicRentIncreases = async () => {
 
         for (const tenant of activeTenants) {
             let updated = false;
+            // Anchor = entry date; never overwrite this after applying an increase,
+            // otherwise the next 2-year cycle never elapses and compound increases stop triggering.
             const effectiveOriginRent = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
             const effectiveOriginService = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
 
@@ -56,7 +58,6 @@ const processPeriodicRentIncreases = async () => {
             if (currentPrice > tenant.rentAmount) {
                 const oldPrice = tenant.rentAmount;
                 tenant.rentAmount = currentPrice;
-                tenant.lastRentIncreaseDate = new Date();
 
                 tenant.history.push({
                     event: 'rent_update',
@@ -72,7 +73,6 @@ const processPeriodicRentIncreases = async () => {
             if (currentService > tenant.serviceChargeAmount) {
                 const oldService = tenant.serviceChargeAmount;
                 tenant.serviceChargeAmount = currentService;
-                tenant.lastServiceIncreaseDate = new Date();
 
                 tenant.history.push({
                     event: 'rent_update',
