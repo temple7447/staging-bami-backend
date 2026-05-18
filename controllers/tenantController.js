@@ -486,8 +486,9 @@ const getTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
-    const isApplicable = true; // Use business logic from calculator, now universally true
+    const { getCurrentRent } = require('../utils/rentCalculator');
+    // Only new tenants owe caution/legal. Renewal/existing tenants already paid these (one-time fees).
+    const isApplicable = tenant.tenantType === 'new';
 
     const currentCalculatedRent = getCurrentRent(
       tenant.baseRent2024 || tenant.rentAmount,
