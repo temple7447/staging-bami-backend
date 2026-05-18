@@ -85,7 +85,7 @@ const getTenantOverview = async (userId) => {
   // Find tenant records linked to this user
   const tenant = await Tenant.findOne({ user: userId })
     .populate('estate', 'name address')
-    .populate('unit', 'label unitType');
+    .populate('unit', 'label category bedrooms bathrooms area amenities description features streetAddress images cautionFee legalFee');
 
   let overview = {
     section: 'TENANT_OVERVIEW',
@@ -120,15 +120,27 @@ const getTenantOverview = async (userId) => {
     overview.apartment = {
       id: tenant._id,
       tenantName: tenant.tenantName,
+      tenantEmail: tenant.tenantEmail || null,
+      tenantPhone: tenant.tenantPhone || null,
+      profileImageUrl: tenant.profileImageUrl || null,
       unit: tenant.unit?.label || 'N/A',
-      unitType: tenant.unit?.unitType || 'N/A',
+      unitType: tenant.unit?.category || 'N/A',
+      bedrooms: tenant.unit?.bedrooms ?? 0,
+      bathrooms: tenant.unit?.bathrooms ?? 0,
+      area: tenant.unit?.area ?? 0,
+      description: tenant.unit?.description || null,
+      streetAddress: tenant.unit?.streetAddress || null,
+      amenities: tenant.unit?.amenities || {},
+      features: tenant.unit?.features || [],
+      images: (tenant.unit?.images || []).map(img => ({ url: img.url, caption: img.caption || null })),
       estate: tenant.estate?.name || 'N/A',
+      estateAddress: tenant.estate?.address || null,
       rentAmount: tenant.rentAmount,
       serviceChargeAmount: tenant.serviceChargeAmount,
       entryDate: tenant.entryDate,
       nextDueDate: nextDueDate,
       status: tenant.status,
-      leaseEndsOn: tenant.leaseEndDate,
+      tenantType: tenant.tenantType,
       meterNumber: tenant.electricMeterNumber || 'N/A'
     };
 
@@ -207,7 +219,6 @@ const getTenantOverview = async (userId) => {
 
     // Yearly payment summary
     const thisYear = new Date().getFullYear();
-    const nextYear = thisYear + 1;
 
     // Fetch all completed payments this calendar year with metadata
     const currentYearPayments = await Payment.find({
@@ -215,11 +226,11 @@ const getTenantOverview = async (userId) => {
       paymentStatus: 'completed',
       createdAt: {
         $gte: new Date(`${thisYear}-01-01T00:00:00.000Z`),
-        $lt: new Date(`${nextYear}-01-01T00:00:00.000Z`)
+        $lt: new Date(`${thisYear + 1}-01-01T00:00:00.000Z`)
       }
     }).lean();
 
-    // Break down current-year payments by code using billing_items metadata
+    // Break down current-year PAID amounts by type
     let cyRent = 0, cyServiceCharge = 0, cyOther = 0;
     for (const p of currentYearPayments) {
       const items = p.paystackResponse?.data?.metadata?.billing_items;
@@ -231,20 +242,18 @@ const getTenantOverview = async (userId) => {
           else cyOther += item.amount || 0;
         }
       } else {
-        // Fallback for payments without item-level breakdown
         if (p.paymentType === 'rent') cyRent += p.amount;
         else if (p.paymentType === 'service_charge') cyServiceCharge += p.amount;
         else if (['caution_fee', 'legal_fee'].includes(p.paymentType)) cyOther += p.amount;
-        else {
-          // Unclassified bundle — attribute entirely to rent as best-effort fallback
-          cyRent += p.amount;
-        }
+        else cyRent += p.amount;
       }
     }
     const cyTotal = cyRent + cyServiceCharge + cyOther;
-    const isFirstTime = cyOther > 0;
 
-    // Check if caution/legal fees are still unpaid (for next-year projection)
+    // isFirstTime: new tenants owe one-time caution/legal fees
+    const isFirstTime = tenant.tenantType === 'new';
+
+    // Check which one-time fees are still unpaid
     const paidFeePayments = await Payment.find({
       tenant: tenant._id,
       paymentStatus: 'completed',
@@ -262,71 +271,66 @@ const getTenantOverview = async (userId) => {
       }
     }
 
-    // Projected cost for 12 months starting from nextDueDate
-    const renewalStart = nextDueDate ? new Date(nextDueDate) : new Date();
+    // Current billing period: 12 months starting from entryDate
+    const billingStart = tenant.entryDate ? new Date(tenant.entryDate) : new Date();
     const rentOrigin = tenant.entryDate || new Date();
+    const baseMonthlyRent = tenant.rentAmount || tenant.baseRent2024 || 0;
+    const baseMonthlyService = tenant.serviceChargeAmount || tenant.baseServiceCharge2024 || 0;
 
-    // Derive effective monthly rate from actual payments this year (ground truth).
-    // Falls back to stored tenant rates when no payments exist yet.
-    // This ensures the renewal projection matches what was actually charged,
-    // even if baseRent2024 was set differently from the rate the admin used.
-    const baseMonthlyRent = cyRent > 0
-      ? Math.round(cyRent / 12)
-      : (tenant.rentAmount || tenant.baseRent2024 || 0);
-    const baseMonthlyService = cyServiceCharge > 0
-      ? Math.round(cyServiceCharge / 12)
-      : (tenant.serviceChargeAmount || tenant.baseServiceCharge2024 || 0);
+    const projectedRent = calculateEffectiveRent(baseMonthlyRent, billingStart, 12, false, rentOrigin);
+    const projectedServiceCharge = calculateEffectiveRent(baseMonthlyService, billingStart, 12, false, rentOrigin);
 
-    const projectedRent = calculateEffectiveRent(
-      baseMonthlyRent,
-      renewalStart,
-      12,
-      false,
-      rentOrigin
-    );
-    const projectedServiceCharge = calculateEffectiveRent(
-      baseMonthlyService,
-      renewalStart,
-      12,
-      false,
-      rentOrigin
-    );
-
-    // Include unpaid one-time fees in next-year projection if still outstanding
+    // One-time fees belong in the CURRENT year projection (year 1 only, if not yet paid)
     const unit = tenant.unit || {};
-    let nyOther = 0;
-    const nyOtherBreakdown = [];
-    if (!paidFees.has('caution_fee') && (unit.cautionFee || tenant.baseCaution2024) > 0) {
-      const fee = unit.cautionFee || tenant.baseCaution2024 || 0;
-      nyOther += fee;
-      nyOtherBreakdown.push({ code: 'caution_fee', label: 'Caution Fee', amount: fee });
+    let cyProjectedOther = 0;
+    const cyOtherBreakdown = [];
+    if (isFirstTime) {
+      if (!paidFees.has('caution_fee') && (unit.cautionFee || tenant.baseCaution2024) > 0) {
+        const fee = unit.cautionFee || tenant.baseCaution2024 || 0;
+        cyProjectedOther += fee;
+        cyOtherBreakdown.push({ code: 'caution_fee', label: 'Caution Fee', amount: fee });
+      }
+      if (!paidFees.has('legal_fee') && (unit.legalFee || tenant.baseLegal2024) > 0) {
+        const fee = unit.legalFee || tenant.baseLegal2024 || 0;
+        cyProjectedOther += fee;
+        cyOtherBreakdown.push({ code: 'legal_fee', label: 'Legal Fee', amount: fee });
+      }
     }
-    if (!paidFees.has('legal_fee') && (unit.legalFee || tenant.baseLegal2024) > 0) {
-      const fee = unit.legalFee || tenant.baseLegal2024 || 0;
-      nyOther += fee;
-      nyOtherBreakdown.push({ code: 'legal_fee', label: 'Legal Fee', amount: fee });
-    }
-    const nyIsFirstTime = nyOther > 0;
+    const cyProjectedTotal = projectedRent.totalAmount + projectedServiceCharge.totalAmount + cyProjectedOther;
+    const outstanding = Math.max(0, cyProjectedTotal - cyTotal);
+
+    // Next year (renewal): 12 months starting from entryDate + 12 months
+    const renewalStart = new Date(billingStart);
+    renewalStart.setMonth(renewalStart.getMonth() + 12);
+    const nyProjectedRent = calculateEffectiveRent(baseMonthlyRent, renewalStart, 12, false, rentOrigin);
+    const nyProjectedServiceCharge = calculateEffectiveRent(baseMonthlyService, renewalStart, 12, false, rentOrigin);
+    const nyTotal = nyProjectedRent.totalAmount + nyProjectedServiceCharge.totalAmount;
 
     overview.yearlyPayment = {
       currentYear: {
-        year: thisYear,
+        year: billingStart.getFullYear(),
         isFirstTime,
-        rent: cyRent,
-        serviceCharge: cyServiceCharge,
-        ...(isFirstTime && { other: cyOther }),
-        totalPaid: cyTotal
+        rent: projectedRent.totalAmount,
+        serviceCharge: projectedServiceCharge.totalAmount,
+        ...(cyProjectedOther > 0 && { other: cyProjectedOther, otherBreakdown: cyOtherBreakdown }),
+        total: cyProjectedTotal,
+        paid: {
+          rent: cyRent,
+          serviceCharge: cyServiceCharge,
+          ...(cyOther > 0 && { other: cyOther }),
+          total: cyTotal
+        },
+        outstanding
       },
       nextYear: {
-        year: nextYear,
-        isFirstTime: nyIsFirstTime,
+        year: renewalStart.getFullYear(),
+        isFirstTime: false,
         renewalStartDate: renewalStart,
-        monthlyRent: projectedRent.finalRent,
-        monthlyServiceCharge: projectedServiceCharge.finalRent,
-        projectedRent: projectedRent.totalAmount,
-        projectedServiceCharge: projectedServiceCharge.totalAmount,
-        ...(nyIsFirstTime && { projectedOther: nyOther, otherBreakdown: nyOtherBreakdown }),
-        projectedTotal: projectedRent.totalAmount + projectedServiceCharge.totalAmount + nyOther
+        monthlyRent: nyProjectedRent.finalRent,
+        monthlyServiceCharge: nyProjectedServiceCharge.finalRent,
+        projectedRent: nyProjectedRent.totalAmount,
+        projectedServiceCharge: nyProjectedServiceCharge.totalAmount,
+        projectedTotal: nyTotal
       }
     };
   }
