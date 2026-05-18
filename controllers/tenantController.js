@@ -296,10 +296,38 @@ const getTenants = async (req, res) => {
       filter.entryDate = { $gte: startDate, $lt: endDate };
     }
 
+    // Helper: returns { caution: Set<tenantId>, legal: Set<tenantId> } of tenants who already paid
+    const getPaidFees = async (tenantIds) => {
+      if (!tenantIds.length) return { caution: new Set(), legal: new Set() };
+      const Payment = require('../models/Payment');
+      const paid = await Payment.aggregate([
+        {
+          $match: {
+            tenant: { $in: tenantIds },
+            paymentStatus: 'completed',
+            paymentType: { $in: ['caution_fee', 'legal_fee'] }
+          }
+        },
+        { $group: { _id: { tenant: '$tenant', type: '$paymentType' } } }
+      ]);
+      const caution = new Set();
+      const legal = new Set();
+      for (const p of paid) {
+        const id = p._id.tenant.toString();
+        if (p._id.type === 'caution_fee') caution.add(id);
+        if (p._id.type === 'legal_fee') legal.add(id);
+      }
+      return { caution, legal };
+    };
+
     // Helper to process tenant and add fees/metadata
-    const processTenant = (tenant) => {
-      const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
-      const isApplicable = isOneTimeFeeApplicable(tenant.entryDate) && tenant.tenantType === 'new';
+    // paidFees: { caution: Set<tenantId string>, legal: Set<tenantId string> }
+    const processTenant = (tenant, paidFees = { caution: new Set(), legal: new Set() }) => {
+      const { getCurrentRent } = require('../utils/rentCalculator');
+      const tenantIdStr = tenant._id?.toString();
+      const isApplicable = tenant.tenantType === 'new';
+      const cautionAlreadyPaid = paidFees.caution.has(tenantIdStr);
+      const legalAlreadyPaid = paidFees.legal.has(tenantIdStr);
 
       const currentPrice = getCurrentRent(
         tenant.baseRent2024 || tenant.rentAmount,
@@ -313,13 +341,13 @@ const getTenants = async (req, res) => {
         false // Occupied
       );
 
-      const currentCaution = isApplicable ? getCurrentRent(
+      const currentCaution = (isApplicable && !cautionAlreadyPaid) ? getCurrentRent(
         tenant.baseCaution2024 || 0,
         tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
         false // Occupied
       ) : 0;
 
-      const currentLegal = isApplicable ? getCurrentRent(
+      const currentLegal = (isApplicable && !legalAlreadyPaid) ? getCurrentRent(
         tenant.baseLegal2024 || 0,
         tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
         false // Occupied
@@ -359,10 +387,13 @@ const getTenants = async (req, res) => {
 
     if (isQuarterlyView || isValidQuarter) {
       const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate')
         .populate('unit', 'label serviceChargeMonthly')
         .sort({ nextDueDate: 1 })
         .lean();
+
+      const tenantIds = tenants.map(t => t._id);
+      const paidFees = await getPaidFees(tenantIds);
 
       const quarters = {
         Q1: { Jan: [], Feb: [], Mar: [] },
@@ -375,7 +406,7 @@ const getTenants = async (req, res) => {
       let totalMonthlyRent = 0;
 
       tenants.forEach(tenant => {
-        const processed = processTenant(tenant);
+        const processed = processTenant(tenant, paidFees);
         const date = new Date(tenant.nextDueDate);
         const monthIndex = date.getMonth();
         const monthName = monthNames[monthIndex];
@@ -415,7 +446,7 @@ const getTenants = async (req, res) => {
     // Add summary calculation for the flat list
     const [items, total, stats] = await Promise.all([
       Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate')
         .populate('estate', 'name')
         .populate('unit', 'label monthlyPrice serviceChargeMonthly')
         .sort({ nextDueDate: 1, createdAt: -1 })
@@ -436,7 +467,8 @@ const getTenants = async (req, res) => {
       ])
     ]);
 
-    const processedItems = items.map(tenant => processTenant(tenant));
+    const paidFees = await getPaidFees(items.map(t => t._id));
+    const processedItems = items.map(tenant => processTenant(tenant, paidFees));
     const summaryData = stats[0] || { totalRent: 0, totalService: 0, count: 0 };
     const totalMonthlyRent = summaryData.totalRent + summaryData.totalService;
 
