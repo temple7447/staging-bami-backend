@@ -1612,7 +1612,7 @@ async function paySelectedBillingItems(req, res) {
       try {
         const { calculateReceiptData } = require('./paymentController');
         const { sendReceiptEmail } = require('../utils/emailService');
-        const receiptData = calculateReceiptData(tenant, payment, wallet);
+        const receiptData = await calculateReceiptData(tenant, payment, wallet);
         await sendReceiptEmail(receiptData, tenant, tenant.estate);
       } catch (emailError) {
         console.error('Failed to send receipt email:', emailError.message);
