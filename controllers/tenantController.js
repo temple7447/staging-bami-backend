@@ -162,10 +162,19 @@ const createTenant = async (req, res) => {
 
     // Ensure only one active tenant per unitLabel in an estate by
     // deactivating any existing active tenants for this flat.
+    const displacedTenants = await Tenant.find(
+      { estate: estateId, unitLabel: unit.label, isActive: true },
+      { user: 1 }
+    ).lean();
     await Tenant.updateMany(
       { estate: estateId, unitLabel: unit.label, isActive: true },
       { $set: { isActive: false, status: 'vacant', updatedBy: req.user?._id } }
     );
+    // Also deactivate the login accounts of any displaced tenants so they cannot log in.
+    const displacedUserIds = displacedTenants.map(t => t.user).filter(Boolean);
+    if (displacedUserIds.length) {
+      await User.updateMany({ _id: { $in: displacedUserIds } }, { $set: { isActive: false } });
+    }
 
     // Automated Rent Increase Logic initialization
     const { RULE_START_DATE } = require('../utils/rentCalculator');

@@ -1,6 +1,7 @@
 const Unit = require('../models/Unit');
 const Estate = require('../models/Estate');
 const Tenant = require('../models/Tenant');
+const User = require('../models/User');
 const { logError, logInfo, logWarning } = require('../utils/logger');
 const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
 
@@ -777,11 +778,16 @@ const removeTenantFromUnit = async (req, res) => {
 
     // Mark previous tenant as inactive so a new tenant can be created
     // for the same unit (unique index is on estate+unitLabel+isActive=true).
-    await Tenant.findByIdAndUpdate(tenantId, {
-      status: 'vacant',
-      isActive: false,
-      updatedBy: req.user?._id,
-    });
+    const removedTenant = await Tenant.findByIdAndUpdate(
+      tenantId,
+      { status: 'vacant', isActive: false, updatedBy: req.user?._id },
+      { new: true, select: 'user' }
+    );
+
+    // Deactivate the tenant's login account so they can no longer sign in.
+    if (removedTenant?.user) {
+      await User.findByIdAndUpdate(removedTenant.user, { isActive: false });
+    }
 
     return res.status(200).json({ success: true, message: 'Tenant removed from unit successfully' });
   } catch (error) {
