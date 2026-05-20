@@ -136,6 +136,13 @@ const createTenant = async (req, res) => {
     if (emailAddr) {
       let existingUser = await User.findOne({ email: emailAddr });
       if (existingUser) {
+        // Block if the email belongs to a non-tenant account (admin, manager, etc.)
+        if (existingUser.role !== 'tenant') {
+          return res.status(400).json({
+            success: false,
+            message: `This email is already registered as a ${existingUser.role} account and cannot be used for a tenant.`
+          });
+        }
         userId = existingUser._id;
         // Reactivate if previously deactivated (e.g. tenant was vacated before)
         if (!existingUser.isActive) {
@@ -177,8 +184,12 @@ const createTenant = async (req, res) => {
     }
 
     // Automated Rent Increase Logic initialization
+    // Use entryDate as the anchor (falling back to today if not provided).
+    // Never fall back to RULE_START_DATE when the tenant joins after 2024 —
+    // that would make completed increase cycles appear immediately on day one.
     const { RULE_START_DATE } = require('../utils/rentCalculator');
-    const startForIncrease = parsedEntryDate > RULE_START_DATE ? parsedEntryDate : RULE_START_DATE;
+    const effectiveEntryDate = parsedEntryDate || new Date();
+    const startForIncrease = effectiveEntryDate > RULE_START_DATE ? effectiveEntryDate : RULE_START_DATE;
 
     const tenant = await Tenant.create({
       estate: estateId,
@@ -527,7 +538,7 @@ const getTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { getCurrentRent } = require('../utils/rentCalculator');
+    const { getCurrentRent, calculateEffectiveRent } = require('../utils/rentCalculator');
     // Only new tenants owe caution/legal. Renewal/existing tenants already paid these (one-time fees).
     const isApplicable = tenant.tenantType === 'new';
 
@@ -599,6 +610,22 @@ const getTenant = async (req, res) => {
     const finalCalculatedCaution = (isApplicable && !(paymentBreakdown.caution_fee?.count > 0)) ? currentCalculatedCaution : 0;
     const finalCalculatedLegal = (isApplicable && !(paymentBreakdown.legal_fee?.count > 0)) ? currentCalculatedLegal : 0;
 
+    // If the dynamic calculation is ahead of stored values, sync them now so the
+    // tenant dashboard and admin view always agree without waiting for the scheduler.
+    if (currentCalculatedRent > tenant.rentAmount || currentCalculatedService > tenant.serviceChargeAmount) {
+      await Tenant.findByIdAndUpdate(tenant._id, {
+        rentAmount: currentCalculatedRent,
+        serviceChargeAmount: currentCalculatedService
+      });
+      if (tenant.unit) {
+        const Unit = require('../models/Unit');
+        await Unit.findByIdAndUpdate(tenant.unit._id || tenant.unit, {
+          monthlyPrice: currentCalculatedRent,
+          serviceChargeMonthly: currentCalculatedService
+        });
+      }
+    }
+
     // Calculate total duration in months for the entire lease (from move-in to next due date)
     let leaseDurationMonths = 0;
     let totalLeaseAmount = 0;
@@ -613,6 +640,50 @@ const getTenant = async (req, res) => {
       totalLeaseAmount = (leaseDurationMonths * (currentCalculatedRent + currentCalculatedService)) + finalCalculatedCaution + finalCalculatedLegal;
     }
 
+    // --- Yearly lease breakdown ---
+    const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+    const billingStart = tenant.entryDate ? new Date(tenant.entryDate) : new Date();
+
+    // Year 1: current billing period (12 months from entry)
+    const year1AnnualRent = currentCalculatedRent * 12;
+    const year1AnnualService = currentCalculatedService * 12;
+    const year1Total = year1AnnualRent + year1AnnualService + finalCalculatedCaution + finalCalculatedLegal;
+
+    // Year 2: renewal period (12 months starting from entryDate + 12 months)
+    const renewalStart = new Date(billingStart);
+    renewalStart.setMonth(renewalStart.getMonth() + 12);
+    const year2RentCalc = calculateEffectiveRent(tenant.baseRent2024 || tenant.rentAmount, renewalStart, 12, false, rentOrigin);
+    const year2ServiceCalc = calculateEffectiveRent(tenant.baseServiceCharge2024 || tenant.serviceChargeAmount, renewalStart, 12, false, rentOrigin);
+    const year2Total = year2RentCalc.totalAmount + year2ServiceCalc.totalAmount;
+
+    const yearlyBreakdown = {
+      year1: {
+        label: 'Current Year',
+        billingStart: billingStart,
+        billingEnd: renewalStart,
+        monthlyRent: currentCalculatedRent,
+        monthlyServiceCharge: currentCalculatedService,
+        annualRent: year1AnnualRent,
+        annualServiceCharge: year1AnnualService,
+        ...(finalCalculatedCaution > 0 && { cautionFee: finalCalculatedCaution }),
+        ...(finalCalculatedLegal > 0 && { legalFee: finalCalculatedLegal }),
+        oneTimeFees: finalCalculatedCaution + finalCalculatedLegal,
+        total: year1Total
+      },
+      year2: {
+        label: 'Renewal Year',
+        billingStart: renewalStart,
+        billingEnd: (() => { const d = new Date(renewalStart); d.setMonth(d.getMonth() + 12); return d; })(),
+        monthlyRent: year2RentCalc.finalRent,
+        monthlyServiceCharge: year2ServiceCalc.finalRent,
+        annualRent: year2RentCalc.totalAmount,
+        annualServiceCharge: year2ServiceCalc.totalAmount,
+        oneTimeFees: 0,
+        total: year2Total,
+        rentIncreased: year2RentCalc.finalRent > currentCalculatedRent
+      }
+    };
+
     const overview = {
       name: tenant.tenantName,
       unit: tenant.unit ? tenant.unit.label : 'N/A',
@@ -620,8 +691,8 @@ const getTenant = async (req, res) => {
       phone: tenant.tenantPhone,
 
       // Pricing breakdown
-      rent: currentCalculatedRent, // Dynamic rent based on rule
-      storedRent: tenant.rentAmount, // What is currently in database
+      rent: currentCalculatedRent,
+      storedRent: tenant.rentAmount,
       rentIncreased: currentCalculatedRent > (tenant.baseRent2024 || tenant.rentAmount),
 
       serviceCharge: currentCalculatedService,
@@ -635,13 +706,16 @@ const getTenant = async (req, res) => {
       leaseDurationMonths,
       totalLeaseAmount,
 
+      // Yearly lease cost breakdown
+      yearlyBreakdown,
+
       unitMonthlyPrice: tenant.unit ? tenant.unit.monthlyPrice : null,
       serviceChargeMonthly: tenant.unit ? tenant.unit.serviceChargeMonthly : null,
       unitCautionFee: tenant.unit ? tenant.unit.cautionFee : null,
       unitLegalFee: tenant.unit ? tenant.unit.legalFee : null,
 
       nextDue: tenant.nextDueDate,
-      entryDate: tenant.entryDate,       // Move-in date (for edit form pre-population)
+      entryDate: tenant.entryDate,
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
       typeBadge: tenant.tenantType === 'new' ? 'New' : tenant.tenantType === 'existing' ? 'Existing' : tenant.tenantType === 'renewal' ? 'Renewal' : 'Transfer',
