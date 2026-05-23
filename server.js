@@ -48,6 +48,8 @@ const serverStart = async () => {
 serverStart();
 
 app.set('trust proxy', 1);
+app.set('etag', false);
+app.use((req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())

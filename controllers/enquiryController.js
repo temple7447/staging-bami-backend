@@ -64,7 +64,6 @@ exports.submitEnquiry = async (req, res) => {
 // @route GET /api/enquiries
 // @access Protected
 exports.getEnquiries = async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
   try {
     const { estateId, unitId, status, page = 1, limit = 20, search } = req.query;
 

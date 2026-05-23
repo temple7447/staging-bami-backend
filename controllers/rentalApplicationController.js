@@ -94,7 +94,6 @@ exports.submitApplication = async (req, res) => {
 // @route GET /api/rental-applications
 // @access Protected (admin, superadmin, business_owner, manager)
 exports.getApplications = async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
   try {
     const {
       estateId,

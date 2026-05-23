@@ -1,7 +1,6 @@
 const express = require('express');
 const multer = require('multer');
 const { protect } = require('../middleware/auth');
-const { cache, invalidateCache } = require('../middleware/cache');
 const {
   validateObjectId,
   handleValidationErrors,
@@ -102,7 +101,7 @@ const router = express.Router();
  *       401:
  *         description: Unauthorized
  */
-router.get('/overview/all', protect, cache(300), getOverallEstateOverview); // Cache for 5 minutes
+router.get('/overview/all', protect, getOverallEstateOverview);
 
 /**
  * @swagger
@@ -172,7 +171,7 @@ router.get('/overview/all', protect, cache(300), getOverallEstateOverview); // C
  *       401:
  *         description: Unauthorized
  */
-router.get('/', protect, cache(120), getEstates); // Cache for 2 minutes
+router.get('/', protect, getEstates);
 
 /**
  * @swagger
@@ -204,10 +203,7 @@ router.get('/', protect, cache(120), getEstates); // Cache for 2 minutes
  *       400:
  *         description: Validation error
  */
-router.post('/', protect, validateEstateCreate, handleValidationErrors, async (req, res, next) => {
-  await createEstate(req, res);
-  invalidateCache('/api/estates');
-});
+router.post('/', protect, validateEstateCreate, handleValidationErrors, createEstate);
 
 /**
  * @swagger
@@ -257,7 +253,7 @@ router.post('/', protect, validateEstateCreate, handleValidationErrors, async (r
  *       404:
  *         description: Estate not found
  */
-router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErrors, cache(60), getEstateOverview); // Cache for 1 minute
+router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErrors, getEstateOverview);
 
 /**
  * @swagger
@@ -279,7 +275,7 @@ router.get('/:id/overview', protect, validateObjectId('id'), handleValidationErr
  *       404:
  *         description: Estate not found
  */
-router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, cache(180), getEstate); // Cache for 3 minutes
+router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, getEstate);
 
 
 /**
@@ -314,11 +310,7 @@ router.get('/:id', protect, validateObjectId('id'), handleValidationErrors, cach
  *       404:
  *         description: Estate not found
  */
-router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handleValidationErrors, async (req, res, next) => {
-  await updateEstate(req, res);
-  invalidateCache(`/api/estates/${req.params.id}`);
-  invalidateCache('/api/estates');
-});
+router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handleValidationErrors, updateEstate);
 
 /**
  * @swagger
@@ -340,10 +332,7 @@ router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handle
  *       404:
  *         description: Estate not found
  */
-router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, async (req, res, next) => {
-  await deleteEstate(req, res);
-  invalidateCache('/api/estates');
-});
+router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, deleteEstate);
 
 // --- Estate Image Endpoints ---
 // Upload images directly (multipart, field: "images", up to 10 files)
