@@ -1364,6 +1364,141 @@ const deleteConditionReport = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/units/unit/:unitId/vacancy-scenarios
+ * Projects what happens to a unit's market rate if it stays vacant for 1–5 years,
+ * and what new tenants would pay on arrival — based on the Samfred 2024 pricing rules.
+ *
+ * Rules (from Vacancy_Scenarios_Analysis.docx):
+ *  - Occupied tenants: 26% increase every 2 years
+ *  - Vacant units:     26% increase every 1 year
+ *  - New tenant market rate = max(current occupied rate, current vacant rate)
+ */
+const getVacancyScenarios = async (req, res) => {
+  try {
+    const unit = await Unit.findOne({ _id: req.params.unitId, isActive: true })
+      .populate('estate', 'name')
+      .lean();
+
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Unit not found' });
+    }
+
+    const INCREASE_RATE = 1.26;
+    const RULE_START = new Date('2024-01-01');
+
+    // Anchor: use lastRentIncreaseDate if set, otherwise the creation date or rule start
+    const rentAnchor = unit.lastRentIncreaseDate || unit.createdAt || RULE_START;
+    const serviceAnchor = unit.lastServiceIncreaseDate || unit.createdAt || RULE_START;
+    const baseRent = unit.basePrice2024 || unit.monthlyPrice;
+    const baseService = unit.baseServiceCharge2024 || unit.serviceChargeMonthly;
+
+    // Current occupied rate (what an active tenant pays right now using the 2-year cycle)
+    const now = new Date();
+    const yearsSinceAnchorRent = Math.max(0, (now - rentAnchor) / (365.25 * 24 * 3600 * 1000));
+    const yearsSinceAnchorService = Math.max(0, (now - serviceAnchor) / (365.25 * 24 * 3600 * 1000));
+    const currentOccupiedRentCycles = Math.floor(yearsSinceAnchorRent / 2);
+    const currentOccupiedServiceCycles = Math.floor(yearsSinceAnchorService / 2);
+    const currentOccupiedRent = Math.round(baseRent * Math.pow(INCREASE_RATE, currentOccupiedRentCycles));
+    const currentOccupiedService = Math.round(baseService * Math.pow(INCREASE_RATE, currentOccupiedServiceCycles));
+
+    // Current market rate (what a new tenant pays today if unit is vacant)
+    const currentVacantCyclesRent = Math.floor(yearsSinceAnchorRent / 1);
+    const currentVacantCyclesService = Math.floor(yearsSinceAnchorService / 1);
+    const currentVacantRent = Math.round(baseRent * Math.pow(INCREASE_RATE, currentVacantCyclesRent));
+    const currentVacantService = Math.round(baseService * Math.pow(INCREASE_RATE, currentVacantCyclesService));
+    const currentMarketRent = Math.max(currentOccupiedRent, currentVacantRent);
+    const currentMarketService = Math.max(currentOccupiedService, currentVacantService);
+
+    // Project 1–5 years of vacancy from today
+    const scenarios = [];
+    for (let vacantYears = 1; vacantYears <= 5; vacantYears++) {
+      const futureYear = now.getFullYear() + vacantYears;
+
+      // Occupied rate at that future year (2-year cycle continues from anchor)
+      const totalYearsRent = yearsSinceAnchorRent + vacantYears;
+      const totalYearsService = yearsSinceAnchorService + vacantYears;
+      const futureOccupiedCyclesRent = Math.floor(totalYearsRent / 2);
+      const futureOccupiedCyclesService = Math.floor(totalYearsService / 2);
+      const futureOccupiedRent = Math.round(baseRent * Math.pow(INCREASE_RATE, futureOccupiedCyclesRent));
+      const futureOccupiedService = Math.round(baseService * Math.pow(INCREASE_RATE, futureOccupiedCyclesService));
+
+      // Vacant rate at that future year (1-year cycle from today's market rate as base)
+      // Per the business rules, vacancy inflates from the current market rate each year
+      const futureVacantRent = Math.round(currentMarketRent * Math.pow(INCREASE_RATE, vacantYears));
+      const futureVacantService = Math.round(currentMarketService * Math.pow(INCREASE_RATE, vacantYears));
+
+      // New tenant market rate = max(occupied, vacant)
+      const marketRent = Math.max(futureOccupiedRent, futureVacantRent);
+      const marketService = Math.max(futureOccupiedService, futureVacantService);
+
+      scenarios.push({
+        vacantYears,
+        arrivalYear: futureYear,
+        occupiedRate: {
+          monthly: { rent: futureOccupiedRent, serviceCharge: futureOccupiedService },
+          annual: { rent: futureOccupiedRent * 12, serviceCharge: futureOccupiedService * 12 }
+        },
+        vacantRate: {
+          monthly: { rent: futureVacantRent, serviceCharge: futureVacantService },
+          annual: { rent: futureVacantRent * 12, serviceCharge: futureVacantService * 12 }
+        },
+        newTenantWouldPay: {
+          monthlyRent: marketRent,
+          monthlyServiceCharge: marketService,
+          annualRent: marketRent * 12,
+          annualServiceCharge: marketService * 12,
+          totalFirstYear: (marketRent + marketService) * 12,
+          increaseFromToday: `${(((marketRent / currentMarketRent) - 1) * 100).toFixed(1)}%`
+        }
+      });
+    }
+
+    // Year-by-year breakdown table (for display)
+    const yearByYear = [];
+    for (let y = 0; y <= 5; y++) {
+      const yearLabel = now.getFullYear() + y;
+      const totalYearsRent = yearsSinceAnchorRent + y;
+      const occupiedCycles = Math.floor(totalYearsRent / 2);
+      const vacantCycles = y;
+      const occRent = Math.round(baseRent * Math.pow(INCREASE_RATE, occupiedCycles));
+      const vacRent = y === 0 ? currentMarketRent : Math.round(currentMarketRent * Math.pow(INCREASE_RATE, vacantCycles));
+      yearByYear.push({
+        year: yearLabel,
+        status: y === 0 ? (unit.status === 'vacant' ? 'Currently Vacant' : 'Currently Occupied') : `Vacant Year ${y}`,
+        occupiedRateMonthly: occRent,
+        vacantRateMonthly: vacRent,
+        marketRateMonthly: Math.max(occRent, vacRent)
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        unit: {
+          id: unit._id,
+          label: unit.label,
+          estate: unit.estate?.name,
+          currentStatus: unit.status,
+          currentMonthlyRent: unit.monthlyPrice,
+          currentMonthlyServiceCharge: unit.serviceChargeMonthly
+        },
+        currentRates: {
+          occupiedRate: { monthly: currentOccupiedRent, annual: currentOccupiedRent * 12 },
+          vacantRate: { monthly: currentVacantRent, annual: currentVacantRent * 12 },
+          marketRate: { monthly: currentMarketRent, annual: currentMarketRent * 12 }
+        },
+        rule: 'Occupied: 26% every 2 years | Vacant: 26% every year | New tenant pays max(occupied, vacant)',
+        yearByYear,
+        scenarios
+      }
+    });
+  } catch (err) {
+    logError('getVacancyScenarios error', err);
+    return res.status(500).json({ success: false, message: 'Error computing vacancy scenarios' });
+  }
+};
+
 module.exports = {
   createUnit,
   getEstateUnits,
@@ -1383,4 +1518,5 @@ module.exports = {
   createConditionReportFromJson,
   getConditionReports,
   deleteConditionReport,
+  getVacancyScenarios,
 };

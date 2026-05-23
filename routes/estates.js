@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { protect } = require('../middleware/auth');
 const { cache, invalidateCache } = require('../middleware/cache');
 const {
@@ -15,7 +16,20 @@ const {
   deleteEstate,
   getEstateOverview,
   getOverallEstateOverview,
+  uploadEstateImages,
+  updateEstateMedia,
+  removeEstateMedia,
 } = require('../controllers/estateController');
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowed.includes(file.mimetype)) return cb(null, true);
+    cb(new Error('Only image files are allowed (jpeg, png, gif, webp)'));
+  }
+});
 
 const router = express.Router();
 
@@ -329,6 +343,24 @@ router.put('/:id', protect, validateObjectId('id'), validateEstateUpdate, handle
 router.delete('/:id', protect, validateObjectId('id'), handleValidationErrors, async (req, res, next) => {
   await deleteEstate(req, res);
   invalidateCache('/api/estates');
+});
+
+// --- Estate Image Endpoints ---
+// Upload images directly (multipart, field: "images", up to 10 files)
+router.post('/:id/media/images', protect, validateObjectId('id'), handleValidationErrors, imageUpload.array('images', 10), uploadEstateImages);
+
+// Attach images by URL (after uploading via /api/upload/image)
+router.patch('/:id/media', protect, validateObjectId('id'), handleValidationErrors, updateEstateMedia);
+
+// Remove images by publicId (also deletes from Cloudinary)
+router.delete('/:id/media', protect, validateObjectId('id'), handleValidationErrors, removeEstateMedia);
+
+// Multer error handler
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError || err.message?.includes('Only')) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next(err);
 });
 
 module.exports = router;

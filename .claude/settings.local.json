@@ -6,7 +6,17 @@
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/models/Issue.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/issueController.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/routes/issues.js)",
-      "Bash(mongosh mongodb+srv://samfredglobal7_db_user:26tauI4tuo0BnNn7@staging-bami.wryxzjv.mongodb.net/ --eval ' *)"
+      "Bash(mongosh mongodb+srv://samfredglobal7_db_user:26tauI4tuo0BnNn7@staging-bami.wryxzjv.mongodb.net/ --eval ' *)",
+      "Read(//Users/temple/Downloads/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(pip3 install *)",
+      "Bash(python3 -m venv /tmp/docx_venv)",
+      "Bash(/tmp/docx_venv/bin/pip install *)",
+      "Bash(/tmp/docx_venv/bin/python3 -c ' *)",
+      "Bash(node -e ' *)",
+      "Bash(node scripts/addEstateImages.js)",
+      "Bash(node scripts/addUnitImages.js)",
+      "Bash(node scripts/checkEnquiriesApps.js)"
     ]
   }
 }

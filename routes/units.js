@@ -24,6 +24,7 @@ const {
   createConditionReportFromJson,
   getConditionReports,
   deleteConditionReport,
+  getVacancyScenarios,
 } = require('../controllers/unitController');
 
 const storage = multer.memoryStorage();
@@ -119,6 +120,9 @@ router.get('/unit/:unitId/condition', protect, validateObjectId('unitId'), handl
 
 // Delete a specific condition report (also removes Cloudinary assets)
 router.delete('/unit/:unitId/condition/:reportId', protect, validateObjectId('unitId'), handleValidationErrors, deleteConditionReport);
+
+// Vacancy scenario projections — shows market rate impact for 1–5 years of vacancy
+router.get('/unit/:unitId/vacancy-scenarios', protect, validateObjectId('unitId'), handleValidationErrors, getVacancyScenarios);
 
 // Multer error handler
 router.use((err, req, res, next) => {

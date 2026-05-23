@@ -35,6 +35,11 @@ const EstateSchema = new mongoose.Schema({
     type: mongoose.Schema.ObjectId,
     ref: 'User'
   }],
+  images: [{
+    url: { type: String, required: true },
+    publicId: { type: String },
+    caption: { type: String }
+  }],
   isActive: {
     type: Boolean,
     default: true

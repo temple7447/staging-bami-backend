@@ -4,6 +4,17 @@ const Transaction = require('../models/Transaction');
 const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
 const { sendActivityToSlack } = require('../utils/slackService');
+const { cloudinary, ensureCloudinaryConfigured } = require('../config/cloudinary');
+
+function uploadBufferToCloudinary(buffer, options) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(options, (err, result) => {
+      if (err) return reject(err);
+      resolve(result);
+    });
+    stream.end(buffer);
+  });
+}
 
 // Create estate
 const createEstate = async (req, res) => {
@@ -732,6 +743,107 @@ const getOverallEstateOverview = async (req, res) => {
   }
 };
 
+// POST /api/estates/:id/media/images
+// Upload one or more images (multipart, field: "images", up to 10) to Cloudinary and attach to estate.
+const uploadEstateImages = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const estate = await Estate.findById(req.params.id);
+    if (!estate) {
+      return res.status(404).json({ success: false, message: 'Estate not found' });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No image files uploaded' });
+    }
+
+    const folder = `${process.env.CLOUDINARY_FOLDER || 'bamihustle'}/estates/${estate._id}/images`;
+    const uploaded = [];
+
+    for (const file of req.files) {
+      const result = await uploadBufferToCloudinary(file.buffer, {
+        folder,
+        resource_type: 'image',
+        transformation: [{ quality: 'auto', fetch_format: 'auto' }]
+      });
+      uploaded.push({ url: result.secure_url, publicId: result.public_id });
+    }
+
+    estate.images.push(...uploaded);
+    estate.updatedBy = req.user._id;
+    await estate.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `${uploaded.length} image(s) uploaded and attached to estate`,
+      uploaded,
+      images: estate.images
+    });
+  } catch (err) {
+    logError('uploadEstateImages error', err);
+    return res.status(err.http_code || 500).json({ success: false, message: err.message || 'Image upload failed' });
+  }
+};
+
+// PATCH /api/estates/:id/media
+// Attach images by URL (after uploading via /api/upload/image).
+// Body: { images: [{url, publicId, caption}], replace: true/false }
+const updateEstateMedia = async (req, res) => {
+  try {
+    const { images, replace = false } = req.body;
+
+    const estate = await Estate.findById(req.params.id);
+    if (!estate) {
+      return res.status(404).json({ success: false, message: 'Estate not found' });
+    }
+
+    if (!images || !Array.isArray(images)) {
+      return res.status(400).json({ success: false, message: 'images must be an array' });
+    }
+
+    const mapped = images
+      .map(img => ({ url: img.url || img.secure_url, publicId: img.publicId || img.public_id || null, caption: img.caption || null }))
+      .filter(img => img.url);
+
+    estate.images = replace ? mapped : [...estate.images, ...mapped];
+    estate.updatedBy = req.user._id;
+    await estate.save();
+
+    return res.status(200).json({ success: true, message: 'Estate images updated', images: estate.images });
+  } catch (err) {
+    logError('updateEstateMedia error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to update estate images' });
+  }
+};
+
+// DELETE /api/estates/:id/media
+// Remove images by publicId and delete from Cloudinary.
+// Body: { imageIds: ['publicId1', ...] }
+const removeEstateMedia = async (req, res) => {
+  try {
+    ensureCloudinaryConfigured();
+
+    const { imageIds = [] } = req.body;
+    const estate = await Estate.findById(req.params.id);
+    if (!estate) {
+      return res.status(404).json({ success: false, message: 'Estate not found' });
+    }
+
+    const toDelete = estate.images.filter(img => img.publicId && imageIds.includes(img.publicId));
+    await Promise.all(toDelete.map(img => cloudinary.uploader.destroy(img.publicId)));
+
+    estate.images = estate.images.filter(img => !imageIds.includes(img.publicId));
+    estate.updatedBy = req.user._id;
+    await estate.save();
+
+    return res.status(200).json({ success: true, message: `${toDelete.length} image(s) removed`, images: estate.images });
+  } catch (err) {
+    logError('removeEstateMedia error', err);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to remove estate images' });
+  }
+};
+
 module.exports = {
   createEstate,
   getEstates,
@@ -740,4 +852,7 @@ module.exports = {
   deleteEstate,
   getEstateOverview,
   getOverallEstateOverview,
+  uploadEstateImages,
+  updateEstateMedia,
+  removeEstateMedia,
 };
