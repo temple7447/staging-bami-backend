@@ -159,7 +159,7 @@ const imageOnly = (req, file, cb) => {
 const imageUpload = multer({ storage: imageStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imageOnly });
 
 // Protected routes (require authentication)
-router.get('/logout', logout);
+router.get('/logout', protect, logout);
 router.get('/me', protect, getMe);
 router.put('/me/avatar', protect, imageUpload.single('file'), uploadAvatar);
 router.post('/me/avatar', protect, imageUpload.single('file'), uploadAvatar);

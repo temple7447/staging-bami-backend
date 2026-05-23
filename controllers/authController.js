@@ -922,7 +922,7 @@ exports.deleteAdmin = async (req, res, next) => {
       });
     }
 
-    await admin.remove();
+    await admin.deleteOne();
 
     res.status(200).json({
       success: true,

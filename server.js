@@ -303,11 +303,6 @@ app.get('/api/test/scheduler-status', (req, res) => {
   res.json(status);
 });
 
-app.get('/api/test/scheduler-status', (req, res) => {
-  const status = getSchedulerStatus();
-  res.json(status);
-});
-
 app.all('*', (req, res) => {
   res.status(404).json({
     success: false,
