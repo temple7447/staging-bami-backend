@@ -69,7 +69,7 @@ exports.getEnquiries = async (req, res) => {
 
     const filter = { isActive: true };
 
-    if (!['superadmin', 'admin'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       const ownedEstates = await Estate.find({ owner: req.user._id, isActive: true }).select('_id').lean();
       const estateIds = ownedEstates.map(e => e._id);
 
@@ -133,7 +133,7 @@ exports.getEnquiry = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Enquiry not found' });
     }
 
-    if (!['superadmin', 'admin'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       const estateOwnerId = enquiry.estate?.owner?.toString();
       if (estateOwnerId !== req.user._id.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorised to view this enquiry' });
@@ -171,7 +171,7 @@ exports.updateEnquiryStatus = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Enquiry not found' });
     }
 
-    if (!['superadmin', 'admin'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       const estateOwnerId = enquiry.estate?.owner?.toString();
       if (estateOwnerId !== req.user._id.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorised to update this enquiry' });
@@ -203,7 +203,7 @@ exports.deleteEnquiry = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Enquiry not found' });
     }
 
-    if (!['superadmin', 'admin'].includes(req.user.role)) {
+    if (!['super_admin', 'admin'].includes(req.user.role)) {
       const estateOwnerId = enquiry.estate?.owner?.toString();
       if (estateOwnerId !== req.user._id.toString()) {
         return res.status(403).json({ success: false, message: 'Not authorised to delete this enquiry' });
