@@ -815,6 +815,7 @@ const getPublicListings = async (req, res) => {
       bedrooms,
       bathrooms,
       search,
+      estateId,
     } = req.query;
 
     const filter = {
@@ -822,6 +823,7 @@ const getPublicListings = async (req, res) => {
       status: 'vacant'
     };
 
+    if (estateId) filter.estate = estateId;
     if (category) filter.category = category;
     if (listingType) filter.listingType = listingType;
     if (bedrooms) filter.bedrooms = { $gte: parseInt(bedrooms) };
@@ -844,7 +846,7 @@ const getPublicListings = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [units, total] = await Promise.all([
       Unit.find(filter)
-        .populate('estate', 'name')
+        .populate('estate', 'name description images')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit)),
@@ -868,6 +870,44 @@ const getPublicListings = async (req, res) => {
       message: 'Error fetching properties',
       error: error.message
     });
+  }
+};
+
+/**
+ * List all estates that have at least one vacant unit (public, no auth)
+ */
+const getPublicEstates = async (req, res) => {
+  try {
+    const Estate = require('../models/Estate');
+
+    // Find all unique estate IDs that have at least one vacant, active unit
+    const estateIds = await Unit.distinct('estate', { isActive: true, status: 'vacant' });
+
+    const estates = await Estate.find({ _id: { $in: estateIds }, isActive: true })
+      .select('name description images')
+      .sort({ name: 1 });
+
+    // Attach vacant unit count per estate
+    const counts = await Unit.aggregate([
+      { $match: { isActive: true, status: 'vacant', estate: { $in: estateIds } } },
+      { $group: { _id: '$estate', count: { $sum: 1 } } }
+    ]);
+    const countMap = {};
+    counts.forEach(c => { countMap[String(c._id)] = c.count; });
+
+    const data = estates.map(e => ({
+      _id: e._id,
+      id: e._id,
+      name: e.name,
+      description: e.description,
+      images: e.images,
+      vacantUnits: countMap[String(e._id)] || 0,
+    }));
+
+    res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    logError('GET /api/public/estates', error);
+    res.status(500).json({ success: false, message: 'Error fetching estates', error: error.message });
   }
 };
 
@@ -1508,6 +1548,7 @@ module.exports = {
   assignTenantToUnit,
   removeTenantFromUnit,
   getPublicListings,
+  getPublicEstates,
   getPublicListingDetail,
   deleteUnit,
   uploadUnitImages,
