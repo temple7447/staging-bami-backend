@@ -633,6 +633,18 @@ const getTenant = async (req, res) => {
       }
     }
 
+    // Fix stored nextDueDate if it equals entryDate (created by old bug where fallback was entryDate)
+    if (tenant.entryDate) {
+      const entryMs = new Date(tenant.entryDate).getTime();
+      const dueMs = tenant.nextDueDate ? new Date(tenant.nextDueDate).getTime() : 0;
+      if (!tenant.nextDueDate || dueMs <= entryMs) {
+        const corrected = new Date(tenant.entryDate);
+        corrected.setMonth(corrected.getMonth() + 12);
+        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate: corrected });
+        tenant.nextDueDate = corrected;
+      }
+    }
+
     // Calculate total duration in months for the entire lease (from move-in to next due date)
     let leaseDurationMonths = 0;
     let totalLeaseAmount = 0;
@@ -1803,6 +1815,18 @@ async function getMyTenant(req, res) {
 
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'No tenant record found for this account' });
+    }
+
+    // Fix nextDueDate if it was incorrectly stored as entryDate (legacy bug)
+    if (tenant.entryDate) {
+      const entryMs = new Date(tenant.entryDate).getTime();
+      const dueMs = tenant.nextDueDate ? new Date(tenant.nextDueDate).getTime() : 0;
+      if (!tenant.nextDueDate || dueMs <= entryMs) {
+        const corrected = new Date(tenant.entryDate);
+        corrected.setMonth(corrected.getMonth() + 12);
+        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate: corrected });
+        tenant.nextDueDate = corrected;
+      }
     }
 
     const unpaidCount = await BillingItem.countDocuments({

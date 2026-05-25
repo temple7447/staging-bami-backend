@@ -109,11 +109,17 @@ const getTenantOverview = async (userId) => {
   };
 
   if (tenant) {
-    // Auto-calculate nextDueDate if missing (backward compatibility)
+    // Auto-calculate nextDueDate if missing or equal to entryDate (bug: old records defaulted to entryDate)
     let nextDueDate = tenant.nextDueDate;
-    if (!nextDueDate && tenant.entryDate) {
-      nextDueDate = new Date(tenant.entryDate);
-      nextDueDate.setMonth(nextDueDate.getMonth() + 12);
+    if (tenant.entryDate) {
+      const entryMs = new Date(tenant.entryDate).getTime();
+      const dueMs = nextDueDate ? new Date(nextDueDate).getTime() : 0;
+      if (!nextDueDate || dueMs <= entryMs) {
+        nextDueDate = new Date(tenant.entryDate);
+        nextDueDate.setMonth(nextDueDate.getMonth() + 12);
+        // Persist the correction so the stored record stays in sync
+        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate });
+      }
     }
 
     // Apartment info
