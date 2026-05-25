@@ -125,9 +125,16 @@ const createTenant = async (req, res) => {
       });
     }
 
-    // Use admin-provided nextDueDate if given; otherwise default to entryDate.
+    // Compute nextDueDate: use explicit value if provided, otherwise entryDate + durationMonths.
     // Normalize to midnight UTC so the time component never drifts across payments.
-    const _rawDue = parsedNextDueDate || parsedEntryDate || new Date();
+    const anchor = parsedEntryDate || new Date();
+    let _rawDue;
+    if (parsedNextDueDate) {
+      _rawDue = parsedNextDueDate;
+    } else {
+      const months = durationMonths ?? 12;
+      _rawDue = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + months, anchor.getUTCDate()));
+    }
     const effectiveNextDueDate = new Date(Date.UTC(_rawDue.getUTCFullYear(), _rawDue.getUTCMonth(), _rawDue.getUTCDate()));
 
     // Optionally create or link a user account for tenant
