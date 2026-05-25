@@ -836,11 +836,22 @@ const getPublicListings = async (req, res) => {
     }
 
     if (search) {
-      filter.$or = [
+      // Find estate IDs matching the search term so we can include estate name in results
+      const matchingEstates = await Estate.find(
+        { name: new RegExp(search, 'i'), isActive: true },
+        '_id'
+      ).lean();
+      const matchingEstateIds = matchingEstates.map(e => e._id);
+
+      const textConditions = [
         { label: new RegExp(search, 'i') },
         { streetAddress: new RegExp(search, 'i') },
-        { description: new RegExp(search, 'i') }
+        { description: new RegExp(search, 'i') },
       ];
+      if (matchingEstateIds.length > 0) {
+        textConditions.push({ estate: { $in: matchingEstateIds } });
+      }
+      filter.$or = textConditions;
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);

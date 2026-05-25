@@ -30,6 +30,7 @@ const {
   listMyHistory,
   paySelectedBillingItems,
   getQuarterlyRentByDueMonth,
+  getMyBillingItems,
 } = require('../controllers/tenantController');
 
 // List tenants (optionally filter by estateId)
@@ -38,7 +39,10 @@ router.get('/:quarter(Q[1-4]|6_months)', protect, getTenants); // Path param for
 router.post('/', protect, validateTenantCreate, handleValidationErrors, createTenant);
 
 // Special routes (must be before /:id routes)
+router.get('/me', protect, getMyTenant);
 router.get('/me/history', protect, listMyHistory);
+router.get('/me/billing', protect, getMyBillingItems);
+router.post('/me/avatar', protect, imageUpload.single('file'), uploadMyAvatar);
 router.post('/me/billing/pay', protect, paySelectedBillingItems);
 
 // Single tenant ops - parameterized routes

@@ -1785,6 +1785,90 @@ async function paySelectedBillingItems(req, res) {
 }
 
 
+// @desc    Get logged-in user's own tenant record
+// @route   GET /api/tenants/me
+// @access  Private (tenant)
+async function getMyTenant(req, res) {
+  try {
+    const tenant = await Tenant.findOne({ user: req.user._id, isActive: true })
+      .populate('estate', 'name description images address')
+      .populate('unit', 'label category bedrooms bathrooms monthlyPrice floor');
+
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'No tenant record found for this account' });
+    }
+
+    const unpaidCount = await BillingItem.countDocuments({
+      tenant: tenant._id,
+      status: { $in: ['pending', 'overdue'] },
+      isActive: true,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...tenant.toObject(),
+        unpaidBillingCount: unpaidCount,
+      },
+    });
+  } catch (err) {
+    logError('GET /api/tenants/me', err, { userId: req.user?._id });
+    res.status(500).json({ success: false, message: 'Server error fetching tenant record' });
+  }
+}
+
+// @desc    Upload avatar for the logged-in tenant's own profile
+// @route   POST /api/tenants/me/avatar
+// @access  Private (tenant)
+async function uploadMyAvatar(req, res) {
+  try {
+    const tenant = await Tenant.findOne({ user: req.user._id, isActive: true });
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'No tenant record found' });
+    }
+    // Delegate to uploadTenantAvatar logic by forwarding req.params.id
+    req.params.id = tenant._id.toString();
+    return uploadTenantAvatar(req, res);
+  } catch (err) {
+    logError('POST /api/tenants/me/avatar', err, { userId: req.user?._id });
+    res.status(500).json({ success: false, message: 'Server error uploading avatar' });
+  }
+}
+
+// @desc    Get quarterly rent breakdown by due month
+// @route   GET /api/tenants/:id/quarterly-rent
+// @access  Private
+async function getQuarterlyRentByDueMonth(req, res) {
+  try {
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) {
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
+    }
+
+    const transactions = await Transaction.find({ tenant: tenant._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Group by quarter (month)
+    const byMonth = {};
+    for (const tx of transactions) {
+      const d = new Date(tx.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!byMonth[key]) byMonth[key] = { month: key, total: 0, count: 0 };
+      byMonth[key].total += tx.amount || 0;
+      byMonth[key].count += 1;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: Object.values(byMonth).sort((a, b) => b.month.localeCompare(a.month)),
+    });
+  } catch (err) {
+    logError('GET /api/tenants/:id/quarterly-rent', err, { id: req.params.id });
+    res.status(500).json({ success: false, message: 'Server error fetching quarterly rent data' });
+  }
+}
+
 module.exports = {
   createTenant,
   getTenants,
@@ -1797,7 +1881,10 @@ module.exports = {
   listTransactions,
   listBillingItems,
   uploadTenantAvatar,
+  uploadMyAvatar,
+  getMyTenant,
   listMyHistory,
   getMyBillingItems,
   paySelectedBillingItems,
+  getQuarterlyRentByDueMonth,
 };

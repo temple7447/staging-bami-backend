@@ -97,6 +97,23 @@ exports.markAllAsRead = async (req, res) => {
     }
 };
 
+// @desc    Get unread notification count only (lightweight, for badge)
+// @route   GET /api/notifications/count
+// @access  Private
+exports.getNotificationCount = async (req, res) => {
+    try {
+        const unreadCount = await Notification.countDocuments({
+            user: req.user.id,
+            isRead: false,
+            isActive: true,
+        });
+        res.status(200).json({ success: true, unreadCount });
+    } catch (err) {
+        console.error('Get notification count error:', err);
+        res.status(500).json({ success: false, message: 'Server error fetching notification count' });
+    }
+};
+
 // @desc    Delete notification
 // @route   DELETE /api/notifications/:id
 // @access  Private
