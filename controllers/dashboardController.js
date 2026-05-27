@@ -109,17 +109,18 @@ const getTenantOverview = async (userId) => {
   };
 
   if (tenant) {
-    // Auto-calculate nextDueDate if missing or equal to entryDate (bug: old records defaulted to entryDate)
+    // Reconcile nextDueDate from completed rent payments (fixes any bad stored values).
+    // When no payments exist yet, display entryDate+12 as the expected lease end.
+    const { reconcileNextDueDate } = require('./tenantController');
+    const corrected = await reconcileNextDueDate(tenant, Payment);
+    if (corrected) tenant.nextDueDate = corrected;
+
+    // Before first payment, nextDueDate == entryDate (payment due on move-in).
+    // Show entryDate+12 as display-only expected lease end without saving to DB.
     let nextDueDate = tenant.nextDueDate;
-    if (tenant.entryDate) {
-      const entryMs = new Date(tenant.entryDate).getTime();
-      const dueMs = nextDueDate ? new Date(nextDueDate).getTime() : 0;
-      if (!nextDueDate || dueMs <= entryMs) {
-        nextDueDate = new Date(tenant.entryDate);
-        nextDueDate.setMonth(nextDueDate.getMonth() + 12);
-        // Persist the correction so the stored record stays in sync
-        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate });
-      }
+    if (tenant.entryDate && nextDueDate && new Date(nextDueDate).getTime() <= new Date(tenant.entryDate).getTime()) {
+      nextDueDate = new Date(tenant.entryDate);
+      nextDueDate.setMonth(nextDueDate.getMonth() + 12);
     }
 
     // Apartment info

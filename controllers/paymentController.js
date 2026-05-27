@@ -80,20 +80,24 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
     false
   ) : 0;
 
-  // Calculate lease duration in months
-  let durationMonths = 12; // Default
-  if (tenant.entryDate && tenant.nextDueDate) {
-    const entry = new Date(tenant.entryDate);
-    const nextDue = new Date(tenant.nextDueDate);
-    durationMonths = Math.max(1, (nextDue.getFullYear() - entry.getFullYear()) * 12 + (nextDue.getMonth() - entry.getMonth()));
-  }
+  // Tenancy duration is always 1 year (yearly contract system)
+  const durationMonths = 12;
 
-  // Calculate total stay from entry to now
+  // Tenant Total Stay = number of completed rent payment cycles
+  // Rent may be paid as 'rent', 'bundle', or 'initial' — count any that cover rent
   let totalStayYears = 1;
-  if (tenant.entryDate) {
-    const entry = new Date(tenant.entryDate);
-    const now = new Date();
-    totalStayYears = Math.max(1, Math.ceil(((now.getFullYear() - entry.getFullYear()) * 12 + (now.getMonth() - entry.getMonth())) / 12));
+  if (tenant._id) {
+    const rentPayments = await Payment.find({
+      tenant: tenant._id,
+      paymentType: { $in: ['rent', 'bundle', 'initial'] },
+      paymentStatus: 'completed',
+    }, 'paystackResponse paymentType').lean();
+    const rentCoveringCount = rentPayments.filter(p => {
+      if (p.paymentType === 'rent') return true;
+      const items = p.paystackResponse?.data?.metadata?.billing_items || [];
+      return items.some(i => i.code === 'rent' || i.type === 'rent');
+    }).length;
+    totalStayYears = Math.max(1, rentCoveringCount);
   }
 
   // Samfred receipts always show YEARLY figures (× 12 months) regardless of lease length.
@@ -128,12 +132,10 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   const currentYear = new Date().getFullYear();
   const nextYear = currentYear + 1;
 
-  // Tenancy duration label
-  const tenancyDuration = durationMonths >= 12
-    ? `${Math.floor(durationMonths / 12)} YEAR${Math.floor(durationMonths / 12) > 1 ? 'S' : ''}`
-    : `${durationMonths} MONTH${durationMonths > 1 ? 'S' : ''}`;
+  // Tenancy duration is always 1 YEAR (yearly contract system)
+  const tenancyDuration = '1 YEAR';
 
-  // Total stay ordinal
+  // Total stay ordinal (e.g. "1st YEAR", "2nd YEAR")
   const ordinalSuffix = (n) => {
     const s = ['th', 'st', 'nd', 'rd'];
     const v = n % 100;
@@ -141,10 +143,13 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   };
   const tenantTotalStay = `${ordinalSuffix(totalStayYears)} YEAR`;
 
-  // Year duration
-  const entryYear = tenant.entryDate ? new Date(tenant.entryDate).getFullYear() : currentYear;
-  const dueYear = tenant.nextDueDate ? new Date(tenant.nextDueDate).getFullYear() : nextYear;
-  const yearDuration = `${entryYear} - ${dueYear}`;
+  // Year duration = the current contract period (entryDate + (N-1)*12  →  entryDate + N*12)
+  const entryBase = tenant.entryDate ? new Date(tenant.entryDate) : new Date();
+  const periodStart = new Date(entryBase);
+  periodStart.setMonth(periodStart.getMonth() + (totalStayYears - 1) * 12);
+  const periodEnd = new Date(periodStart);
+  periodEnd.setMonth(periodEnd.getMonth() + 12);
+  const yearDuration = `${periodStart.getFullYear()} - ${periodEnd.getFullYear()}`;
 
   return {
     paymentDate,
@@ -1638,6 +1643,11 @@ const getTenantReceipts = async (req, res) => {
     if (!tenant) {
       return res.status(404).json({ success: false, message: 'Tenant profile not found' });
     }
+
+    // Reconcile nextDueDate so receipts show the correct expiry date
+    const { reconcileNextDueDate } = require('./tenantController');
+    const corrected = await reconcileNextDueDate(tenant, Payment);
+    if (corrected) tenant.nextDueDate = corrected;
 
     const payments = await Payment.find({
       tenant: tenant._id,

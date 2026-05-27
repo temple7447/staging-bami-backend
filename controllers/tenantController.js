@@ -13,7 +13,6 @@ const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
 const { sendActivityToSlack } = require('../utils/slackService');
 const { distributePayment } = require('../utils/distributionService');
-const paystackService = require('../utils/paystackService');
 
 // Generate a random alphanumeric password of given length (at least one letter and one digit)
 function generateTempPassword(len = 6) {
@@ -125,16 +124,10 @@ const createTenant = async (req, res) => {
       });
     }
 
-    // Compute nextDueDate: use explicit value if provided, otherwise entryDate + durationMonths.
-    // Normalize to midnight UTC so the time component never drifts across payments.
-    const anchor = parsedEntryDate || new Date();
-    let _rawDue;
-    if (parsedNextDueDate) {
-      _rawDue = parsedNextDueDate;
-    } else {
-      const months = durationMonths ?? 12;
-      _rawDue = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + months, anchor.getUTCDate()));
-    }
+    // nextDueDate starts at entryDate (rent is due on move-in day).
+    // The Paystack verification handler advances it by the paid duration on each payment.
+    // Only use an explicit admin override when nextDueDate is provided in the request body.
+    const _rawDue = parsedNextDueDate || parsedEntryDate || new Date();
     const effectiveNextDueDate = new Date(Date.UTC(_rawDue.getUTCFullYear(), _rawDue.getUTCMonth(), _rawDue.getUTCDate()));
 
     // Optionally create or link a user account for tenant
@@ -633,17 +626,9 @@ const getTenant = async (req, res) => {
       }
     }
 
-    // Fix stored nextDueDate if it equals entryDate (created by old bug where fallback was entryDate)
-    if (tenant.entryDate) {
-      const entryMs = new Date(tenant.entryDate).getTime();
-      const dueMs = tenant.nextDueDate ? new Date(tenant.nextDueDate).getTime() : 0;
-      if (!tenant.nextDueDate || dueMs <= entryMs) {
-        const corrected = new Date(tenant.entryDate);
-        corrected.setMonth(corrected.getMonth() + 12);
-        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate: corrected });
-        tenant.nextDueDate = corrected;
-      }
-    }
+    // Reconcile nextDueDate from completed rent payments so stale/wrong stored values self-correct.
+    const reconciledDueDate = await reconcileNextDueDate(tenant, Payment);
+    if (reconciledDueDate) tenant.nextDueDate = reconciledDueDate;
 
     // Calculate total duration in months for the entire lease (from move-in to next due date)
     let leaseDurationMonths = 0;
@@ -1522,7 +1507,8 @@ async function paySelectedBillingItems(req, res) {
             type: 'predefined',
             code: 'rent',
             label: `Rent (${durationMonths} months)`,
-            amount: rentResult.totalAmount
+            amount: rentResult.totalAmount,
+            duration: durationMonths
           });
         } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
           const serviceChargeTotal = tenant.unit.serviceChargeMonthly * durationMonths;
@@ -1531,7 +1517,8 @@ async function paySelectedBillingItems(req, res) {
             type: 'predefined',
             code: 'service_charge',
             label: `Service Charge (${durationMonths} months)`,
-            amount: serviceChargeTotal
+            amount: serviceChargeTotal,
+            duration: durationMonths
           });
         } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
           const paidCaution = await Payment.exists({
@@ -1662,6 +1649,10 @@ async function paySelectedBillingItems(req, res) {
 
       // Auto-advance nextDueDate for rent/service_charge payments
       if (tenant) {
+        // Reconcile before advancing so we always start from the correct base
+        const correctedBase = await reconcileNextDueDate(tenant, Payment);
+        if (correctedBase) tenant.nextDueDate = correctedBase;
+
         const rentMonths = itemsToProcess.some(i => i.code === 'rent') ? durationMonths : 0;
         const serviceMonths = itemsToProcess.some(i => i.code === 'service_charge') ? durationMonths : 0;
         const maxMonths = Math.max(rentMonths, serviceMonths);
@@ -1739,63 +1730,11 @@ async function paySelectedBillingItems(req, res) {
       });
     }
 
-    // Initialize Paystack payment (default)
-    const description = itemsToProcess.map(item => item.label).join(', ');
-
-    const metadata = {
-      user_id: req.user.id,
-      payment_type: 'multiple_billing_items',
-      billing_items: itemsToProcess
-    };
-
-    if (tenant) {
-      metadata.tenant_id = tenant._id.toString();
-      metadata.tenant_name = tenant.tenantName;
-      metadata.estate_id = tenant.estate?._id.toString();
-      metadata.estate_name = tenant.estate?.name;
-      metadata.unit_label = tenant.unit?.label;
-    }
-
-    const paystackResponse = await paystackService.initiatePayment({
-      amount: totalAmount,
-      customerEmail: (tenant && tenant.tenantEmail) || req.user.email,
-      customerName: tenant?.tenantName || req.user.name || req.user.email,
-      description,
-      tenantId: tenant?._id?.toString(),
-      estateId: tenant?.estate?._id?.toString(),
-      metadata
-    });
-
-    if (!paystackResponse.success) {
-      return res.status(500).json({ success: false, message: 'Failed to initialize payment', error: paystackResponse.error });
-    }
-
-    // Create pending payment record
-    await Payment.create({
-      user: req.user.id,
-      tenant: tenant?._id,
-      estate: tenant?.estate?._id,
-      admin: req.user.id,
-      paymentType: resolvedPaymentType,
-      amount: totalAmount,
-      description,
-      paystackReference: paystackResponse.reference,
-      paystackAccessCode: paystackResponse.accessCode,
-      paymentStatus: 'initiated',
-      paymentMethod: 'paystack',
-      createdBy: req.user.id
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Payment initialized successfully',
-      data: {
-        authorizationUrl: paystackResponse.authorizationUrl,
-        accessCode: paystackResponse.accessCode,
-        reference: paystackResponse.reference,
-        amount: totalAmount,
-        items: itemsToProcess
-      }
+    // Only wallet payments are supported. Top up your wallet via bank deposit first.
+    return res.status(400).json({
+      success: false,
+      message: 'Only wallet payments are supported. Please top up your wallet via bank deposit first.',
+      data: { requiredAmount: totalAmount, items: itemsToProcess }
     });
   } catch (err) {
     console.error('Pay selected billing items error:', err);
@@ -1803,6 +1742,60 @@ async function paySelectedBillingItems(req, res) {
   }
 }
 
+
+/**
+ * Reconcile a tenant's nextDueDate from their completed rent payments.
+ * Starting from entryDate, advance by each payment's duration_months.
+ * Returns the corrected Date, or null if no change is needed.
+ * Persists the correction to the DB if the stored value is wrong.
+ */
+async function reconcileNextDueDate(tenant, PaymentModel) {
+  if (!tenant.entryDate) return null;
+
+  // Include rent-only AND bundle/initial payments that contain a rent component
+  const allPayments = await PaymentModel.find({
+    tenant: tenant._id,
+    paymentType: { $in: ['rent', 'bundle', 'initial'] },
+    paymentStatus: 'completed',
+  }, 'paystackResponse paymentDate paymentType').sort({ paymentDate: 1 }).lean();
+
+  // Compute expected due date: entryDate + sum of all rent-covering paid durations
+  let computed = new Date(tenant.entryDate);
+  for (const p of allPayments) {
+    // Metadata lives in paystackResponse.data.metadata (local store) or p.metadata (legacy)
+    const meta = p.paystackResponse?.data?.metadata || p.paystackResponse?.metadata || {};
+    const billingItems = meta.billing_items || [];
+    const hasRent = p.paymentType === 'rent' ||
+      billingItems.some(i => i.code === 'rent' || i.type === 'rent');
+
+    if (!hasRent) continue;
+
+    let months = meta.duration_months || 0;
+    if (!months) {
+      for (const item of billingItems) {
+        if (item.code === 'rent' || item.type === 'rent') {
+          months = Math.max(months, item.duration || 0);
+        }
+      }
+    }
+    if (!months) months = 12; // safe default: 1-year contract
+    computed = new Date(computed);
+    computed.setMonth(computed.getMonth() + months);
+  }
+
+  // Normalise to midnight UTC
+  computed = new Date(Date.UTC(computed.getUTCFullYear(), computed.getUTCMonth(), computed.getUTCDate()));
+
+  const storedMs = tenant.nextDueDate ? new Date(tenant.nextDueDate).getTime() : 0;
+  const computedMs = computed.getTime();
+
+  if (Math.abs(storedMs - computedMs) > 86400000) {
+    // More than 1 day off — persist the correction
+    await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate: computed });
+    return computed;
+  }
+  return null;
+}
 
 // @desc    Get logged-in user's own tenant record
 // @route   GET /api/tenants/me
@@ -1817,17 +1810,8 @@ async function getMyTenant(req, res) {
       return res.status(404).json({ success: false, message: 'No tenant record found for this account' });
     }
 
-    // Fix nextDueDate if it was incorrectly stored as entryDate (legacy bug)
-    if (tenant.entryDate) {
-      const entryMs = new Date(tenant.entryDate).getTime();
-      const dueMs = tenant.nextDueDate ? new Date(tenant.nextDueDate).getTime() : 0;
-      if (!tenant.nextDueDate || dueMs <= entryMs) {
-        const corrected = new Date(tenant.entryDate);
-        corrected.setMonth(corrected.getMonth() + 12);
-        await Tenant.findByIdAndUpdate(tenant._id, { nextDueDate: corrected });
-        tenant.nextDueDate = corrected;
-      }
-    }
+    const reconciledDueDate = await reconcileNextDueDate(tenant, Payment);
+    if (reconciledDueDate) tenant.nextDueDate = reconciledDueDate;
 
     const unpaidCount = await BillingItem.countDocuments({
       tenant: tenant._id,
@@ -1918,4 +1902,5 @@ module.exports = {
   getMyBillingItems,
   paySelectedBillingItems,
   getQuarterlyRentByDueMonth,
+  reconcileNextDueDate,
 };

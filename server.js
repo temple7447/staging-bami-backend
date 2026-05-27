@@ -276,6 +276,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/issues', require('./routes/issues'));
 app.use('/api/rental-applications', require('./routes/rentalApplications'));
 app.use('/api/enquiries', require('./routes/enquiries'));
+app.use('/api/bank-deposits', require('./routes/bankDeposits'));
 
 // Test routes for manual triggers
 const { triggerMonthlyReport, getSchedulerStatus, triggerVendorManagerPayout } = require('./utils/scheduler');
