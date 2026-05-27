@@ -16,7 +16,22 @@
       "Bash(node -e ' *)",
       "Bash(node scripts/addEstateImages.js)",
       "Bash(node scripts/addUnitImages.js)",
-      "Bash(node scripts/checkEnquiriesApps.js)"
+      "Bash(node scripts/checkEnquiriesApps.js)",
+      "Bash(grep -n \"metadata\\\\|paystackResponse\" /Users/temple/Documents/Bami/BamiHustle-backend/models/Payment.js | head -20 && echo \"---\" && ls /Users/temple/Documents/Kwarixpress/frontend/app/)",
+      "Read(//Users/temple/Documents/Kwarixpress/frontend/app/**)",
+      "Bash(ls /Users/temple/Documents/Kwarixpress/frontend/app/dashboard/ && echo \"---\" && find /Users/temple/Documents/Kwarixpress/frontend -type f -name \"*.tsx\" | xargs grep -l \"tenancyDuration\\\\|TENANCY DURATION\\\\|yearDuration\\\\|YEAR DURATION\\\\|totalStay\\\\|Lease End\\\\|leaseEnd\\\\|tenantTotalStay\" 2>/dev/null)",
+      "Read(//Users/temple/Documents/Kwarixpress/frontend/**)",
+      "Bash(find /Users/temple/Documents -maxdepth 3 -type d -name \"frontend\" 2>/dev/null | grep -v node_modules && find /Users/temple/Documents/Bami -maxdepth 3 -type d 2>/dev/null)",
+      "Read(//Users/temple/Documents/**)",
+      "Read(//Users/temple/Documents/Bami/**)",
+      "Bash(node -e \"require\\('./utils/rentCalculator'\\); console.log\\('rentCalculator OK'\\);\")",
+      "Bash(node -e \"require\\('./controllers/tenantController'\\); console.log\\('tenantController OK'\\);\")",
+      "Bash(node -e \"require\\('./controllers/paymentController'\\); console.log\\('paymentController OK'\\);\")",
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend status)",
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend log --oneline -5)",
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend diff --stat HEAD)",
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend add controllers/bankDepositController.js models/BankDeposit.js routes/bankDeposits.js controllers/dashboardController.js controllers/paymentController.js controllers/tenantController.js server.js utils/rentCalculator.js)",
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend commit -m ' *)"
     ]
   }
 }

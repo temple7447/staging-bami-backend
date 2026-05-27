@@ -13,10 +13,7 @@ const {
   adminLookupUser,
   adminCreditWallet
 } = require('../controllers/walletController');
-const {
-  initializeDeposit,
-  verifyDeposit
-} = require('../controllers/paystackController');
+const { requestDepositInstructions } = require('../controllers/bankTransferController');
 
 const router = express.Router();
 
@@ -56,8 +53,7 @@ router.post('/admin/credit', protect, [
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be greater than 0')
 ], handleValidationErrors, adminCreditWallet);
 
-// Paystack deposit flows
-router.post('/paystack/initialize', protect, initializeDeposit);
-router.get('/paystack/verify/:reference', protect, verifyDeposit);
+// Bank transfer deposit: returns UBA account details + reference for narration
+router.post('/deposit/request', protect, requestDepositInstructions);
 
 module.exports = router;
