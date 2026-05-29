@@ -251,8 +251,8 @@ const getTenantOverview = async (userId) => {
       } else {
         if (p.paymentType === 'rent') cyRent += p.amount;
         else if (p.paymentType === 'service_charge') cyServiceCharge += p.amount;
-        else if (['caution_fee', 'legal_fee'].includes(p.paymentType)) cyOther += p.amount;
-        else cyRent += p.amount;
+        else if (['caution_fee', 'legal_fee', 'deposit', 'other'].includes(p.paymentType)) cyOther += p.amount;
+        else cyRent += p.amount; // bundle / initial — covers rent
       }
     }
     const cyTotal = cyRent + cyServiceCharge + cyOther;

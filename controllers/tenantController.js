@@ -1341,12 +1341,24 @@ async function getMyBillingItems(req, res) {
         const tenantType = tenant.tenantType || 'new';
         const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
 
-        // Predefined recurring items (Rent & Service Charge)
-        if (tenant.rentAmount > 0) {
+        // Predefined recurring items (Rent & Service Charge) — use dynamic rate
+        const { getCurrentRent: _getRate } = require('../utils/rentCalculator');
+        const dynamicRent = _getRate(
+          tenant.baseRent2024 || tenant.rentAmount,
+          tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+          false
+        );
+        const dynamicService = _getRate(
+          tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit.serviceChargeMonthly || 0,
+          tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+          false
+        );
+
+        if (dynamicRent > 0) {
           recurring.unshift({
             code: 'rent',
             label: 'Rent',
-            amount: tenant.rentAmount,
+            amount: dynamicRent,
             dueDate: tenant.nextDueDate,
             type: 'recurring',
             category: 'rent',
@@ -1354,11 +1366,11 @@ async function getMyBillingItems(req, res) {
           });
         }
 
-        if (unit.serviceChargeMonthly > 0) {
+        if (dynamicService > 0) {
           recurring.push({
             code: 'service_charge',
             label: 'Service Charge',
-            amount: unit.serviceChargeMonthly,
+            amount: dynamicService,
             dueDate: tenant.nextDueDate,
             type: 'recurring',
             category: 'service',
@@ -1765,8 +1777,12 @@ async function reconcileNextDueDate(tenant, PaymentModel) {
     // Metadata lives in paystackResponse.data.metadata (local store) or p.metadata (legacy)
     const meta = p.paystackResponse?.data?.metadata || p.paystackResponse?.metadata || {};
     const billingItems = meta.billing_items || [];
-    const hasRent = p.paymentType === 'rent' ||
-      billingItems.some(i => i.code === 'rent' || i.type === 'rent');
+    // 'rent' always counts. 'bundle' always covers rent (rent + service charge).
+    // 'initial' counts if billing_items include a rent component (Paystack path)
+    // or if there are no billing_items at all (manual initial payment).
+    const hasRent = p.paymentType === 'rent' || p.paymentType === 'bundle' ||
+      billingItems.some(i => i.code === 'rent' || i.type === 'rent') ||
+      (p.paymentType === 'initial' && billingItems.length === 0);
 
     if (!hasRent) continue;
 

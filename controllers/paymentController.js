@@ -93,8 +93,12 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
       paymentStatus: 'completed',
     }, 'paystackResponse paymentType').lean();
     const rentCoveringCount = rentPayments.filter(p => {
-      if (p.paymentType === 'rent') return true;
-      const items = p.paystackResponse?.data?.metadata?.billing_items || [];
+      // 'rent' and 'bundle' always cover rent
+      if (p.paymentType === 'rent' || p.paymentType === 'bundle') return true;
+      // 'initial': check billing_items for a rent line; if no items (manual), count it
+      const items = p.paystackResponse?.data?.metadata?.billing_items ||
+                    p.paystackResponse?.metadata?.billing_items || [];
+      if (items.length === 0) return true;
       return items.some(i => i.code === 'rent' || i.type === 'rent');
     }).length;
     totalStayYears = Math.max(1, rentCoveringCount);
@@ -1555,7 +1559,12 @@ const recordManualPayment = async (req, res) => {
       createdBy: adminId,
       reconciled: true,
       reconciledDate: new Date(),
-      reconciledBy: adminId
+      reconciledBy: adminId,
+      // Store duration in paystackResponse.metadata so reconcileNextDueDate can read it back
+      // (reconcileNextDueDate reads p.paystackResponse?.metadata?.duration_months)
+      paystackResponse: appliedDurationMonths > 0 ? {
+        metadata: { duration_months: appliedDurationMonths, payment_type: paymentType }
+      } : undefined,
     });
 
     await payment.save();
