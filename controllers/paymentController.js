@@ -119,14 +119,19 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   const nextTotalTenancyRate = nextRentIncrease + nextServiceChargeIncrease;
   const totalTenancyRateIncrease = nextTotalTenancyRate;
 
-  // Next increase date = the day after current lease expires (start of next lease).
-  const nextIncreaseDate = tenant.nextDueDate
-    ? (() => {
-      const d = new Date(tenant.nextDueDate);
-      d.setDate(d.getDate() + 1);
-      return d.toLocaleDateString('en-NG', { month: 'long', day: 'numeric', year: 'numeric' });
-    })()
-    : '-';
+  // Next increase date: 26% increase every 2 years, anchored to entryDate.
+  // Find the next 2-year anniversary of entryDate that is still in the future.
+  const nextIncreaseDate = (() => {
+    const origin = tenant.entryDate ? new Date(tenant.entryDate) : null;
+    if (!origin) return '-';
+    const now = new Date();
+    const msPerYear = 365.25 * 24 * 3600 * 1000;
+    const yearsPassed = (now - origin) / msPerYear;
+    const cyclesPassed = Math.max(0, Math.floor(yearsPassed / 2));
+    const d = new Date(origin);
+    d.setFullYear(d.getFullYear() + (cyclesPassed + 1) * 2);
+    return d.toLocaleDateString('en-NG', { day: 'numeric', month: 'long', year: 'numeric' });
+  })();
 
   // Year calculations
   const currentYear = new Date().getFullYear();
