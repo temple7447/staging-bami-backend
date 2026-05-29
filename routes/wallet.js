@@ -13,7 +13,6 @@ const {
   adminLookupUser,
   adminCreditWallet
 } = require('../controllers/walletController');
-const { requestDepositInstructions } = require('../controllers/bankTransferController');
 
 const router = express.Router();
 
@@ -53,7 +52,5 @@ router.post('/admin/credit', protect, [
   body('amount').isFloat({ min: 1 }).withMessage('Amount must be greater than 0')
 ], handleValidationErrors, adminCreditWallet);
 
-// Bank transfer deposit: returns UBA account details + reference for narration
-router.post('/deposit/request', protect, requestDepositInstructions);
 
 module.exports = router;
