@@ -814,7 +814,9 @@ const updateTenant = async (req, res) => {
       status,
       electricMeterNumber,
       entryDate,
-      nextDueDate
+      nextDueDate,
+      rentOutstanding,
+      serviceChargeOutstanding
     } = req.body;
 
     if (unitLabel !== undefined) tenant.unitLabel = unitLabel;
@@ -875,6 +877,14 @@ const updateTenant = async (req, res) => {
 
     if (nextDueDate !== undefined) {
       tenant.nextDueDate = parseFlexibleDate(nextDueDate);
+    }
+
+    // Allow admin to manually reduce or clear carried-over outstanding balances
+    if (rentOutstanding !== undefined) {
+      tenant.rentOutstanding = Math.max(0, Number(rentOutstanding) || 0);
+    }
+    if (serviceChargeOutstanding !== undefined) {
+      tenant.serviceChargeOutstanding = Math.max(0, Number(serviceChargeOutstanding) || 0);
     }
 
     if (req.user?.id) tenant.updatedBy = req.user.id;
@@ -1380,6 +1390,30 @@ async function getMyBillingItems(req, res) {
             type: 'recurring',
             category: 'service',
             frequency: 'monthly'
+          });
+        }
+
+        // Outstanding onboarding balances — show as payable one-time items for existing tenants
+        if ((tenant.rentOutstanding || 0) > 0) {
+          oneTime.unshift({
+            code: 'outstanding_rent',
+            label: 'Outstanding Rent Balance',
+            amount: tenant.rentOutstanding,
+            type: 'one_time',
+            category: 'fees',
+            frequency: 'once',
+            description: 'Carried-over rent balance from before system registration'
+          });
+        }
+        if ((tenant.serviceChargeOutstanding || 0) > 0) {
+          oneTime.push({
+            code: 'outstanding_service_charge',
+            label: 'Outstanding Service Charge Balance',
+            amount: tenant.serviceChargeOutstanding,
+            type: 'one_time',
+            category: 'fees',
+            frequency: 'once',
+            description: 'Carried-over service charge balance from before system registration'
           });
         }
 

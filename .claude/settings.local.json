@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "*",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/billingController.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
       "Bash(node --check /Users/temple/Documents/Bami/BamiHustle-backend/models/Issue.js)",
@@ -33,6 +32,9 @@
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend diff --stat HEAD)",
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend add controllers/bankDepositController.js models/BankDeposit.js routes/bankDeposits.js controllers/dashboardController.js controllers/paymentController.js controllers/tenantController.js server.js utils/rentCalculator.js)",
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend commit -m ' *)"
+    ],
+    "additionalDirectories": [
+      "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
     ]
   }
 }

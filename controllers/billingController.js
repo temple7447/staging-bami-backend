@@ -398,7 +398,8 @@ async function buildTenantDetail(tenant) {
             recurringMonthly,
             oneTimeUnpaid: unpaidOneTime,
             utilityUnpaid: unpaidUtility,
-            totalOutstanding: unpaidOneTime + unpaidUtility + overdueRecurring,
+            onboardingOutstanding: (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0),
+            totalOutstanding: unpaidOneTime + unpaidUtility + overdueRecurring + (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0),
             overdueAmount: overdueUtility + overdueRecurring,
             isOverdue,
             daysUntilDue: dueIn,
@@ -596,7 +597,8 @@ exports.getBillingSummary = async (req, res) => {
                 const overdueUtility = overdueBills.reduce((s, b) => s + b.amount, 0);
 
                 const overdueRecurring = isOverdue ? recurringMonthly : 0;
-                const totalOutstanding = unpaidFees + unpaidUtility + overdueRecurring;
+                const onboardingOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
+                const totalOutstanding = unpaidFees + unpaidUtility + overdueRecurring + onboardingOutstanding;
                 const overdueAmount = overdueUtility + overdueRecurring;
 
                 if (isOverdue || overdueAmount > 0) estateOverdueCount++;
@@ -620,6 +622,7 @@ exports.getBillingSummary = async (req, res) => {
                     unpaidFees,
                     unpaidBillingItems: tenantBills.length,
                     unpaidUtility,
+                    onboardingOutstanding,
                     totalOutstanding,
                     overdueAmount
                 });

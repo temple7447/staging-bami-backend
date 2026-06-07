@@ -148,7 +148,9 @@ const getTenantOverview = async (userId) => {
       nextDueDate: nextDueDate,
       status: tenant.status,
       tenantType: tenant.tenantType,
-      meterNumber: tenant.electricMeterNumber || 'N/A'
+      meterNumber: tenant.electricMeterNumber || 'N/A',
+      rentOutstanding: tenant.rentOutstanding || 0,
+      serviceChargeOutstanding: tenant.serviceChargeOutstanding || 0,
     };
 
     // Billing Overview
