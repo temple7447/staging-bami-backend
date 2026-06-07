@@ -83,19 +83,22 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   // Tenancy duration is always 1 year (yearly contract system)
   const durationMonths = 12;
 
-  // Tenant Total Stay = number of completed rent payment cycles
-  // Rent may be paid as 'rent', 'bundle', or 'initial' — count any that cover rent
+  // Tenant Total Stay: derive from entryDate when available (works correctly for existing
+  // tenants onboarded with historical dates and no payment records in the system).
+  // Fall back to counting completed rent payment cycles when entryDate is absent.
   let totalStayYears = 1;
-  if (tenant._id) {
+  if (tenant.entryDate) {
+    const msPerYear = 365.25 * 24 * 3600 * 1000;
+    const yearsElapsed = (Date.now() - new Date(tenant.entryDate).getTime()) / msPerYear;
+    totalStayYears = Math.max(1, Math.floor(yearsElapsed) + 1);
+  } else if (tenant._id) {
     const rentPayments = await Payment.find({
       tenant: tenant._id,
       paymentType: { $in: ['rent', 'bundle', 'initial'] },
       paymentStatus: 'completed',
     }, 'paystackResponse paymentType').lean();
     const rentCoveringCount = rentPayments.filter(p => {
-      // 'rent' and 'bundle' always cover rent
       if (p.paymentType === 'rent' || p.paymentType === 'bundle') return true;
-      // 'initial': check billing_items for a rent line; if no items (manual), count it
       const items = p.paystackResponse?.data?.metadata?.billing_items ||
                     p.paystackResponse?.metadata?.billing_items || [];
       if (items.length === 0) return true;
@@ -109,9 +112,11 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   const rentAmount = effectiveRent * annualMultiplier;
   const serviceChargeTotal = effectiveServiceMonthly * annualMultiplier;
 
-  // Outstanding
+  // Outstanding: wallet deficit + any manually recorded outstanding balances from onboarding
   const walletBalance = wallet?.balance || 0;
-  const outstandingBalance = walletBalance < 0 ? Math.abs(walletBalance) : 0;
+  const walletDeficit = walletBalance < 0 ? Math.abs(walletBalance) : 0;
+  const onboardingOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
+  const outstandingBalance = walletDeficit + onboardingOutstanding;
 
   // Current total tenancy rate = yearly rent + yearly service charge
   const currentTotalTenancyRate = rentAmount + serviceChargeTotal;
@@ -170,9 +175,9 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
     tenancyDuration,
     tenantTotalStay,
     rentAmount,
-    rentOutstanding: 0,
+    rentOutstanding: tenant.rentOutstanding || 0,
     serviceCharge: serviceChargeTotal,
-    serviceChargeOutstanding: 0,
+    serviceChargeOutstanding: tenant.serviceChargeOutstanding || 0,
     cautionFee: effectiveCautionFee,
     legalFee: effectiveLegalFee,
     outstandingBalance,

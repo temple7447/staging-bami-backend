@@ -115,6 +115,17 @@ const TenantSchema = new mongoose.Schema({
   baseLegal2024: {
     type: Number
   },
+  // Outstanding balances recorded at onboarding for existing tenants
+  rentOutstanding: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  serviceChargeOutstanding: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   updatedBy: {
     type: mongoose.Schema.ObjectId,
     ref: 'User'

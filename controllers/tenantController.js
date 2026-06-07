@@ -66,7 +66,9 @@ const createTenant = async (req, res) => {
       whatsapp,
       tenantType,
       entryDate,
-      nextDueDate
+      nextDueDate,
+      rentOutstanding,
+      serviceChargeOutstanding
     } = req.body;
 
     if (!unitId) {
@@ -215,6 +217,9 @@ const createTenant = async (req, res) => {
       lastCautionIncreaseDate: unit.lastCautionIncreaseDate || startForIncrease,
       baseLegal2024: unit.baseLegal2024 || unit.legalFee || 0,
       lastLegalIncreaseDate: unit.lastLegalIncreaseDate || startForIncrease,
+      // Outstanding balances for existing tenants (debt that pre-dates system entry)
+      rentOutstanding: (rentOutstanding != null && !isNaN(Number(rentOutstanding))) ? Math.max(0, Number(rentOutstanding)) : 0,
+      serviceChargeOutstanding: (serviceChargeOutstanding != null && !isNaN(Number(serviceChargeOutstanding))) ? Math.max(0, Number(serviceChargeOutstanding)) : 0,
       history: [{ event: 'created', note: 'Tenant record created', meta: { unitId, unitLabel: unit.label, rentAmount: unit.monthlyPrice, serviceCharge: unit.serviceChargeMonthly }, createdBy: req.user?._id }],
       createdBy: req.user?._id,
     });
@@ -407,7 +412,7 @@ const getTenants = async (req, res) => {
 
     if (isQuarterlyView || isValidQuarter) {
       const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate rentOutstanding serviceChargeOutstanding')
         .populate('unit', 'label serviceChargeMonthly')
         .sort({ nextDueDate: 1 })
         .lean();
@@ -466,7 +471,7 @@ const getTenants = async (req, res) => {
     // Add summary calculation for the flat list
     const [items, total, stats] = await Promise.all([
       Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate rentOutstanding serviceChargeOutstanding')
         .populate('estate', 'name')
         .populate('unit', 'label monthlyPrice serviceChargeMonthly')
         .sort({ nextDueDate: 1, createdAt: -1 })

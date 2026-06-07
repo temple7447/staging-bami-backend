@@ -99,6 +99,10 @@ const validateTenantCreate = [
     .optional()
     .isInt({ min: 1, max: 12 }).withMessage('durationMonths must be between 1 and 12')
     .toInt(),
+
+  // Outstanding balances for existing tenants
+  check('rentOutstanding').optional().isFloat({ min: 0 }).withMessage('rentOutstanding must be a non-negative number').toFloat(),
+  check('serviceChargeOutstanding').optional().isFloat({ min: 0 }).withMessage('serviceChargeOutstanding must be a non-negative number').toFloat(),
 ];
 
 const validateTenantUpdate = [
