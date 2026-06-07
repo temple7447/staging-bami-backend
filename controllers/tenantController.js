@@ -1611,6 +1611,22 @@ async function paySelectedBillingItems(req, res) {
               amount: tenant.unit.legalFee
             });
           }
+        } else if (itemId === 'outstanding_rent' && (tenant.rentOutstanding || 0) > 0) {
+          totalAmount += tenant.rentOutstanding;
+          itemsToProcess.push({
+            type: 'predefined',
+            code: 'outstanding_rent',
+            label: 'Outstanding Rent Balance',
+            amount: tenant.rentOutstanding
+          });
+        } else if (itemId === 'outstanding_service_charge' && (tenant.serviceChargeOutstanding || 0) > 0) {
+          totalAmount += tenant.serviceChargeOutstanding;
+          itemsToProcess.push({
+            type: 'predefined',
+            code: 'outstanding_service_charge',
+            label: 'Outstanding Service Charge Balance',
+            amount: tenant.serviceChargeOutstanding
+          });
         }
       }
     }
@@ -1624,12 +1640,13 @@ async function paySelectedBillingItems(req, res) {
     }
 
     // Derive paymentType from actual items selected
+    const validPaymentTypes = new Set(['rent', 'service_charge', 'caution_fee', 'legal_fee']);
     const predefinedCodes = itemsToProcess.filter(i => i.type === 'predefined').map(i => i.code);
     const hasBillingItems = itemsToProcess.some(i => i.type === 'billing_item');
     let resolvedPaymentType;
-    if (!hasBillingItems && predefinedCodes.length === 1) {
+    if (!hasBillingItems && predefinedCodes.length === 1 && validPaymentTypes.has(predefinedCodes[0])) {
       resolvedPaymentType = predefinedCodes[0]; // rent | service_charge | caution_fee | legal_fee
-    } else if (predefinedCodes.length > 0) {
+    } else if (predefinedCodes.some(c => validPaymentTypes.has(c))) {
       resolvedPaymentType = 'bundle';
     } else {
       resolvedPaymentType = 'other';
@@ -1700,6 +1717,18 @@ async function paySelectedBillingItems(req, res) {
 
       // Auto-advance nextDueDate for rent/service_charge payments
       if (tenant) {
+        let tenantDirty = false;
+
+        // Clear onboarding outstanding balances when paid
+        if (itemsToProcess.some(i => i.code === 'outstanding_rent')) {
+          tenant.rentOutstanding = 0;
+          tenantDirty = true;
+        }
+        if (itemsToProcess.some(i => i.code === 'outstanding_service_charge')) {
+          tenant.serviceChargeOutstanding = 0;
+          tenantDirty = true;
+        }
+
         // Reconcile before advancing so we always start from the correct base
         const correctedBase = await reconcileNextDueDate(tenant, Payment);
         if (correctedBase) tenant.nextDueDate = correctedBase;
@@ -1721,6 +1750,10 @@ async function paySelectedBillingItems(req, res) {
             meta: { rentMonths, serviceMonths, oldDueDate, newDueDate, paymentId: payment._id },
             createdBy: req.user.id
           });
+          tenantDirty = true;
+        }
+
+        if (tenantDirty) {
           await tenant.save({ validateBeforeSave: false });
         }
       }
