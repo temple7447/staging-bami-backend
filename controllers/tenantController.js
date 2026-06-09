@@ -405,9 +405,9 @@ const getTenants = async (req, res) => {
         ...tenant,
         nextDueDate: projectedDueDate || tenant.nextDueDate,
         currentEffectiveRent: currentPrice,
-        isRentIncreased: currentPrice > rentBase,
+        isRentIncreased: currentPrice > tenant.rentAmount,
         currentEffectiveService: currentService,
-        isServiceIncreased: currentService > serviceBase,
+        isServiceIncreased: currentService > (tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
         currentEffectiveCaution: currentCaution,
         isCautionIncreased: false,
         currentEffectiveLegal: currentLegal,
@@ -421,7 +421,7 @@ const getTenants = async (req, res) => {
 
     if (isQuarterlyView || isValidQuarter) {
       const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount baseRent serviceChargeAmount baseServiceCharge nextDueDate status tenantType unitLabel entryDate createdAt rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel entryDate createdAt rentOutstanding serviceChargeOutstanding')
         .populate('unit', 'label serviceChargeMonthly')
         .sort({ nextDueDate: 1 })
         .lean();
@@ -480,7 +480,7 @@ const getTenants = async (req, res) => {
     // Add summary calculation for the flat list
     const [items, total, stats] = await Promise.all([
       Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount baseRent serviceChargeAmount baseServiceCharge nextDueDate status tenantType unitLabel createdAt entryDate rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt entryDate rentOutstanding serviceChargeOutstanding')
         .populate('estate', 'name')
         .populate('unit', 'label monthlyPrice serviceChargeMonthly')
         .sort({ nextDueDate: 1, createdAt: -1 })
