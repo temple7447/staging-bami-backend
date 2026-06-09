@@ -714,11 +714,11 @@ const getTenant = async (req, res) => {
 
       // Pricing breakdown
       rent: currentCalculatedRent,
-      storedRent: tenant.rentAmount,
+      storedRent: tenant.baseRent2024 || tenant.rentAmount,
       rentIncreased: currentCalculatedRent > (tenant.baseRent2024 || tenant.rentAmount),
 
       serviceCharge: currentCalculatedService,
-      storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
+      storedServiceCharge: tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
       serviceChargeIncreased: currentCalculatedService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
 
       cautionFee: finalCalculatedCaution,
