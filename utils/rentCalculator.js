@@ -44,33 +44,31 @@ const getCurrentRent = (baseAmount, originDate, isVacant) => {
 const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originDate) => {
     const cycleYears = isVacant ? 1 : 2;
     const cycleMonths = cycleYears * 12;
-    const absoluteOrigin = originDate ? new Date(originDate) : new Date(startDate);
+    const start  = new Date(startDate);
+    const origin = originDate ? new Date(originDate) : start;
+
+    // Use integer year/month arithmetic to avoid setMonth day-overflow.
+    // e.g. May 31 + 1 month via setMonth = July 1 (June skipped), breaking cycle counts.
+    const startY  = start.getFullYear(),  startM  = start.getMonth();
+    const originY = origin.getFullYear(), originM = origin.getMonth();
 
     let currentRent = baseAmount;
-    let totalTotal = 0;
+    let totalTotal  = 0;
 
-    // We iterate month by month to handle boundaries accurately
     for (let i = 0; i < months; i++) {
-        const monthDate = new Date(startDate);
-        monthDate.setMonth(monthDate.getMonth() + i);
+        const absMonth = startM + i;
+        const curY = startY + Math.floor(absMonth / 12);
+        const curM = absMonth % 12;
 
-        // Calculate months since origin
-        const totalMonthsSinceOrigin = (monthDate.getFullYear() - absoluteOrigin.getFullYear()) * 12 +
-            (monthDate.getMonth() - absoluteOrigin.getMonth());
+        const monthsSinceOrigin = (curY - originY) * 12 + (curM - originM);
+        const cycles = Math.floor(Math.max(0, monthsSinceOrigin) / cycleMonths);
 
-        const cycles = Math.floor(Math.max(0, totalMonthsSinceOrigin) / cycleMonths);
-
-        // Final monthly rent for this specific month
-        const monthlyRentForThisMonth = Math.round(baseAmount * Math.pow(INCREASE_RATE, cycles));
-
-        totalTotal += monthlyRentForThisMonth;
-        currentRent = monthlyRentForThisMonth; // Track final state
+        const monthlyRent = Math.round(baseAmount * Math.pow(INCREASE_RATE, cycles));
+        totalTotal  += monthlyRent;
+        currentRent  = monthlyRent;
     }
 
-    return {
-        totalAmount: totalTotal,
-        finalRent: currentRent
-    };
+    return { totalAmount: totalTotal, finalRent: currentRent };
 };
 
 /**
