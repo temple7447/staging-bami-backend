@@ -126,11 +126,25 @@ const createTenant = async (req, res) => {
       });
     }
 
-    // nextDueDate starts at entryDate (rent is due on move-in day).
-    // The Paystack verification handler advances it by the paid duration on each payment.
-    // Only use an explicit admin override when nextDueDate is provided in the request body.
-    const _rawDue = parsedNextDueDate || parsedEntryDate || new Date();
-    const effectiveNextDueDate = new Date(Date.UTC(_rawDue.getUTCFullYear(), _rawDue.getUTCMonth(), _rawDue.getUTCDate()));
+    // For new tenants nextDueDate = entryDate (rent is due on move-in day).
+    // For existing/transfer tenants with no explicit nextDueDate, project the entry date
+    // forward by 12-month increments until the next anniversary lands in the future so the
+    // yearly breakdown shows upcoming (not historical) periods and the tenant is not
+    // immediately flagged as overdue upon onboarding.
+    let effectiveNextDueDate;
+    if (parsedNextDueDate) {
+      effectiveNextDueDate = new Date(Date.UTC(parsedNextDueDate.getUTCFullYear(), parsedNextDueDate.getUTCMonth(), parsedNextDueDate.getUTCDate()));
+    } else if (tenantType !== 'new' && parsedEntryDate) {
+      const base = new Date(Date.UTC(parsedEntryDate.getUTCFullYear(), parsedEntryDate.getUTCMonth(), parsedEntryDate.getUTCDate()));
+      const today = new Date();
+      while (base <= today) {
+        base.setUTCFullYear(base.getUTCFullYear() + 1);
+      }
+      effectiveNextDueDate = base;
+    } else {
+      const _rawDue = parsedEntryDate || new Date();
+      effectiveNextDueDate = new Date(Date.UTC(_rawDue.getUTCFullYear(), _rawDue.getUTCMonth(), _rawDue.getUTCDate()));
+    }
 
     // Optionally create or link a user account for tenant
     let userId = undefined;
@@ -600,19 +614,12 @@ const getTenant = async (req, res) => {
 
     // If the dynamic calculation is ahead of stored values, sync them now so the
     // tenant dashboard and admin view always agree without waiting for the scheduler.
-    if (currentCalculatedRent > tenant.rentAmount || currentCalculatedService > tenant.serviceChargeAmount) {
-      await Tenant.findByIdAndUpdate(tenant._id, {
-        rentAmount: currentCalculatedRent,
-        serviceChargeAmount: currentCalculatedService
-      });
-      if (tenant.unit) {
-        const Unit = require('../models/Unit');
-        await Unit.findByIdAndUpdate(tenant.unit._id || tenant.unit, {
-          monthlyPrice: currentCalculatedRent,
-          serviceChargeMonthly: currentCalculatedService
-        });
-      }
-    }
+    // NOTE: We intentionally do NOT auto-sync tenant.rentAmount or unit.monthlyPrice here.
+    // tenant.rentAmount is the ORIGINAL base price at time of onboarding. getCurrentRent()
+    // computes the current rate by applying 26% cycles on top of that base from entryDate.
+    // Overwriting tenant.rentAmount with the increased rate would cause the next call to
+    // compound cycles on an already-increased base, producing a double-increase.
+    // The scheduler (or a dedicated admin action) is the right place to persist rent increases.
 
     // Reconcile nextDueDate from completed rent payments so stale/wrong stored values self-correct.
     const reconciledDueDate = await reconcileNextDueDate(tenant, Payment);
@@ -637,13 +644,22 @@ const getTenant = async (req, res) => {
     const rentBase = tenant.rentAmount;
     const serviceBase = tenant.serviceChargeAmount;
 
-    // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period,
-    // not historical Year-1/Year-2 periods that may already be in the past.
-    const renewalStart = tenant.nextDueDate
+    // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period.
+    // If nextDueDate is in the past (e.g. entry date was used as default), project it
+    // forward by 12-month steps until it lands in the future.
+    let renewalStart = tenant.nextDueDate
       ? new Date(tenant.nextDueDate)
       : (() => { const d = new Date(rentOrigin); d.setFullYear(d.getFullYear() + 1); return d; })();
+    const _now = new Date();
+    if (renewalStart <= _now) {
+      const anchorDate = tenant.entryDate ? new Date(tenant.entryDate) : new Date(rentOrigin);
+      renewalStart = new Date(Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()));
+      while (renewalStart <= _now) {
+        renewalStart.setUTCFullYear(renewalStart.getUTCFullYear() + 1);
+      }
+    }
     const billingStart = new Date(renewalStart);
-    billingStart.setFullYear(billingStart.getFullYear() - 1);
+    billingStart.setUTCFullYear(billingStart.getUTCFullYear() - 1);
 
     // Year 1: the 12-month period the tenant is currently in (ending at nextDueDate)
     const year1RentCalc = calculateEffectiveRent(rentBase, billingStart, 12, false, rentOrigin);
