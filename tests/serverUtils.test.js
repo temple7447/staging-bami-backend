@@ -7,7 +7,7 @@
  *   E01–E07  errorHandler middleware          (middleware/error.js)
  *   A01–A02  apiVersion middleware            (middleware/apiVersion.js)
  *   R01–R03  requestId middleware             (middleware/requestId.js)
- *   C01–C08  cache utilities                 (middleware/cache.js)
+ *   (cache utilities suite removed — cache.js deleted from project)
  *   N01–N04  validateEnv                     (utils/validateEnv.js)
  *   L01–L03  logger helpers                  (utils/logger.js)
  *   PM01–PM05 Payment model methods/virtuals (models/Payment.js)
@@ -175,99 +175,6 @@ describe('requestId middleware', () => {
   test('R03: next() is always called', () => {
     const { next } = runRequestId({ 'x-request-id': 'abc' });
     expect(next).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Suite 4 — cache utilities (in-memory NodeCache)
-// ─────────────────────────────────────────────────────────────────────────────
-describe('cache utilities', () => {
-  const { setCache, getCache, deleteCache, clearCache, invalidateCache, getCacheStats } =
-    require('../middleware/cache');
-
-  beforeEach(() => clearCache());
-
-  // C01 — set then get returns same value
-  test('C01: setCache / getCache round-trip', () => {
-    setCache('testKey', { hello: 'world' });
-    expect(getCache('testKey')).toEqual({ hello: 'world' });
-  });
-
-  // C02 — getCache returns undefined for unknown key
-  test('C02: getCache returns undefined for missing key', () => {
-    expect(getCache('doesNotExist')).toBeUndefined();
-  });
-
-  // C03 — deleteCache removes the key
-  test('C03: deleteCache removes stored key', () => {
-    setCache('toDelete', 42);
-    deleteCache('toDelete');
-    expect(getCache('toDelete')).toBeUndefined();
-  });
-
-  // C04 — clearCache flushes all keys
-  test('C04: clearCache flushes everything', () => {
-    setCache('a', 1);
-    setCache('b', 2);
-    clearCache();
-    expect(getCache('a')).toBeUndefined();
-    expect(getCache('b')).toBeUndefined();
-  });
-
-  // C05 — invalidateCache with wildcard removes matching keys
-  test('C05: invalidateCache with wildcard removes matching keys', () => {
-    setCache('/api/estates/1:user1', 'val1');
-    setCache('/api/estates/2:user1', 'val2');
-    setCache('/api/payments/1:user1', 'val3');
-    const deleted = invalidateCache('/api/estates*');
-    expect(deleted).toBe(2);
-    expect(getCache('/api/estates/1:user1')).toBeUndefined();
-    expect(getCache('/api/payments/1:user1')).toBe('val3');
-  });
-
-  // C06 — getCacheStats returns expected keys
-  test('C06: getCacheStats has hits, misses, keys properties', () => {
-    const stats = getCacheStats();
-    expect(typeof stats.hits).toBe('number');
-    expect(typeof stats.misses).toBe('number');
-    expect(typeof stats.keys).toBe('number');
-  });
-
-  // C07 — cacheMiddleware skips non-GET requests
-  test('C07: cache middleware passes through non-GET requests without caching', () => {
-    const { cache } = require('../middleware/cache');
-    const middleware = cache(60);
-    const next = jest.fn();
-    const req = { method: 'POST', originalUrl: '/api/payments' };
-    middleware(req, {}, next);
-    expect(next).toHaveBeenCalledTimes(1);
-  });
-
-  // C08 — cacheMiddleware stores and returns cached response on second GET
-  test('C08: cache middleware returns cached data on second GET', () => {
-    const { cache } = require('../middleware/cache');
-    const middleware = cache(60);
-
-    // First request — cache miss, intercept res.json to fill cache
-    const next1 = jest.fn();
-    let capturedJson;
-    const res1 = {
-      statusCode: 200,
-      json: jest.fn((data) => { capturedJson = data; })
-    };
-    const req = { method: 'GET', originalUrl: '/api/test-cache', user: { id: 'u1' } };
-    middleware(req, res1, next1);
-    expect(next1).toHaveBeenCalledTimes(1);
-    // Simulate controller calling res.json
-    res1.json({ data: 'fresh' });
-
-    // Second request — cache hit, res.json called immediately without next
-    const next2 = jest.fn();
-    let hitData;
-    const res2 = { json: jest.fn((d) => { hitData = d; }) };
-    middleware(req, res2, next2);
-    expect(hitData).toEqual({ data: 'fresh' });
-    expect(next2).not.toHaveBeenCalled();
   });
 });
 

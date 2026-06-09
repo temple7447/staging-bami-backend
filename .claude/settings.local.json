@@ -31,7 +31,22 @@
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend log --oneline -5)",
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend diff --stat HEAD)",
       "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend add controllers/bankDepositController.js models/BankDeposit.js routes/bankDeposits.js controllers/dashboardController.js controllers/paymentController.js controllers/tenantController.js server.js utils/rentCalculator.js)",
-      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend commit -m ' *)"
+      "Bash(git -C /Users/temple/Documents/Bami/BamiHustle-backend commit -m ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npx jest *)",
+      "Bash(./node_modules/.bin/jest tests/rentCalculator.test.js --verbose)",
+      "Bash(node_modules/.bin/jest tests/rentCalculator.test.js --verbose)",
+      "Bash(node -e 'const s = require\\('\\\\''mongo-sanitize'\\\\''\\); console.log\\(JSON.stringify\\(s\\({ '\\\\''$where'\\\\'': '\\\\''1=1'\\\\'', name: '\\\\''John'\\\\'' }\\)\\)\\); console.log\\(JSON.stringify\\(s\\({ name: { '\\\\''$gt'\\\\'': '\\\\'''\\\\'' }, age: 5 }\\)\\)\\); console.log\\(JSON.stringify\\(s\\({ ok: '\\\\''yes'\\\\'' }\\)\\)\\);' --prefix /Users/temple/Documents/Bami/BamiHustle-backend)",
+      "Bash(node -e 'const s = require\\('\\\\''mongo-sanitize'\\\\''\\); console.log\\(JSON.stringify\\(s\\({ '\\\\''$where'\\\\'': '\\\\''1=1'\\\\'', name: '\\\\''John'\\\\'' }\\)\\)\\); console.log\\(JSON.stringify\\(s\\({ name: { '\\\\''$gt'\\\\'': '\\\\'''\\\\'' }, age: 5 }\\)\\)\\); console.log\\(JSON.stringify\\(s\\({ ok: '\\\\''yes'\\\\'' }\\)\\)\\);')",
+      "Bash(node_modules/.bin/jest tests/businessLogic.test.js --verbose)",
+      "Bash(node_modules/.bin/jest tests/rentCalculator.test.js tests/businessLogic.test.js --verbose)",
+      "Bash(node_modules/.bin/jest tests/serverUtils.test.js --verbose)",
+      "Bash(node -e \"require\\('uuid'\\)\")",
+      "Bash(node_modules/.bin/jest tests/rentCalculator.test.js tests/businessLogic.test.js tests/serverUtils.test.js)",
+      "Bash(node_modules/.bin/jest tests/tenantEndpoints.test.js --verbose)",
+      "Bash(node_modules/.bin/jest tests/)"
     ],
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
