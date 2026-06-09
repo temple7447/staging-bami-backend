@@ -525,8 +525,8 @@ const getTenants = async (req, res) => {
 
 // Get a tenant (supports expand=history,transactions)
 const getTenant = async (req, res) => {
+  const { expand, page = 1, limit = 10 } = req.query;
   try {
-    const { expand, page = 1, limit = 10 } = req.query;
     const includeHistory = expand?.includes('history');
     const includeTx = expand?.includes('transactions');
 

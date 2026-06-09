@@ -46,7 +46,9 @@
       "Bash(node -e \"require\\('uuid'\\)\")",
       "Bash(node_modules/.bin/jest tests/rentCalculator.test.js tests/businessLogic.test.js tests/serverUtils.test.js)",
       "Bash(node_modules/.bin/jest tests/tenantEndpoints.test.js --verbose)",
-      "Bash(node_modules/.bin/jest tests/)"
+      "Bash(node_modules/.bin/jest tests/)",
+      "Bash(sed -n '1501,1560p' /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
+      "Bash(sed -n '1904,1960p' /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)"
     ],
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
