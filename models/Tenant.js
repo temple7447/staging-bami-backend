@@ -48,10 +48,20 @@ const TenantSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Rent amount cannot be negative']
   },
+  baseRent: {
+    type: Number,
+    default: 0,
+    min: [0, 'Base rent cannot be negative']
+  },
   serviceChargeAmount: {
     type: Number,
     default: 0,
     min: [0, 'Service charge amount cannot be negative']
+  },
+  baseServiceCharge: {
+    type: Number,
+    default: 0,
+    min: [0, 'Base service charge cannot be negative']
   },
   tenantType: {
     type: String,

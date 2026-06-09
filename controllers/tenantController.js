@@ -207,7 +207,9 @@ const createTenant = async (req, res) => {
       tenantEmail: emailAddr || undefined,
       tenantPhone: phone || undefined,
       rentAmount: unit.monthlyPrice,
-      serviceChargeAmount: unit.serviceChargeMonthly || 0, // Initial service charge
+      baseRent: unit.monthlyPrice,              // Immutable original base — never updated after creation
+      serviceChargeAmount: unit.serviceChargeMonthly || 0,
+      baseServiceCharge: unit.serviceChargeMonthly || 0, // Immutable original base
       tenantType,
       electricMeterNumber: unit.meterNumber,
       entryDate: parsedEntryDate || new Date(),
@@ -544,14 +546,21 @@ const getTenant = async (req, res) => {
     // Only new tenants owe caution/legal. Renewal/existing tenants already paid these (one-time fees).
     const isApplicable = tenant.tenantType === 'new';
 
+    // Always use the immutable original base (baseRent) so that rent increase cycles are
+    // applied correctly from the original price. Fall back to rentAmount for legacy records
+    // that predate the baseRent field.
+    const rentBase0 = (tenant.baseRent > 0 ? tenant.baseRent : null) || tenant.rentAmount;
+    const serviceBase0 = (tenant.baseServiceCharge > 0 ? tenant.baseServiceCharge : null)
+      || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0;
+
     const currentCalculatedRent = getCurrentRent(
-      tenant.rentAmount,
+      rentBase0,
       tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
 
     const currentCalculatedService = getCurrentRent(
-      tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+      serviceBase0,
       tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
@@ -641,8 +650,8 @@ const getTenant = async (req, res) => {
 
     // --- Yearly lease breakdown ---
     const rentOrigin = tenant.entryDate || tenant.createdAt;
-    const rentBase = tenant.rentAmount;
-    const serviceBase = tenant.serviceChargeAmount;
+    const rentBase = rentBase0;
+    const serviceBase = serviceBase0;
 
     // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period.
     // If nextDueDate is in the past (e.g. entry date was used as default), project it
@@ -710,12 +719,12 @@ const getTenant = async (req, res) => {
 
       // Pricing breakdown
       rent: currentCalculatedRent,
-      storedRent: tenant.rentAmount,
-      rentIncreased: currentCalculatedRent > tenant.rentAmount,
+      storedRent: rentBase0,
+      rentIncreased: currentCalculatedRent > rentBase0,
 
       serviceCharge: currentCalculatedService,
-      storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
-      serviceChargeIncreased: currentCalculatedService > (tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
+      storedServiceCharge: serviceBase0,
+      serviceChargeIncreased: currentCalculatedService > serviceBase0,
 
       cautionFee: finalCalculatedCaution,
       legalFee: finalCalculatedLegal,
@@ -732,7 +741,7 @@ const getTenant = async (req, res) => {
       unitCautionFee: tenant.unit ? tenant.unit.cautionFee : null,
       unitLegalFee: tenant.unit ? tenant.unit.legalFee : null,
 
-      nextDue: tenant.nextDueDate,
+      nextDue: renewalStart,
       entryDate: tenant.entryDate,
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
