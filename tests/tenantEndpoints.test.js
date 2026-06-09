@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * tenantEndpoints.test.js — 33 HTTP-level tests for all tenant endpoints.
+ * tenantEndpoints.test.js — 47 HTTP-level tests for all tenant endpoints.
  * No real database or external services used.
  *
- * T01–T02  Auth protection (no token → 401)
+ * T01–T02  Billing items  GET /:id/billing
  * T03–T05  Input validation (bad ObjectId, missing fields)
  * T06–T12  POST  /api/v1/estates/:estateId/tenants  (createTenant)
  * T13–T15  GET   /api/v1/estates/:estateId/tenants  (getTenants)
@@ -12,8 +12,12 @@
  * T20–T23  PUT   /api/v1/estates/:estateId/tenants/:id  (updateTenant)
  * T24–T26  DELETE /api/v1/estates/:estateId/tenants/:id  (deleteTenant)
  * T27–T29  GET/POST /api/v1/estates/:estateId/tenants/:id/history
- * T30–T31  GET   /api/v1/estates/:estateId/tenants/:id/transactions
- * T32–T33  POST  /api/v1/estates/:estateId/tenants/:id/transactions
+ * T30–T33  GET/POST /api/v1/estates/:estateId/tenants/:id/transactions
+ * T34–T35  GET   /me  (getMyTenant)
+ * T36–T37  GET   /me/history  (listMyHistory)
+ * T38–T40  GET   /me/billing  (getMyBillingItems)
+ * T41–T44  POST  /me/billing/pay  (paySelectedBillingItems)
+ * T45–T47  POST  /:id/avatar  (uploadTenantAvatar)
  */
 
 // ─── mock uuid (ESM package, not loadable by Jest's CJS runner) ──────────────
@@ -64,6 +68,17 @@ jest.mock('../models/Wallet');
 jest.mock('../models/BillingItem');
 jest.mock('../models/Setting');
 
+// ─── cloudinary: no-op so avatar tests don't require real credentials ─────────
+jest.mock('../config/cloudinary', () => ({
+  cloudinary: {
+    uploader: {
+      destroy: jest.fn().mockResolvedValue({}),
+      upload_stream: jest.fn(),
+    },
+  },
+  ensureCloudinaryConfigured: jest.fn(),
+}));
+
 // ─── libs ─────────────────────────────────────────────────────────────────────
 const request    = require('supertest');
 const express    = require('express');
@@ -75,6 +90,8 @@ const Unit        = require('../models/Unit');
 const Payment     = require('../models/Payment');
 const Transaction = require('../models/Transaction');
 const User        = require('../models/User');
+const BillingItem = require('../models/BillingItem');
+const Wallet      = require('../models/Wallet');
 
 // ─── reusable test IDs ────────────────────────────────────────────────────────
 const ESTATE_ID = new mongoose.Types.ObjectId().toHexString();
@@ -152,6 +169,16 @@ beforeEach(() => {
   Payment.aggregate    = jest.fn().mockResolvedValue([]);
   Payment.countDocuments = jest.fn().mockResolvedValue(0);
   Payment.exists       = jest.fn().mockResolvedValue(false);
+  Payment.create       = jest.fn().mockResolvedValue({ _id: new mongoose.Types.ObjectId(), paymentStatus: 'completed' });
+
+  // Default BillingItem mocks
+  BillingItem.find            = jest.fn().mockReturnValue(makeQuery([]));
+  BillingItem.findOne         = jest.fn().mockResolvedValue(null);
+  BillingItem.countDocuments  = jest.fn().mockResolvedValue(0);
+  BillingItem.findByIdAndUpdate = jest.fn().mockResolvedValue(true);
+
+  // Default Wallet mocks
+  Wallet.findOne = jest.fn().mockResolvedValue(null);
 
   // Default Transaction mocks
   Transaction.find         = jest.fn().mockReturnValue(makeQuery([]));
@@ -594,5 +621,202 @@ describe('Transactions — GET/POST /api/v1/estates/:estateId/tenants/:id/transa
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(tenant.save).toHaveBeenCalled(); // nextDueDate advanced
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Suite 10 — getMyTenant (GET /me)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('getMyTenant — GET /api/v1/estates/:estateId/tenants/me', () => {
+
+  // T34 — no tenant record for this user → 404
+  test('T34: GET /me returns 404 when no tenant record found for user', async () => {
+    Tenant.findOne = jest.fn().mockReturnValue(makeQuery(null));
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me`);
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.message).toMatch(/no tenant record/i);
+  });
+
+  // T35 — found → 200 with tenant data and unpaidBillingCount
+  test('T35: GET /me returns 200 with tenant data and unpaidBillingCount', async () => {
+    const tenant = makeTenantDoc({ toObject: () => ({ ...makeTenantDoc() }) });
+    Tenant.findOne = jest.fn().mockReturnValue(makeQuery(tenant));
+    BillingItem.countDocuments = jest.fn().mockResolvedValue(3);
+
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveProperty('unpaidBillingCount', 3);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Suite 11 — listMyHistory (GET /me/history)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('listMyHistory — GET /api/v1/estates/:estateId/tenants/me/history', () => {
+
+  // T36 — no tenant → 404
+  test('T36: GET /me/history returns 404 when tenant record not found', async () => {
+    Tenant.findOne = jest.fn().mockReturnValue(makeQuery(null));
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me/history`);
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/tenant record not found/i);
+  });
+
+  // T37 — returns history in reverse order
+  test('T37: GET /me/history returns 200 with history array reversed', async () => {
+    const tenant = makeTenantDoc({
+      history: [
+        { event: 'created', note: 'First',  createdAt: new Date('2024-01-01') },
+        { event: 'note',    note: 'Second', createdAt: new Date('2024-06-01') },
+      ],
+    });
+    Tenant.findOne = jest.fn().mockReturnValue(makeQuery(tenant));
+
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me/history`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.length).toBe(2);
+    // reversed: latest entry is first
+    expect(res.body.data[0].note).toBe('Second');
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Suite 12 — getMyBillingItems (GET /me/billing)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('getMyBillingItems — GET /api/v1/estates/:estateId/tenants/me/billing', () => {
+
+  // T38 — no billing items and no tenant record → 200 with empty categories
+  test('T38: GET /me/billing returns 200 with empty arrays when no items exist', async () => {
+    BillingItem.find   = jest.fn().mockReturnValue(makeQuery([]));
+    Tenant.findOne     = jest.fn().mockReturnValue(makeQuery(null));
+
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  // T39 — recurring billing item is categorised into the recurring array
+  test('T39: GET /me/billing places recurring items in recurring category', async () => {
+    const recurringItem = {
+      _id: new mongoose.Types.ObjectId(),
+      itemType: 'cleaning_service',
+      label: 'Cleaning Service',
+      amount: 5000,
+      dueDate: new Date(),
+      isRecurring: true,
+      category: 'service',
+      frequency: 'monthly',
+    };
+    BillingItem.find = jest.fn().mockReturnValue(makeQuery([recurringItem]));
+    Tenant.findOne   = jest.fn().mockReturnValue(makeQuery(null));
+
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  // T40 — tenant exists with rent → includes rent in recurring section
+  test('T40: GET /me/billing includes rent in recurring when tenant has rentAmount', async () => {
+    BillingItem.find = jest.fn().mockReturnValue(makeQuery([]));
+    Tenant.findOne   = jest.fn().mockReturnValue(makeQuery(makeTenantDoc({ rentAmount: 35000 })));
+
+    const res = await request(app)
+      .get(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Suite 13 — paySelectedBillingItems (POST /me/billing/pay)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('paySelectedBillingItems — POST /api/v1/estates/:estateId/tenants/me/billing/pay', () => {
+
+  // T41 — invalid durationMonths → 400
+  test('T41: POST /me/billing/pay returns 400 for invalid durationMonths (e.g. 3)', async () => {
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing/pay`)
+      .send({ itemIds: ['rent'], durationMonths: 3 });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/6 or 12 months/i);
+  });
+
+  // T42 — empty itemIds array → 400
+  test('T42: POST /me/billing/pay returns 400 when itemIds is empty array', async () => {
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing/pay`)
+      .send({ itemIds: [] });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/select at least one item/i);
+  });
+
+  // T43 — no valid billing items found → 400
+  test('T43: POST /me/billing/pay returns 400 when itemIds has no matching items', async () => {
+    BillingItem.findOne = jest.fn().mockResolvedValue(null);
+    Tenant.findOne      = jest.fn().mockReturnValue(makeQuery(null));
+
+    const fakeItemId = new mongoose.Types.ObjectId().toHexString();
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing/pay`)
+      .send({ itemIds: [fakeItemId] });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/no valid billing items/i);
+  });
+
+  // T44 — wallet not found → 404
+  test('T44: POST /me/billing/pay returns 404 when wallet not found for user', async () => {
+    BillingItem.findOne = jest.fn().mockResolvedValue(null);
+    const tenant = makeTenantDoc({ rentAmount: 35000 });
+    Tenant.findOne = jest.fn().mockReturnValue(makeQuery(tenant));
+    Wallet.findOne = jest.fn().mockResolvedValue(null);
+
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/me/billing/pay`)
+      .send({ itemIds: ['rent'], paymentMethod: 'wallet' });
+    expect(res.status).toBe(404);
+    expect(res.body.message).toMatch(/wallet not found/i);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Suite 14 — uploadTenantAvatar (POST /:id/avatar)
+// ═════════════════════════════════════════════════════════════════════════════
+describe('uploadTenantAvatar — POST /api/v1/estates/:estateId/tenants/:id/avatar', () => {
+
+  // T45 — tenant not found → 404
+  test('T45: POST /:id/avatar returns 404 when tenant not found', async () => {
+    Tenant.findById = jest.fn().mockReturnValue(makeQuery(null));
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/${TENANT_ID}/avatar`);
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe('Tenant not found');
+  });
+
+  // T46 — no file uploaded → 400
+  test('T46: POST /:id/avatar returns 400 when no image file is uploaded', async () => {
+    Tenant.findById = jest.fn().mockReturnValue(makeQuery(makeTenantDoc()));
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/${TENANT_ID}/avatar`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/no image file/i);
+  });
+
+  // T47 — wrong file type (non-image) → multer 400
+  test('T47: POST /:id/avatar returns 400 for non-image file type', async () => {
+    const res = await request(app)
+      .post(`/api/v1/estates/${ESTATE_ID}/tenants/${TENANT_ID}/avatar`)
+      .attach('file', Buffer.from('fake pdf content'), { filename: 'doc.pdf', contentType: 'application/pdf' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 });
