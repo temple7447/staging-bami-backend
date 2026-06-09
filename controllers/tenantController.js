@@ -379,11 +379,20 @@ const getTenants = async (req, res) => {
 
       const totalMonthlyFees = currentPrice + currentService;
 
-      const dueDate = new Date(tenant.nextDueDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const diffTime = dueDate - today;
-      const daysUntilDue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      // Project nextDueDate forward if it's in the past (same logic as getTenant)
+      let projectedDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
+      const _today = new Date();
+      _today.setHours(0, 0, 0, 0);
+      if (projectedDueDate && projectedDueDate < _today && tenant.entryDate) {
+        const anchor = new Date(tenant.entryDate);
+        projectedDueDate = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate()));
+        while (projectedDueDate <= _today) {
+          projectedDueDate.setUTCFullYear(projectedDueDate.getUTCFullYear() + 1);
+        }
+      }
+
+      const diffTime = projectedDueDate ? projectedDueDate - _today : 0;
+      const daysUntilDue = projectedDueDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
 
       let statusColor = '#4caf50'; // Green (Safe)
       if (daysUntilDue < 0) {
@@ -394,10 +403,11 @@ const getTenants = async (req, res) => {
 
       return {
         ...tenant,
+        nextDueDate: projectedDueDate || tenant.nextDueDate,
         currentEffectiveRent: currentPrice,
-        isRentIncreased: currentPrice > tenant.rentAmount,
+        isRentIncreased: currentPrice > rentBase,
         currentEffectiveService: currentService,
-        isServiceIncreased: currentService > (tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
+        isServiceIncreased: currentService > serviceBase,
         currentEffectiveCaution: currentCaution,
         isCautionIncreased: false,
         currentEffectiveLegal: currentLegal,
@@ -411,7 +421,7 @@ const getTenants = async (req, res) => {
 
     if (isQuarterlyView || isValidQuarter) {
       const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel entryDate createdAt rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount baseRent serviceChargeAmount baseServiceCharge nextDueDate status tenantType unitLabel entryDate createdAt rentOutstanding serviceChargeOutstanding')
         .populate('unit', 'label serviceChargeMonthly')
         .sort({ nextDueDate: 1 })
         .lean();
@@ -470,7 +480,7 @@ const getTenants = async (req, res) => {
     // Add summary calculation for the flat list
     const [items, total, stats] = await Promise.all([
       Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt entryDate rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount baseRent serviceChargeAmount baseServiceCharge nextDueDate status tenantType unitLabel createdAt entryDate rentOutstanding serviceChargeOutstanding')
         .populate('estate', 'name')
         .populate('unit', 'label monthlyPrice serviceChargeMonthly')
         .sort({ nextDueDate: 1, createdAt: -1 })
