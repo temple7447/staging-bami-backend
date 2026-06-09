@@ -507,3 +507,166 @@ describe('Real estate data — Flat 1, Flat 3, Flat 4 receipt validation', () =>
 
 });
 
+// ─── Suite 7: All entry years 2018–2030 — full cycle ladder ─────────────────
+//
+// For every entry year, we verify:
+//   a) getCurrentRent at each 2-year anniversary (cycles 0→1, 1→2, …)
+//   b) calculateEffectiveRent for each annual payment period
+//   c) the dashboard renewal card at the relevant nextDueDate
+//
+// Entry year → increase dates:
+//   2018: 2020, 2022, 2024, 2026, 2028, 2030
+//   2019: 2021, 2023, 2025, 2027, 2029
+//   2020: 2022, 2024, 2026, 2028, 2030
+//   2021: 2023, 2025, 2027, 2029
+//   2022: 2024, 2026, 2028
+//   2023: 2025, 2027
+//   2024: 2026, 2028
+//   2025: 2027, 2029
+//   2026: 2028
+//   2027: 2029
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('All entry years 2018–2030 — cycle ladder', () => {
+
+  const BASE = 35_000;
+
+  /**
+   * Build the full expected cycle ladder for a given entry year (June 1).
+   * Returns array of { checkYear, expectedCycles }.
+   */
+  function cycleLadder(entryYear) {
+    const rows = [];
+    for (let y = entryYear; y <= 2032; y++) {
+      const monthsSince = (y - entryYear) * 12;  // checking June 1 of year y
+      const cycles = Math.floor(monthsSince / 24);
+      rows.push({ checkYear: y, expectedCycles: cycles });
+    }
+    return rows;
+  }
+
+  // For every entry year, verify getCurrentRent at every June 1 up to 2032
+  const entryYears = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030];
+
+  entryYears.forEach(entryYear => {
+    const entry = `${entryYear}-06-01`;
+    const ladder = cycleLadder(entryYear);
+
+    describe(`Entry ${entryYear}`, () => {
+
+      // a) getCurrentRent at each anniversary year
+      ladder.forEach(({ checkYear, expectedCycles }) => {
+        test(`getCurrentRent at ${checkYear}-06-01 → cycle ${expectedCycles} = ₦${increased(BASE, expectedCycles).toLocaleString()}`, () => {
+          withDate(`${checkYear}-06-01`, () => {
+            expect(getCurrentRent(BASE, new Date(entry), false))
+              .toBe(increased(BASE, expectedCycles));
+          });
+        });
+      });
+
+      // b) calculateEffectiveRent: each 12-month annual payment period
+      for (let payYear = entryYear; payYear <= Math.min(entryYear + 8, 2032); payYear++) {
+        const periodStart = `${payYear}-06-01`;
+        // months since entry at period start
+        const startMonths = (payYear - entryYear) * 12;
+        const expectedCycles = Math.floor(startMonths / 24);
+        const expectedTotal  = increased(BASE, expectedCycles) * 12;
+
+        test(`pay 12 months from ${payYear}-06-01 → cycle ${expectedCycles} = ₦${expectedTotal.toLocaleString()}/yr`, () => {
+          const result = calculateEffectiveRent(BASE, new Date(periodStart), 12, false, new Date(entry));
+          // All 12 months of a payment period that starts ON a cycle boundary
+          // are at the same rate. Periods that DON'T cross a boundary are uniform.
+          // A period starting exactly on an anniversary (e.g. Jun 2026 for 2024 entry)
+          // starts at the new cycle for ALL months → no boundary crossing.
+          expect(result.totalAmount).toBe(expectedTotal);
+          expect(result.finalRent).toBe(increased(BASE, expectedCycles));
+        });
+      }
+
+      // c) Dashboard renewal card: nextDueDate = 2 years after entry (first increase)
+      const firstIncreaseYear = entryYear + 2;
+      const nextDue = `${firstIncreaseYear}-06-01`;
+      const cyclesAtRenewal = 1; // the renewal period starts at the first increase
+
+      test(`dashboard renewal card at nextDueDate ${nextDue} → shows increased rate`, () => {
+        const rentOrigin   = new Date(entry);
+        const renewalStart = new Date(nextDue);
+        const billingStart = new Date(renewalStart);
+        billingStart.setFullYear(billingStart.getFullYear() - 1);
+
+        const current = calculateEffectiveRent(BASE, billingStart, 12, false, rentOrigin);
+        const renewal = calculateEffectiveRent(BASE, renewalStart, 12, false, rentOrigin);
+
+        // current period (year before nextDueDate) is still at base rate
+        expect(current.totalAmount).toBe(BASE * 12);
+        expect(current.finalRent).toBe(BASE);
+        // renewal period starts at first increase
+        expect(renewal.totalAmount).toBe(increased(BASE, cyclesAtRenewal) * 12);
+        expect(renewal.finalRent).toBe(increased(BASE, cyclesAtRenewal));
+      });
+
+    });
+  });
+
+});
+
+// ─── Suite 8: Backward compatibility — very old tenants ─────────────────────
+
+describe('Very old tenants — entry years before 2018', () => {
+  const BASE = 35_000;
+  const oldEntries = [
+    { year: 2010, cyclesAt2026: 8 },   // (2026-2010)/2 = 8
+    { year: 2012, cyclesAt2026: 7 },
+    { year: 2014, cyclesAt2026: 6 },
+    { year: 2015, cyclesAt2026: 5 },   // (2026-2015)/2 = 5.5 → floor = 5
+    { year: 2016, cyclesAt2026: 5 },
+    { year: 2017, cyclesAt2026: 4 },   // (2026-2017)/2 = 4.5 → floor = 4
+  ];
+
+  oldEntries.forEach(({ year, cyclesAt2026 }) => {
+    test(`${year} tenant at Jun 2026 → ${cyclesAt2026} cycles = ₦${increased(BASE, cyclesAt2026).toLocaleString()}/month`, () => {
+      withDate('2026-06-01', () => {
+        expect(getCurrentRent(BASE, new Date(`${year}-06-01`), false))
+          .toBe(increased(BASE, cyclesAt2026));
+      });
+    });
+
+    test(`${year} tenant: 12-month payment Jun 2026–May 2027 = ₦${(increased(BASE, cyclesAt2026) * 12).toLocaleString()}`, () => {
+      const result = calculateEffectiveRent(BASE, new Date('2026-06-01'), 12, false, new Date(`${year}-06-01`));
+      expect(result.totalAmount).toBe(increased(BASE, cyclesAt2026) * 12);
+    });
+  });
+});
+
+// ─── Suite 9: Future entry years (onboarding planned ahead) ─────────────────
+
+describe('Future entry years 2026–2030 — first increase date is correct', () => {
+  const BASE = 35_000;
+
+  const futureEntries = [
+    { entry: '2026-01-01', firstIncreaseDate: '2028-01-01', noIncreaseDate: '2027-12-31' },
+    { entry: '2026-06-01', firstIncreaseDate: '2028-06-01', noIncreaseDate: '2028-05-31' },
+    { entry: '2026-09-01', firstIncreaseDate: '2028-09-01', noIncreaseDate: '2028-08-31' },
+    { entry: '2027-01-01', firstIncreaseDate: '2029-01-01', noIncreaseDate: '2028-12-31' },
+    { entry: '2027-06-01', firstIncreaseDate: '2029-06-01', noIncreaseDate: '2029-05-31' },
+    { entry: '2028-01-01', firstIncreaseDate: '2030-01-01', noIncreaseDate: '2029-12-31' },
+    { entry: '2029-06-01', firstIncreaseDate: '2031-06-01', noIncreaseDate: '2031-05-31' },
+    { entry: '2030-01-01', firstIncreaseDate: '2032-01-01', noIncreaseDate: '2031-12-31' },
+  ];
+
+  futureEntries.forEach(({ entry, firstIncreaseDate, noIncreaseDate }) => {
+    test(`Entry ${entry}: no increase day before → base rate`, () => {
+      withDate(noIncreaseDate, () => {
+        expect(getCurrentRent(BASE, new Date(entry), false)).toBe(BASE);
+      });
+    });
+
+    test(`Entry ${entry}: first increase fires on ${firstIncreaseDate}`, () => {
+      withDate(firstIncreaseDate, () => {
+        expect(getCurrentRent(BASE, new Date(entry), false)).toBe(increased(BASE, 1));
+      });
+    });
+  });
+});
+
+
