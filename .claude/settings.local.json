@@ -48,7 +48,8 @@
       "Bash(node_modules/.bin/jest tests/tenantEndpoints.test.js --verbose)",
       "Bash(node_modules/.bin/jest tests/)",
       "Bash(sed -n '1501,1560p' /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
-      "Bash(sed -n '1904,1960p' /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)"
+      "Bash(sed -n '1904,1960p' /Users/temple/Documents/Bami/BamiHustle-backend/controllers/tenantController.js)",
+      "Bash(awk -F: '{print $1}')"
     ],
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"

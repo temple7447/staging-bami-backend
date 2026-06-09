@@ -99,14 +99,6 @@ async function run() {
         ...u,
         estate: ESTATE_ID,
         createdBy: ADMIN_ID,
-        basePrice2024: u.monthlyPrice,
-        lastRentIncreaseDate: new Date(),
-        baseServiceCharge2024: u.serviceChargeMonthly,
-        lastServiceIncreaseDate: new Date(),
-        baseCaution2024: u.cautionFee,
-        lastCautionIncreaseDate: new Date(),
-        baseLegal2024: u.legalFee,
-        lastLegalIncreaseDate: new Date(),
       });
       console.log(`✅ Created: ${unit.label} (ID: ${unit._id})`);
       created++;

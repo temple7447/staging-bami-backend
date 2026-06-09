@@ -282,11 +282,9 @@ const getTenantOverview = async (userId) => {
 
     // Anchor to nextDueDate so existing tenants see their actual current/upcoming periods,
     // not the historical periods that started at entryDate.
-    const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || new Date();
-    // Use baseRent2024 as the immutable original-rate base; rentAmount may have been auto-updated
-    // to the increased rate, which would cause calculateEffectiveRent to double-count cycles.
-    const baseMonthlyRent = tenant.baseRent2024 || tenant.rentAmount || 0;
-    const baseMonthlyService = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || 0;
+    const rentOrigin = tenant.entryDate || new Date();
+    const baseMonthlyRent = tenant.rentAmount || 0;
+    const baseMonthlyService = tenant.serviceChargeAmount || 0;
 
     // Renewal year starts at nextDueDate; current year is the 12-month period ending there.
     const renewalStart = tenant.nextDueDate
@@ -303,13 +301,13 @@ const getTenantOverview = async (userId) => {
     let cyProjectedOther = 0;
     const cyOtherBreakdown = [];
     if (isFirstTime) {
-      if (!paidFees.has('caution_fee') && (unit.cautionFee || tenant.baseCaution2024) > 0) {
-        const fee = unit.cautionFee || tenant.baseCaution2024 || 0;
+      if (!paidFees.has('caution_fee') && unit.cautionFee > 0) {
+        const fee = unit.cautionFee || 0;
         cyProjectedOther += fee;
         cyOtherBreakdown.push({ code: 'caution_fee', label: 'Caution Fee', amount: fee });
       }
-      if (!paidFees.has('legal_fee') && (unit.legalFee || tenant.baseLegal2024) > 0) {
-        const fee = unit.legalFee || tenant.baseLegal2024 || 0;
+      if (!paidFees.has('legal_fee') && unit.legalFee > 0) {
+        const fee = unit.legalFee || 0;
         cyProjectedOther += fee;
         cyOtherBreakdown.push({ code: 'legal_fee', label: 'Legal Fee', amount: fee });
       }

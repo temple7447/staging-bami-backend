@@ -34,15 +34,15 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
 
   // Dynamic rent (same logic as tenant detail view)
   const effectiveRent = getCurrentRent(
-    tenant.baseRent2024 || tenant.rentAmount,
-    tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+    tenant.rentAmount,
+    tenant.entryDate || tenant.createdAt,
     false // Occupied
   );
 
   // Dynamic service charge (monthly)
   const effectiveServiceMonthly = getCurrentRent(
-    tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
-    tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+    tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+    tenant.entryDate || tenant.createdAt,
     false // Occupied
   );
 
@@ -69,14 +69,14 @@ const calculateReceiptData = async (tenant, payment, wallet) => {
   }
 
   const effectiveCautionFee = (isApplicable && !cautionAlreadyPaid) ? getCurrentRent(
-    tenant.baseCaution2024 || tenant.unit?.cautionFee || 0,
-    tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+    tenant.unit?.cautionFee || 0,
+    tenant.entryDate || tenant.createdAt,
     false
   ) : 0;
 
   const effectiveLegalFee = (isApplicable && !legalAlreadyPaid) ? getCurrentRent(
-    tenant.baseLegal2024 || tenant.unit?.legalFee || 0,
-    tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+    tenant.unit?.legalFee || 0,
+    tenant.entryDate || tenant.createdAt,
     false
   ) : 0;
 
@@ -268,7 +268,7 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
 
           // 1. Calculate Rent Component
           const rentBase = tenant.rentAmount || 0;
-          const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+          const rentOrigin = tenant.entryDate || tenant.createdAt;
 
           const rentResult = calculateEffectiveRent(
             rentBase,
@@ -285,7 +285,7 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
 
           if (paymentType === 'rent' || paymentType === 'service_charge') {
             const serviceBase = tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0;
-            const serviceOrigin = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt;
+            const serviceOrigin = tenant.entryDate || tenant.createdAt;
 
             const serviceResult = calculateEffectiveRent(
               serviceBase,
@@ -312,13 +312,13 @@ const initiatePaymentGeneric = (paymentType, isDeposit = false) => {
 
       if (paymentType === 'caution_fee') {
         const { getCurrentRent } = require('../utils/rentCalculator');
-        const base = tenant.baseCaution2024 || tenant.unit?.cautionFee || 0;
-        const origin = tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt;
+        const base = tenant.unit?.cautionFee || 0;
+        const origin = tenant.entryDate || tenant.createdAt;
         amount = getCurrentRent(base, origin, false);
       } else if (paymentType === 'legal_fee') {
         const { getCurrentRent } = require('../utils/rentCalculator');
-        const base = tenant.baseLegal2024 || tenant.unit?.legalFee || 0;
-        const origin = tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt;
+        const base = tenant.unit?.legalFee || 0;
+        const origin = tenant.entryDate || tenant.createdAt;
         amount = getCurrentRent(base, origin, false);
       }
 
@@ -518,20 +518,20 @@ const initiateInitialPayment = async (req, res) => {
       // Apply dynamic 26% increase rule to ALL items based on anniversaries
       const { getCurrentRent, isOneTimeFeeApplicable } = require('../utils/rentCalculator');
       if (item.type === 'rent') {
-        itemAmount = getCurrentRent(tenant.baseRent2024 || itemAmount, tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        itemAmount = getCurrentRent(itemAmount, tenant.entryDate || tenant.createdAt, false);
       } else if (item.type === 'service_charge') {
-        itemAmount = getCurrentRent(tenant.baseServiceCharge2024 || itemAmount, tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+        itemAmount = getCurrentRent(itemAmount, tenant.entryDate || tenant.createdAt, false);
       } else if (item.type === 'caution_fee') {
         if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
           itemAmount = 0;
         } else {
-          itemAmount = getCurrentRent(tenant.baseCaution2024 || itemAmount, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+          itemAmount = getCurrentRent(itemAmount, tenant.entryDate || tenant.createdAt, false);
         }
       } else if (item.type === 'legal_fee') {
         if (!isOneTimeFeeApplicable(tenant.entryDate) || tenant.tenantType !== 'new') {
           itemAmount = 0;
         } else {
-          itemAmount = getCurrentRent(tenant.baseLegal2024 || itemAmount, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+          itemAmount = getCurrentRent(itemAmount, tenant.entryDate || tenant.createdAt, false);
         }
       }
 
@@ -564,9 +564,7 @@ const initiateInitialPayment = async (req, res) => {
         const isRent = item.type === 'rent';
 
         // For initial payment, entryDate is usually today or slightly in past
-        const originDate = (isRent
-          ? (tenant.lastRentIncreaseDate || tenant.entryDate)
-          : (tenant.lastServiceIncreaseDate || tenant.entryDate)) || new Date();
+        const originDate = tenant.entryDate || new Date();
 
         const result = calculateEffectiveRent(
           itemAmount,

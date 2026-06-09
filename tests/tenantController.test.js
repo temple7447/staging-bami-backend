@@ -166,9 +166,8 @@ function makePaymentModel(payments = []) {
 /** Sets up a populated tenant for paySelectedBillingItems tests */
 function setupTenantForPayment() {
   const mockTenant = {
-    _id: 'tid', isActive: true, rentAmount: 100000, baseRent2024: 100000,
+    _id: 'tid', isActive: true, rentAmount: 100000,
     entryDate: new Date('2024-01-15'),
-    lastRentIncreaseDate: new Date('2024-01-15'),
     nextDueDate: new Date('2025-01-15'),
     rentOutstanding: 0, serviceChargeOutstanding: 0,
     unit: { _id: 'uid', serviceChargeMonthly: 5000, cautionFee: 50000, legalFee: 50000 },

@@ -216,11 +216,11 @@ async function buildTenantDetail(tenant) {
     // ── 1. Recurring charges ──────────────────────────────────────────────────
     const recurring = [];
 
-    const rentBase = tenant.baseRent2024 || tenant.rentAmount || 0;
+    const rentBase = tenant.rentAmount || 0;
     if (rentBase > 0) {
         const effectiveRent = getCurrentRent(
             rentBase,
-            tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+            tenant.entryDate || tenant.createdAt,
             false
         );
         recurring.push({
@@ -236,11 +236,11 @@ async function buildTenantDetail(tenant) {
         });
     }
 
-    const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
+    const serviceBase = tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
     if (serviceBase > 0) {
         const effectiveService = getCurrentRent(
             serviceBase,
-            tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+            tenant.entryDate || tenant.createdAt,
             false
         );
         recurring.push({
@@ -261,10 +261,10 @@ async function buildTenantDetail(tenant) {
     const paidFees = await getPaidOneTimeFees(tenant._id);
 
     if (unit?.cautionFee > 0) {
-        const base = tenant.baseCaution2024 || unit.cautionFee;
+        const base = unit.cautionFee;
         const effectiveAmount = getCurrentRent(
             base,
-            tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+            tenant.entryDate || tenant.createdAt,
             false
         );
         const isPaid = paidFees.has('caution_fee');
@@ -278,10 +278,10 @@ async function buildTenantDetail(tenant) {
     }
 
     if (unit?.legalFee > 0) {
-        const base = tenant.baseLegal2024 || unit.legalFee;
+        const base = unit.legalFee;
         const effectiveAmount = getCurrentRent(
             base,
-            tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+            tenant.entryDate || tenant.createdAt,
             false
         );
         const isPaid = paidFees.has('legal_fee');
@@ -340,27 +340,27 @@ async function buildTenantDetail(tenant) {
         if (!hasCompletedPayment) {
             requiresInitialPayment = true;
 
-            const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+            const rentOrigin = tenant.entryDate || tenant.createdAt;
             const rentResult = calculateEffectiveRent(
-                tenant.baseRent2024 || tenant.rentAmount || 0,
+                tenant.rentAmount || 0,
                 tenant.entryDate || now,
                 12,
                 false,
                 rentOrigin
             );
 
-            const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
+            const serviceBase = tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
             let serviceTotal = 0;
             if (serviceBase > 0) {
-                const svcOrigin = tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt;
+                const svcOrigin = tenant.entryDate || tenant.createdAt;
                 serviceTotal = calculateEffectiveRent(serviceBase, tenant.entryDate || now, 12, false, svcOrigin).totalAmount;
             }
 
             const cautionAmount = unit?.cautionFee > 0
-                ? getCurrentRent(tenant.baseCaution2024 || unit.cautionFee, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false)
+                ? getCurrentRent(unit.cautionFee, tenant.entryDate || tenant.createdAt, false)
                 : 0;
             const legalAmount = unit?.legalFee > 0
-                ? getCurrentRent(tenant.baseLegal2024 || unit.legalFee, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false)
+                ? getCurrentRent(unit.legalFee, tenant.entryDate || tenant.createdAt, false)
                 : 0;
 
             initialPayment = {
@@ -567,13 +567,13 @@ exports.getBillingSummary = async (req, res) => {
 
                 // Effective recurring amounts
                 const effectiveRent = getCurrentRent(
-                    tenant.baseRent2024 || tenant.rentAmount || 0,
-                    tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+                    tenant.rentAmount || 0,
+                    tenant.entryDate || tenant.createdAt,
                     false
                 );
-                const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
+                const serviceBase = tenant.serviceChargeAmount || unit?.serviceChargeMonthly || 0;
                 const effectiveService = serviceBase > 0
-                    ? getCurrentRent(serviceBase, tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt, false)
+                    ? getCurrentRent(serviceBase, tenant.entryDate || tenant.createdAt, false)
                     : 0;
                 const recurringMonthly = effectiveRent + effectiveService;
 
@@ -582,11 +582,11 @@ exports.getBillingSummary = async (req, res) => {
                 let unpaidFees = 0;
                 const unpaidFeeCodes = [];
                 if (unit?.cautionFee > 0 && !paid.has('caution_fee')) {
-                    unpaidFees += getCurrentRent(tenant.baseCaution2024 || unit.cautionFee, tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+                    unpaidFees += getCurrentRent(unit.cautionFee, tenant.entryDate || tenant.createdAt, false);
                     unpaidFeeCodes.push('caution_fee');
                 }
                 if (unit?.legalFee > 0 && !paid.has('legal_fee')) {
-                    unpaidFees += getCurrentRent(tenant.baseLegal2024 || unit.legalFee, tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt, false);
+                    unpaidFees += getCurrentRent(unit.legalFee, tenant.entryDate || tenant.createdAt, false);
                     unpaidFeeCodes.push('legal_fee');
                 }
 

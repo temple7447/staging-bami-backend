@@ -185,14 +185,6 @@ const createTenant = async (req, res) => {
       await User.updateMany({ _id: { $in: displacedUserIds } }, { $set: { isActive: false } });
     }
 
-    // Automated Rent Increase Logic initialization
-    // Use entryDate as the anchor (falling back to today if not provided).
-    // Never fall back to RULE_START_DATE when the tenant joins after 2024 —
-    // that would make completed increase cycles appear immediately on day one.
-    const { RULE_START_DATE } = require('../utils/rentCalculator');
-    const effectiveEntryDate = parsedEntryDate || new Date();
-    const startForIncrease = effectiveEntryDate > RULE_START_DATE ? effectiveEntryDate : RULE_START_DATE;
-
     const tenant = await Tenant.create({
       estate: estateId,
       unit: unitId,
@@ -201,22 +193,13 @@ const createTenant = async (req, res) => {
       tenantEmail: emailAddr || undefined,
       tenantPhone: phone || undefined,
       rentAmount: unit.monthlyPrice,
-      baseRent2024: unit.monthlyPrice,
-      lastRentIncreaseDate: startForIncrease,
       serviceChargeAmount: unit.serviceChargeMonthly || 0, // Initial service charge
-      baseServiceCharge2024: unit.serviceChargeMonthly || 0,
-      lastServiceIncreaseDate: startForIncrease,
       tenantType,
       electricMeterNumber: unit.meterNumber,
       entryDate: parsedEntryDate || new Date(),
       nextDueDate: effectiveNextDueDate,
       status: 'occupied',
       user: userId,
-      // Global 26% increase rule fields
-      baseCaution2024: unit.baseCaution2024 || unit.cautionFee || 0,
-      lastCautionIncreaseDate: unit.lastCautionIncreaseDate || startForIncrease,
-      baseLegal2024: unit.baseLegal2024 || unit.legalFee || 0,
-      lastLegalIncreaseDate: unit.lastLegalIncreaseDate || startForIncrease,
       // Outstanding balances for existing tenants (debt that pre-dates system entry)
       rentOutstanding: (rentOutstanding != null && !isNaN(Number(rentOutstanding))) ? Math.max(0, Number(rentOutstanding)) : 0,
       serviceChargeOutstanding: (serviceChargeOutstanding != null && !isNaN(Number(serviceChargeOutstanding))) ? Math.max(0, Number(serviceChargeOutstanding)) : 0,
@@ -355,26 +338,26 @@ const getTenants = async (req, res) => {
       const legalAlreadyPaid = paidFees.legal.has(tenantIdStr);
 
       const currentPrice = getCurrentRent(
-        tenant.baseRent2024 || tenant.rentAmount,
-        tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+        tenant.rentAmount,
+        tenant.entryDate || tenant.createdAt,
         false // Occupied
       );
 
       const currentService = getCurrentRent(
-        tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
-        tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+        tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+        tenant.entryDate || tenant.createdAt,
         false // Occupied
       );
 
       const currentCaution = (isApplicable && !cautionAlreadyPaid) ? getCurrentRent(
-        tenant.baseCaution2024 || 0,
-        tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+        0,
+        tenant.entryDate || tenant.createdAt,
         false // Occupied
       ) : 0;
 
       const currentLegal = (isApplicable && !legalAlreadyPaid) ? getCurrentRent(
-        tenant.baseLegal2024 || 0,
-        tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+        0,
+        tenant.entryDate || tenant.createdAt,
         false // Occupied
       ) : 0;
 
@@ -396,13 +379,13 @@ const getTenants = async (req, res) => {
       return {
         ...tenant,
         currentEffectiveRent: currentPrice,
-        isRentIncreased: currentPrice > (tenant.baseRent2024 || tenant.rentAmount),
+        isRentIncreased: currentPrice > tenant.rentAmount,
         currentEffectiveService: currentService,
-        isServiceIncreased: currentService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
+        isServiceIncreased: currentService > (tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0),
         currentEffectiveCaution: currentCaution,
-        isCautionIncreased: currentCaution > (tenant.baseCaution2024 || 0),
+        isCautionIncreased: false,
         currentEffectiveLegal: currentLegal,
-        isLegalIncreased: currentLegal > (tenant.baseLegal2024 || 0),
+        isLegalIncreased: false,
         totalMonthlyFees,
         daysUntilDue,
         statusColor,
@@ -412,7 +395,7 @@ const getTenants = async (req, res) => {
 
     if (isQuarterlyView || isValidQuarter) {
       const tenants = await Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel baseRent2024 lastRentIncreaseDate entryDate createdAt baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel entryDate createdAt rentOutstanding serviceChargeOutstanding')
         .populate('unit', 'label serviceChargeMonthly')
         .sort({ nextDueDate: 1 })
         .lean();
@@ -471,7 +454,7 @@ const getTenants = async (req, res) => {
     // Add summary calculation for the flat list
     const [items, total, stats] = await Promise.all([
       Tenant.find(filter)
-        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt baseRent2024 lastRentIncreaseDate entryDate baseServiceCharge2024 lastServiceIncreaseDate baseCaution2024 baseLegal2024 lastCautionIncreaseDate lastLegalIncreaseDate rentOutstanding serviceChargeOutstanding')
+        .select('tenantName tenantEmail tenantPhone rentAmount serviceChargeAmount nextDueDate status tenantType unitLabel createdAt entryDate rentOutstanding serviceChargeOutstanding')
         .populate('estate', 'name')
         .populate('unit', 'label monthlyPrice serviceChargeMonthly')
         .sort({ nextDueDate: 1, createdAt: -1 })
@@ -548,26 +531,26 @@ const getTenant = async (req, res) => {
     const isApplicable = tenant.tenantType === 'new';
 
     const currentCalculatedRent = getCurrentRent(
-      tenant.baseRent2024 || tenant.rentAmount,
-      tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+      tenant.rentAmount,
+      tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
 
     const currentCalculatedService = getCurrentRent(
-      tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
-      tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+      tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0,
+      tenant.entryDate || tenant.createdAt,
       false // Occupied
     );
 
     const currentCalculatedCaution = isApplicable ? getCurrentRent(
-      tenant.baseCaution2024 || tenant.unit?.cautionFee || 0,
-      tenant.lastCautionIncreaseDate || tenant.entryDate || tenant.createdAt,
+      tenant.unit?.cautionFee || 0,
+      tenant.entryDate || tenant.createdAt,
       false // Occupied
     ) : 0;
 
     const currentCalculatedLegal = isApplicable ? getCurrentRent(
-      tenant.baseLegal2024 || tenant.unit?.legalFee || 0,
-      tenant.lastLegalIncreaseDate || tenant.entryDate || tenant.createdAt,
+      tenant.unit?.legalFee || 0,
+      tenant.entryDate || tenant.createdAt,
       false // Occupied
     ) : 0;
 
@@ -650,12 +633,9 @@ const getTenant = async (req, res) => {
     }
 
     // --- Yearly lease breakdown ---
-    const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
-    // Use the immutable original base so calculateEffectiveRent counts cycles correctly.
-    // rentAmount may have been auto-updated to the increased rate; using it as the base
-    // would cause the calculator to apply a further cycle on top (double-count).
-    const rentBase = tenant.baseRent2024 || tenant.rentAmount;
-    const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount;
+    const rentOrigin = tenant.entryDate || tenant.createdAt;
+    const rentBase = tenant.rentAmount;
+    const serviceBase = tenant.serviceChargeAmount;
 
     // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period,
     // not historical Year-1/Year-2 periods that may already be in the past.
@@ -714,12 +694,12 @@ const getTenant = async (req, res) => {
 
       // Pricing breakdown
       rent: currentCalculatedRent,
-      storedRent: tenant.baseRent2024 || tenant.rentAmount,
-      rentIncreased: currentCalculatedRent > (tenant.baseRent2024 || tenant.rentAmount),
+      storedRent: tenant.rentAmount,
+      rentIncreased: currentCalculatedRent > tenant.rentAmount,
 
       serviceCharge: currentCalculatedService,
-      storedServiceCharge: tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
-      serviceChargeIncreased: currentCalculatedService > (tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
+      storedServiceCharge: tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0),
+      serviceChargeIncreased: currentCalculatedService > (tenant.serviceChargeAmount || (tenant.unit ? tenant.unit.serviceChargeMonthly : 0)),
 
       cautionFee: finalCalculatedCaution,
       legalFee: finalCalculatedLegal,
@@ -1372,13 +1352,13 @@ async function getMyBillingItems(req, res) {
         // Predefined recurring items (Rent & Service Charge) — use dynamic rate
         const { getCurrentRent: _getRate } = require('../utils/rentCalculator');
         const dynamicRent = _getRate(
-          tenant.baseRent2024 || tenant.rentAmount,
-          tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt,
+          tenant.rentAmount,
+          tenant.entryDate || tenant.createdAt,
           false
         );
         const dynamicService = _getRate(
-          tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || unit.serviceChargeMonthly || 0,
-          tenant.lastServiceIncreaseDate || tenant.entryDate || tenant.createdAt,
+          tenant.serviceChargeAmount || unit.serviceChargeMonthly || 0,
+          tenant.entryDate || tenant.createdAt,
           false
         );
 
@@ -1558,9 +1538,9 @@ async function paySelectedBillingItems(req, res) {
       if (tenant) {
         if (itemId === 'rent' && tenant.rentAmount > 0) {
           const { calculateEffectiveRent } = require('../utils/rentCalculator');
-          const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
+          const rentOrigin = tenant.entryDate || tenant.createdAt;
           const rentResult = calculateEffectiveRent(
-            tenant.baseRent2024 || tenant.rentAmount,
+            tenant.rentAmount,
             tenant.entryDate || new Date(),
             durationMonths,
             false,

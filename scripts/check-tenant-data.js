@@ -16,10 +16,6 @@ async function checkTenantData() {
   console.log('=== TENANT DATA ===');
   console.log('rentAmount:', tenant.rentAmount);
   console.log('serviceChargeAmount:', tenant.serviceChargeAmount);
-  console.log('baseRent2024:', tenant.baseRent2024);
-  console.log('baseServiceCharge2024:', tenant.baseServiceCharge2024);
-  console.log('lastRentIncreaseDate:', tenant.lastRentIncreaseDate);
-  console.log('lastServiceIncreaseDate:', tenant.lastServiceIncreaseDate);
   console.log('entryDate:', tenant.entryDate);
   console.log('nextDueDate:', tenant.nextDueDate);
 

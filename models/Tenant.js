@@ -89,32 +89,6 @@ const TenantSchema = new mongoose.Schema({
     ref: 'User',
     required: true
   },
-  lastRentIncreaseDate: {
-    type: Date
-  },
-  baseRent2024: {
-    type: Number,
-    description: 'Rent as of Jan 1, 2024 or entry date'
-  },
-  lastServiceIncreaseDate: {
-    type: Date
-  },
-  baseServiceCharge2024: {
-    type: Number,
-    description: 'Service Charge as of Jan 1, 2024 or entry date'
-  },
-  lastCautionIncreaseDate: {
-    type: Date
-  },
-  baseCaution2024: {
-    type: Number
-  },
-  lastLegalIncreaseDate: {
-    type: Date
-  },
-  baseLegal2024: {
-    type: Number
-  },
   // Outstanding balances recorded at onboarding for existing tenants
   rentOutstanding: {
     type: Number,

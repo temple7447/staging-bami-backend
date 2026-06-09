@@ -38,14 +38,6 @@ async function onboard() {
                 status: 'vacant',
                 isActive: true,
                 createdBy: adminId,
-                basePrice2024: 150000,
-                lastRentIncreaseDate: new Date('2024-01-01'),
-                baseServiceCharge2024: 20000,
-                lastServiceIncreaseDate: new Date('2024-01-01'),
-                baseCaution2024: 50000,
-                lastCautionIncreaseDate: new Date('2024-01-01'),
-                baseLegal2024: 30000,
-                lastLegalIncreaseDate: new Date('2024-01-01')
             },
             { upsert: true, new: true }
         );
@@ -60,14 +52,6 @@ async function onboard() {
                 status: 'vacant',
                 isActive: true,
                 createdBy: adminId,
-                basePrice2024: 150000,
-                lastRentIncreaseDate: new Date('2024-01-01'),
-                baseServiceCharge2024: 20000,
-                lastServiceIncreaseDate: new Date('2024-01-01'),
-                baseCaution2024: 50000,
-                lastCautionIncreaseDate: new Date('2024-01-01'),
-                baseLegal2024: 30000,
-                lastLegalIncreaseDate: new Date('2024-01-01')
             },
             { upsert: true, new: true }
         );
@@ -127,14 +111,6 @@ async function onboard() {
                 status: 'occupied',
                 user: user1._id,
                 isActive: true,
-                baseRent2024: unit1.monthlyPrice,
-                lastRentIncreaseDate: new Date(),
-                baseServiceCharge2024: unit1.serviceChargeMonthly,
-                lastServiceIncreaseDate: new Date(),
-                baseCaution2024: unit1.cautionFee,
-                lastCautionIncreaseDate: new Date(),
-                baseLegal2024: unit1.legalFee,
-                lastLegalIncreaseDate: new Date()
             },
             { upsert: true }
         );
@@ -156,20 +132,12 @@ async function onboard() {
                 tenantPhone: '08033334444',
                 rentAmount: 250000,
                 serviceChargeAmount: unit2.serviceChargeMonthly,
-                tenantType: 'renewal',
+                tenantType: 'existing',
                 entryDate: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000), // In a year ago
                 nextDueDate: nextDueOld,
                 status: 'occupied',
                 user: user2._id,
                 isActive: true,
-                baseRent2024: unit2.monthlyPrice,
-                lastRentIncreaseDate: new Date('2024-01-01'),
-                baseServiceCharge2024: unit2.serviceChargeMonthly,
-                lastServiceIncreaseDate: new Date('2024-01-01'),
-                baseCaution2024: unit2.cautionFee,
-                lastCautionIncreaseDate: new Date('2024-01-01'),
-                baseLegal2024: unit2.legalFee,
-                lastLegalIncreaseDate: new Date('2024-01-01')
             },
             { upsert: true }
         );

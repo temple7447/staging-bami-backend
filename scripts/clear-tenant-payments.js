@@ -61,10 +61,6 @@ async function clearTenantPayments() {
   const today = new Date();
   tenant.entryDate = today;
   tenant.nextDueDate = null;
-  tenant.lastRentIncreaseDate = today;
-  tenant.lastServiceIncreaseDate = today;
-  tenant.lastCautionIncreaseDate = today;
-  tenant.lastLegalIncreaseDate = today;
   await tenant.save();
   console.log('Set entryDate to today, nextDueDate to null');
 

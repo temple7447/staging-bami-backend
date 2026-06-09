@@ -120,15 +120,6 @@ const createUnit = async (req, res) => {
       streetAddress,
       images: normalizeImages(images),
       createdBy: adminId,
-      // Initialize base pricing for 26% rule
-      basePrice2024: monthlyPrice,
-      lastRentIncreaseDate: new Date(),
-      baseServiceCharge2024: sc != null ? sc : 0,
-      lastServiceIncreaseDate: new Date(),
-      baseCaution2024: cf != null ? cf : 0,
-      lastCautionIncreaseDate: new Date(),
-      baseLegal2024: lf != null ? lf : 0,
-      lastLegalIncreaseDate: new Date()
     });
 
     await unit.save();
@@ -212,17 +203,17 @@ const getEstateUnits = async (req, res) => {
       data: units.map(unit => {
         const { getCurrentRent } = require('../utils/rentCalculator');
         const isVacant = unit.status === 'vacant';
-        const effectiveOrigin = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
+        const effectiveOrigin = unit.createdAt || new Date('2024-01-01');
 
         const currentPrice = getCurrentRent(
-          unit.basePrice2024 || unit.monthlyPrice,
+          unit.monthlyPrice,
           effectiveOrigin,
           isVacant
         );
 
         const currentService = getCurrentRent(
-          unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
-          unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          unit.serviceChargeMonthly,
+          unit.createdAt || new Date('2024-01-01'),
           isVacant
         );
         const { isOneTimeFeeApplicable } = require('../utils/rentCalculator');
@@ -232,30 +223,30 @@ const getEstateUnits = async (req, res) => {
           label: unit.label,
           monthlyPrice: unit.monthlyPrice,
           currentEffectivePrice: currentPrice,
-          isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          isRentIncreased: currentPrice > unit.monthlyPrice,
           serviceChargeMonthly: unit.serviceChargeMonthly,
           currentEffectiveService: currentService,
-          isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+          isServiceIncreased: currentService > unit.serviceChargeMonthly,
           currentEffectiveCaution: isFeeApplicable ? getCurrentRent(
-            unit.baseCaution2024 || unit.cautionFee || 0,
-            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.cautionFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             isVacant
           ) : 0,
           currentEffectiveLegal: isFeeApplicable ? getCurrentRent(
-            unit.baseLegal2024 || unit.legalFee || 0,
-            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.legalFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             isVacant
           ) : 0,
           meterNumber: unit.meterNumber,
           description: unit.description,
           cautionFee: isFeeApplicable ? getCurrentRent(
-            unit.baseCaution2024 || unit.cautionFee || 0,
-            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.cautionFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             isVacant
           ) : 0,
           legalFee: isFeeApplicable ? getCurrentRent(
-            unit.baseLegal2024 || unit.legalFee || 0,
-            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.legalFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             isVacant
           ) : 0,
           status: unit.status,
@@ -319,17 +310,17 @@ const getVacantUnits = async (req, res) => {
       success: true,
       data: vacantUnits.map(unit => {
         const { getCurrentRent } = require('../utils/rentCalculator');
-        const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
-        const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
+        const effectiveOriginRent = unit.createdAt || new Date('2024-01-01');
+        const effectiveOriginService = unit.createdAt || new Date('2024-01-01');
 
         const currentPrice = getCurrentRent(
-          unit.basePrice2024 || unit.monthlyPrice,
+          unit.monthlyPrice,
           effectiveOriginRent,
           true // Vacant cycle
         );
 
         const currentService = getCurrentRent(
-          unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
+          unit.serviceChargeMonthly,
           effectiveOriginService,
           true // Vacant cycle
         );
@@ -339,18 +330,18 @@ const getVacantUnits = async (req, res) => {
           label: unit.label,
           monthlyPrice: unit.monthlyPrice,
           currentEffectivePrice: currentPrice,
-          isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+          isRentIncreased: currentPrice > unit.monthlyPrice,
           serviceChargeMonthly: unit.serviceChargeMonthly,
           currentEffectiveService: currentService,
-          isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+          isServiceIncreased: currentService > unit.serviceChargeMonthly,
           currentEffectiveCaution: getCurrentRent(
-            unit.baseCaution2024 || unit.cautionFee || 0,
-            unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.cautionFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             true
           ),
           currentEffectiveLegal: getCurrentRent(
-            unit.baseLegal2024 || unit.legalFee || 0,
-            unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+            unit.legalFee || 0,
+            unit.createdAt || new Date('2024-01-01'),
             true
           ),
           meterNumber: unit.meterNumber,
@@ -387,17 +378,17 @@ const getUnitDetails = async (req, res) => {
 
     const { getCurrentRent } = require('../utils/rentCalculator');
     const isVacant = unit.status === 'vacant';
-    const effectiveOriginRent = unit.lastRentIncreaseDate || unit.createdAt || new Date('2024-01-01');
-    const effectiveOriginService = unit.lastServiceIncreaseDate || unit.createdAt || new Date('2024-01-01');
+    const effectiveOriginRent = unit.createdAt || new Date('2024-01-01');
+    const effectiveOriginService = unit.createdAt || new Date('2024-01-01');
 
     const currentPrice = getCurrentRent(
-      unit.basePrice2024 || unit.monthlyPrice,
+      unit.monthlyPrice,
       effectiveOriginRent,
       isVacant
     );
 
     const currentService = getCurrentRent(
-      unit.baseServiceCharge2024 || unit.serviceChargeMonthly,
+      unit.serviceChargeMonthly,
       effectiveOriginService,
       isVacant
     );
@@ -410,31 +401,31 @@ const getUnitDetails = async (req, res) => {
         label: unit.label,
         monthlyPrice: unit.monthlyPrice,
         currentEffectivePrice: currentPrice,
-        isRentIncreased: currentPrice > (unit.basePrice2024 || unit.monthlyPrice),
+        isRentIncreased: currentPrice > unit.monthlyPrice,
         serviceChargeMonthly: unit.serviceChargeMonthly,
         currentEffectiveService: currentService,
-        isServiceIncreased: currentService > (unit.baseServiceCharge2024 || unit.serviceChargeMonthly),
+        isServiceIncreased: currentService > unit.serviceChargeMonthly,
         currentEffectiveCaution: isFeeApplicable ? getCurrentRent(
-          unit.baseCaution2024 || unit.cautionFee || 0,
-          unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          unit.cautionFee || 0,
+          unit.createdAt || new Date('2024-01-01'),
           isVacant
         ) : 0,
         currentEffectiveLegal: isFeeApplicable ? getCurrentRent(
-          unit.baseLegal2024 || unit.legalFee || 0,
-          unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          unit.legalFee || 0,
+          unit.createdAt || new Date('2024-01-01'),
           isVacant
         ) : 0,
         meterNumber: unit.meterNumber,
         description: unit.description,
         serviceChargeMonthly: unit.serviceChargeMonthly,
         cautionFee: isFeeApplicable ? getCurrentRent(
-          unit.baseCaution2024 || unit.cautionFee || 0,
-          unit.lastCautionIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          unit.cautionFee || 0,
+          unit.createdAt || new Date('2024-01-01'),
           isVacant
         ) : 0,
         legalFee: isFeeApplicable ? getCurrentRent(
-          unit.baseLegal2024 || unit.legalFee || 0,
-          unit.lastLegalIncreaseDate || unit.createdAt || new Date('2024-01-01'),
+          unit.legalFee || 0,
+          unit.createdAt || new Date('2024-01-01'),
           isVacant
         ) : 0,
         status: unit.status,
@@ -544,39 +535,13 @@ const updateUnit = async (req, res) => {
       if (cf == null) unit.cautionFee = Math.round((unit.cautionFee || 0) * INCREASE_RATE);
       if (lf == null) unit.legalFee = Math.round((unit.legalFee || 0) * INCREASE_RATE);
 
-      // System rule: resetting the base after a manual/cascade increase
-      unit.basePrice2024 = unit.monthlyPrice;
-      unit.lastRentIncreaseDate = new Date();
-      unit.baseServiceCharge2024 = unit.serviceChargeMonthly;
-      unit.lastServiceIncreaseDate = new Date();
-      unit.baseCaution2024 = unit.cautionFee;
-      unit.lastCautionIncreaseDate = new Date();
-      unit.baseLegal2024 = unit.legalFee;
-      unit.lastLegalIncreaseDate = new Date();
-
       logInfo(`Applied 26% cascade increase to vacant unit ${unitId}`);
     } else {
       // Normal application of values if provided
-      if (mp != null) {
-        unit.monthlyPrice = mp;
-        unit.basePrice2024 = mp;
-        unit.lastRentIncreaseDate = new Date();
-      }
-      if (sc != null) {
-        unit.serviceChargeMonthly = sc;
-        unit.baseServiceCharge2024 = sc;
-        unit.lastServiceIncreaseDate = new Date();
-      }
-      if (cf != null) {
-        unit.cautionFee = cf;
-        unit.baseCaution2024 = cf;
-        unit.lastCautionIncreaseDate = new Date();
-      }
-      if (lf != null) {
-        unit.legalFee = lf;
-        unit.baseLegal2024 = lf;
-        unit.lastLegalIncreaseDate = new Date();
-      }
+      if (mp != null) unit.monthlyPrice = mp;
+      if (sc != null) unit.serviceChargeMonthly = sc;
+      if (cf != null) unit.cautionFee = cf;
+      if (lf != null) unit.legalFee = lf;
     }
 
     if (meterNumber !== undefined) unit.meterNumber = meterNumber;
@@ -603,27 +568,9 @@ const updateUnit = async (req, res) => {
     await unit.save();
 
     // Keep active tenants in this unit in sync with the unit's updated prices.
-    // IMPORTANT: must sync baseRent2024 + lastRentIncreaseDate (not just rentAmount)
-    // otherwise getTenant's getCurrentRent() still uses the old base and applies 26% on top.
     const tenantSync = {};
-    if (mp != null) {
-      tenantSync.rentAmount = mp;
-      tenantSync.baseRent2024 = mp;               // Reset base so 26% calculates from new price
-      tenantSync.lastRentIncreaseDate = new Date(); // Reset origin date
-    }
-    if (sc != null) {
-      tenantSync.serviceChargeAmount = sc;
-      tenantSync.baseServiceCharge2024 = sc;
-      tenantSync.lastServiceIncreaseDate = new Date();
-    }
-    if (cf != null) {
-      tenantSync.baseCaution2024 = cf;
-      tenantSync.lastCautionIncreaseDate = new Date();
-    }
-    if (lf != null) {
-      tenantSync.baseLegal2024 = lf;
-      tenantSync.lastLegalIncreaseDate = new Date();
-    }
+    if (mp != null) tenantSync.rentAmount = mp;
+    if (sc != null) tenantSync.serviceChargeAmount = sc;
     if (Object.keys(tenantSync).length > 0) {
       tenantSync.updatedBy = req.user?._id;
 

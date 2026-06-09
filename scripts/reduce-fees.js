@@ -35,19 +35,11 @@ async function reduceFees() {
   unit.serviceChargeMonthly = newPrice;
   unit.cautionFee = newPrice;
   unit.legalFee = newPrice;
-  unit.basePrice2024 = newPrice;
-  unit.baseServiceCharge2024 = newPrice;
-  unit.baseCaution2024 = newPrice;
-  unit.baseLegal2024 = newPrice;
   await unit.save();
   console.log('Unit fees updated');
 
   tenant.rentAmount = newPrice;
   tenant.serviceChargeAmount = newPrice;
-  tenant.baseRent2024 = newPrice;
-  tenant.baseServiceCharge2024 = newPrice;
-  tenant.baseCaution2024 = newPrice;
-  tenant.baseLegal2024 = newPrice;
   await tenant.save();
   console.log('Tenant fees updated');
 
