@@ -280,11 +280,20 @@ const getTenantOverview = async (userId) => {
       }
     }
 
-    // Current billing period: 12 months starting from entryDate
-    const billingStart = tenant.entryDate ? new Date(tenant.entryDate) : new Date();
-    const rentOrigin = tenant.entryDate || new Date();
-    const baseMonthlyRent = tenant.rentAmount || tenant.baseRent2024 || 0;
-    const baseMonthlyService = tenant.serviceChargeAmount || tenant.baseServiceCharge2024 || 0;
+    // Anchor to nextDueDate so existing tenants see their actual current/upcoming periods,
+    // not the historical periods that started at entryDate.
+    const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || new Date();
+    // Use baseRent2024 as the immutable original-rate base; rentAmount may have been auto-updated
+    // to the increased rate, which would cause calculateEffectiveRent to double-count cycles.
+    const baseMonthlyRent = tenant.baseRent2024 || tenant.rentAmount || 0;
+    const baseMonthlyService = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount || 0;
+
+    // Renewal year starts at nextDueDate; current year is the 12-month period ending there.
+    const renewalStart = tenant.nextDueDate
+      ? new Date(tenant.nextDueDate)
+      : (() => { const d = new Date(rentOrigin); d.setFullYear(d.getFullYear() + 1); return d; })();
+    const billingStart = new Date(renewalStart);
+    billingStart.setFullYear(billingStart.getFullYear() - 1);
 
     const projectedRent = calculateEffectiveRent(baseMonthlyRent, billingStart, 12, false, rentOrigin);
     const projectedServiceCharge = calculateEffectiveRent(baseMonthlyService, billingStart, 12, false, rentOrigin);
@@ -308,9 +317,7 @@ const getTenantOverview = async (userId) => {
     const cyProjectedTotal = projectedRent.totalAmount + projectedServiceCharge.totalAmount + cyProjectedOther;
     const outstanding = Math.max(0, cyProjectedTotal - cyTotal);
 
-    // Next year (renewal): 12 months starting from entryDate + 12 months
-    const renewalStart = new Date(billingStart);
-    renewalStart.setMonth(renewalStart.getMonth() + 12);
+    // Next year (renewal): 12 months starting from nextDueDate (already computed above)
     const nyProjectedRent = calculateEffectiveRent(baseMonthlyRent, renewalStart, 12, false, rentOrigin);
     const nyProjectedServiceCharge = calculateEffectiveRent(baseMonthlyService, renewalStart, 12, false, rentOrigin);
     const nyTotal = nyProjectedRent.totalAmount + nyProjectedServiceCharge.totalAmount;

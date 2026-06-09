@@ -651,18 +651,31 @@ const getTenant = async (req, res) => {
 
     // --- Yearly lease breakdown ---
     const rentOrigin = tenant.lastRentIncreaseDate || tenant.entryDate || tenant.createdAt;
-    const billingStart = tenant.entryDate ? new Date(tenant.entryDate) : new Date();
+    // Use the immutable original base so calculateEffectiveRent counts cycles correctly.
+    // rentAmount may have been auto-updated to the increased rate; using it as the base
+    // would cause the calculator to apply a further cycle on top (double-count).
+    const rentBase = tenant.baseRent2024 || tenant.rentAmount;
+    const serviceBase = tenant.baseServiceCharge2024 || tenant.serviceChargeAmount;
 
-    // Year 1: current billing period (12 months from entry)
-    const year1AnnualRent = currentCalculatedRent * 12;
-    const year1AnnualService = currentCalculatedService * 12;
+    // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period,
+    // not historical Year-1/Year-2 periods that may already be in the past.
+    const renewalStart = tenant.nextDueDate
+      ? new Date(tenant.nextDueDate)
+      : (() => { const d = new Date(rentOrigin); d.setFullYear(d.getFullYear() + 1); return d; })();
+    const billingStart = new Date(renewalStart);
+    billingStart.setFullYear(billingStart.getFullYear() - 1);
+
+    // Year 1: the 12-month period the tenant is currently in (ending at nextDueDate)
+    const year1RentCalc = calculateEffectiveRent(rentBase, billingStart, 12, false, rentOrigin);
+    const year1ServiceCalc = calculateEffectiveRent(serviceBase, billingStart, 12, false, rentOrigin);
+    const year1AnnualRent = year1RentCalc.totalAmount;
+    const year1AnnualService = year1ServiceCalc.totalAmount;
     const year1Total = year1AnnualRent + year1AnnualService + finalCalculatedCaution + finalCalculatedLegal;
 
-    // Year 2: renewal period (12 months starting from entryDate + 12 months)
-    const renewalStart = new Date(billingStart);
-    renewalStart.setMonth(renewalStart.getMonth() + 12);
-    const year2RentCalc = calculateEffectiveRent(tenant.baseRent2024 || tenant.rentAmount, renewalStart, 12, false, rentOrigin);
-    const year2ServiceCalc = calculateEffectiveRent(tenant.baseServiceCharge2024 || tenant.serviceChargeAmount, renewalStart, 12, false, rentOrigin);
+    // Year 2: the next renewal period starting from nextDueDate — will show increased rate
+    // if the 2-year anniversary falls within this period.
+    const year2RentCalc = calculateEffectiveRent(rentBase, renewalStart, 12, false, rentOrigin);
+    const year2ServiceCalc = calculateEffectiveRent(serviceBase, renewalStart, 12, false, rentOrigin);
     const year2Total = year2RentCalc.totalAmount + year2ServiceCalc.totalAmount;
 
     const yearlyBreakdown = {
@@ -670,8 +683,8 @@ const getTenant = async (req, res) => {
         label: 'Current Year',
         billingStart: billingStart,
         billingEnd: renewalStart,
-        monthlyRent: currentCalculatedRent,
-        monthlyServiceCharge: currentCalculatedService,
+        monthlyRent: year1RentCalc.finalRent,
+        monthlyServiceCharge: year1ServiceCalc.finalRent,
         annualRent: year1AnnualRent,
         annualServiceCharge: year1AnnualService,
         ...(finalCalculatedCaution > 0 && { cautionFee: finalCalculatedCaution }),
@@ -689,7 +702,7 @@ const getTenant = async (req, res) => {
         annualServiceCharge: year2ServiceCalc.totalAmount,
         oneTimeFees: 0,
         total: year2Total,
-        rentIncreased: year2RentCalc.finalRent > currentCalculatedRent
+        rentIncreased: year2RentCalc.finalRent > year1RentCalc.finalRent
       }
     };
 
@@ -727,7 +740,7 @@ const getTenant = async (req, res) => {
       entryDate: tenant.entryDate,
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
-      typeBadge: tenant.tenantType === 'new' ? 'New' : tenant.tenantType === 'existing' ? 'Existing' : tenant.tenantType === 'renewal' ? 'Renewal' : 'Transfer',
+      typeBadge: tenant.tenantType === 'new' ? 'New' : tenant.tenantType === 'existing' ? 'Existing' : 'Transfer',
       status: tenant.status
     };
 
@@ -1090,7 +1103,7 @@ const listBillingItems = async (req, res) => {
     }
 
     const tenantType = tenant.tenantType || 'new';
-    const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
+    const isExistingLike = ['existing', 'transfer'].includes(tenantType);
 
     // Determine which charge types apply
     const items = [];
@@ -1354,7 +1367,7 @@ async function getMyBillingItems(req, res) {
       const unit = tenant.unit;
       if (unit) {
         const tenantType = tenant.tenantType || 'new';
-        const isExistingLike = ['existing', 'renewal', 'transfer'].includes(tenantType);
+        const isExistingLike = ['existing', 'transfer'].includes(tenantType);
 
         // Predefined recurring items (Rent & Service Charge) — use dynamic rate
         const { getCurrentRent: _getRate } = require('../utils/rentCalculator');

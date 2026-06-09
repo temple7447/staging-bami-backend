@@ -55,7 +55,7 @@ const TenantSchema = new mongoose.Schema({
   },
   tenantType: {
     type: String,
-    enum: ['new', 'existing', 'renewal', 'transfer'],
+    enum: ['new', 'existing', 'transfer'],
     default: 'new'
   },
   status: {

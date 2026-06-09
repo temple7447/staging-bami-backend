@@ -87,7 +87,7 @@ const validateTenantCreate = [
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
-    .isIn(['new', 'existing', 'renewal', 'transfer'])
+    .isIn(['new', 'existing', 'transfer'])
     .withMessage('Invalid tenant type'),
 
   // Dates: accept ISO or dd/mm/yyyy; we'll parse format in controller if not ISO
@@ -133,8 +133,8 @@ const validateTenantUpdate = [
   check('tenantType')
     .optional()
     .customSanitizer(v => (v === 'old' ? 'existing' : v))
-    .isIn(['new', 'existing', 'renewal', 'transfer'])
-    .withMessage('Tenant type must be one of: new, existing, renewal, transfer'),
+    .isIn(['new', 'existing', 'transfer'])
+    .withMessage('Tenant type must be one of: new, existing, transfer'),
   check('status')
     .optional()
     .isIn(['occupied', 'vacant', 'pending', 'evicted'])
