@@ -546,11 +546,14 @@ const getTenant = async (req, res) => {
     // Only new tenants owe caution/legal. Renewal/existing tenants already paid these (one-time fees).
     const isApplicable = tenant.tenantType === 'new';
 
-    // Always use the immutable original base (baseRent) so that rent increase cycles are
-    // applied correctly from the original price. Fall back to rentAmount for legacy records
-    // that predate the baseRent field.
-    const rentBase0 = (tenant.baseRent > 0 ? tenant.baseRent : null) || tenant.rentAmount;
+    // Always derive rent from the immutable original base so increase cycles are never
+    // compounded. Priority: baseRent field → creation history meta → rentAmount (last resort).
+    const creationMeta = tenant.history?.find(h => h.event === 'created')?.meta;
+    const rentBase0 = (tenant.baseRent > 0 ? tenant.baseRent : null)
+      || (creationMeta?.rentAmount > 0 ? creationMeta.rentAmount : null)
+      || tenant.rentAmount;
     const serviceBase0 = (tenant.baseServiceCharge > 0 ? tenant.baseServiceCharge : null)
+      || (creationMeta?.serviceCharge > 0 ? creationMeta.serviceCharge : null)
       || tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0;
 
     const currentCalculatedRent = getCurrentRent(

@@ -6,6 +6,10 @@ const { logInfo, logError } = require('./logger');
 /**
  * Service to handle periodic rent increases for vacant and occupied units.
  * This should be called daily by the scheduler.
+ *
+ * IMPORTANT: Always use the immutable base price (baseRent / unit original price),
+ * never compound from an already-increased value. Storing the increased value as
+ * the new base causes exponential compounding on every scheduler run.
  */
 const processPeriodicRentIncreases = async () => {
     try {
@@ -17,20 +21,21 @@ const processPeriodicRentIncreases = async () => {
 
         for (const unit of vacantUnits) {
             let updated = false;
-            // Anchor = original/creation date; never overwrite this after applying an increase,
-            // otherwise the next cycle never elapses and compound increases stop triggering.
             const effectiveOriginRent = unit.createdAt || new Date('2024-01-01');
             const effectiveOriginService = unit.createdAt || new Date('2024-01-01');
 
-            // Rent Increase
-            const currentPrice = getCurrentRent(unit.monthlyPrice, effectiveOriginRent, true);
+            // Use originalMonthlyPrice (immutable base) if available, else monthlyPrice.
+            // For vacant units we do update monthlyPrice (they have no tenant base to corrupt).
+            const baseRentAmt = unit.originalMonthlyPrice || unit.monthlyPrice;
+            const baseServiceAmt = unit.originalServiceCharge || unit.serviceChargeMonthly;
+
+            const currentPrice = getCurrentRent(baseRentAmt, effectiveOriginRent, true);
             if (currentPrice > unit.monthlyPrice) {
                 unit.monthlyPrice = currentPrice;
                 updated = true;
             }
 
-            // Service Charge Increase
-            const currentService = getCurrentRent(unit.serviceChargeMonthly, effectiveOriginService, true);
+            const currentService = getCurrentRent(baseServiceAmt, effectiveOriginService, true);
             if (currentService > unit.serviceChargeMonthly) {
                 unit.serviceChargeMonthly = currentService;
                 updated = true;
@@ -47,63 +52,63 @@ const processPeriodicRentIncreases = async () => {
         let tenantsUpdated = 0;
 
         for (const tenant of activeTenants) {
-            let updated = false;
-            // Anchor = entry date; never overwrite this after applying an increase,
-            // otherwise the next 2-year cycle never elapses and compound increases stop triggering.
             const effectiveOriginRent = tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
             const effectiveOriginService = tenant.entryDate || tenant.createdAt || new Date('2024-01-01');
 
-            // Rent Increase
-            const currentPrice = getCurrentRent(tenant.rentAmount, effectiveOriginRent, false);
-            if (currentPrice > tenant.rentAmount) {
+            // Always derive the current rate from the immutable original base so that
+            // cycles never compound on top of a previously-increased stored value.
+            const creationMeta = tenant.history?.find(h => h.event === 'created')?.meta;
+            const baseRentAmt = (tenant.baseRent > 0 ? tenant.baseRent : null)
+                || (creationMeta?.rentAmount > 0 ? creationMeta.rentAmount : null)
+                || tenant.rentAmount;
+            const baseServiceAmt = (tenant.baseServiceCharge > 0 ? tenant.baseServiceCharge : null)
+                || (creationMeta?.serviceCharge > 0 ? creationMeta.serviceCharge : null)
+                || tenant.serviceChargeAmount;
+
+            const currentPrice = getCurrentRent(baseRentAmt, effectiveOriginRent, false);
+            const currentService = getCurrentRent(baseServiceAmt, effectiveOriginService, false);
+
+            let updated = false;
+
+            if (currentPrice !== tenant.rentAmount) {
                 const oldPrice = tenant.rentAmount;
                 tenant.rentAmount = currentPrice;
-
-                tenant.history.push({
-                    event: 'rent_update',
-                    note: `Automated biennial 26% rent increase applied (Rule 2024). Increased from NGN ${oldPrice} to NGN ${currentPrice}.`,
-                    meta: { oldPrice, newPrice: currentPrice, type: 'rent' },
-                    createdBy: null
-                });
+                if (currentPrice > oldPrice) {
+                    tenant.history.push({
+                        event: 'rent_update',
+                        note: `Automated biennial 26% rent increase applied (Rule 2024). Increased from NGN ${oldPrice} to NGN ${currentPrice}.`,
+                        meta: { oldPrice, newPrice: currentPrice, type: 'rent' },
+                        createdBy: null
+                    });
+                }
                 updated = true;
             }
 
-            // Service Charge Increase
-            const currentService = getCurrentRent(tenant.serviceChargeAmount, effectiveOriginService, false);
-            if (currentService > tenant.serviceChargeAmount) {
+            if (currentService !== tenant.serviceChargeAmount) {
                 const oldService = tenant.serviceChargeAmount;
                 tenant.serviceChargeAmount = currentService;
-
-                tenant.history.push({
-                    event: 'rent_update',
-                    note: `Automated biennial 26% service charge increase applied (Rule 2024). Increased from NGN ${oldService} to NGN ${currentService}.`,
-                    meta: { oldPrice: oldService, newPrice: currentService, type: 'service_charge' },
-                    createdBy: null
-                });
+                if (currentService > oldService) {
+                    tenant.history.push({
+                        event: 'rent_update',
+                        note: `Automated biennial 26% service charge increase applied (Rule 2024). Increased from NGN ${oldService} to NGN ${currentService}.`,
+                        meta: { oldPrice: oldService, newPrice: currentService, type: 'service_charge' },
+                        createdBy: null
+                    });
+                }
                 updated = true;
             }
 
             if (updated) {
                 await tenant.save({ validateBeforeSave: false });
                 tenantsUpdated++;
-
-                // Keep unit prices in sync
-                if (tenant.unit) {
-                    await Unit.findByIdAndUpdate(tenant.unit, {
-                        monthlyPrice: tenant.rentAmount,
-                        serviceChargeMonthly: tenant.serviceChargeAmount
-                    });
-                }
+                // NOTE: Do NOT update unit.monthlyPrice here. That field stores the original
+                // listing price and must remain unchanged so new tenants get the correct base.
             }
         }
 
         logInfo(`✅ Rent/Service Increase Processor Completed: ${unitsUpdated} units and ${tenantsUpdated} tenants updated.`);
 
-        return {
-            success: true,
-            unitsUpdated,
-            tenantsUpdated
-        };
+        return { success: true, unitsUpdated, tenantsUpdated };
     } catch (err) {
         logError('Rent Increase Processor error', err);
         return { success: false, error: err.message };
