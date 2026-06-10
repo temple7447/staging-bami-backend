@@ -379,36 +379,47 @@ const getTenants = async (req, res) => {
 
       const totalMonthlyFees = currentPrice + currentService;
 
-      // Project nextDueDate forward ONLY for legacy onboarding where nextDueDate was never
-      // updated from the entryDate default. If nextDueDate was set by a real payment cycle
-      // (i.e. it differs from entryDate) and is now past, the tenant is genuinely overdue —
-      // do not project so the overdue status is correctly shown.
+      // Project nextDueDate forward ONLY for legacy onboarding (nextDueDate matches entryDate
+      // day+month, meaning the system never updated it) AND the tenant has no recorded
+      // outstanding balance. If they have a balance, keep the past date — they are overdue.
       let projectedDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
       const _today = new Date();
       _today.setHours(0, 0, 0, 0);
+      const totalOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
       if (projectedDueDate && projectedDueDate < _today && tenant.entryDate) {
         const entry = new Date(tenant.entryDate);
         const isLegacyDefault =
           projectedDueDate.getUTCMonth() === entry.getUTCMonth() &&
           projectedDueDate.getUTCDate() === entry.getUTCDate();
-        if (isLegacyDefault) {
+        if (isLegacyDefault && totalOutstanding === 0) {
           const anchor = new Date(Date.UTC(entry.getUTCFullYear(), entry.getUTCMonth(), entry.getUTCDate()));
           while (anchor <= _today) {
             anchor.setUTCFullYear(anchor.getUTCFullYear() + 1);
           }
           projectedDueDate = anchor;
         }
-        // else: nextDueDate differs from entryDate → genuine overdue, keep the past date
+        // else: has outstanding balance OR real payment cycle date → genuinely overdue
       }
 
       const diffTime = projectedDueDate ? projectedDueDate - _today : 0;
       const daysUntilDue = projectedDueDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
 
-      let statusColor = '#4caf50'; // Green (Safe)
+      // Determine how many months/years overdue (for chronic arrears display)
+      const arrearsMonths = daysUntilDue < 0 ? Math.floor(Math.abs(daysUntilDue) / 30) : 0;
+
+      // Status colour rules (Nigerian context):
+      //   RED    — past nextDueDate (genuine overdue or chronic arrears)
+      //   ORANGE — nextDueDate still in future but has an unpaid outstanding balance
+      //            (partial payment last cycle, service charge held, onboarding arrears)
+      //   YELLOW — due within 7 days, no balance
+      //   GREEN  — current, no balance
+      let statusColor = '#4caf50'; // Green
       if (daysUntilDue < 0) {
-        statusColor = '#ff0000'; // Red (Overdue)
+        statusColor = '#ff0000'; // Red — overdue by nextDueDate
+      } else if (totalOutstanding > 0) {
+        statusColor = '#ff9800'; // Orange — has balance even though not yet at next due date
       } else if (daysUntilDue <= 7) {
-        statusColor = '#ff9800'; // Orange (Due Soon)
+        statusColor = '#ff9800'; // Orange — due soon
       }
 
       return {
@@ -423,6 +434,9 @@ const getTenants = async (req, res) => {
         currentEffectiveLegal: currentLegal,
         isLegalIncreased: false,
         totalMonthlyFees,
+        totalOutstanding,
+        hasOutstanding: totalOutstanding > 0,
+        arrearsMonths,
         daysUntilDue,
         statusColor,
         unitReference: tenant.unitLabel || (tenant.unit?.label || 'N/A')
@@ -687,10 +701,11 @@ const getTenant = async (req, res) => {
     const _now = new Date();
     if (renewalStart <= _now) {
       const anchorDate = tenant.entryDate ? new Date(tenant.entryDate) : new Date(rentOrigin);
+      const _tenantOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
       const isLegacyDefault = tenant.nextDueDate &&
         renewalStart.getUTCMonth() === anchorDate.getUTCMonth() &&
         renewalStart.getUTCDate() === anchorDate.getUTCDate();
-      if (!tenant.nextDueDate || isLegacyDefault) {
+      if (!tenant.nextDueDate || (isLegacyDefault && _tenantOutstanding === 0)) {
         renewalStart = new Date(Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()));
         while (renewalStart <= _now) {
           renewalStart.setUTCFullYear(renewalStart.getUTCFullYear() + 1);
@@ -778,7 +793,17 @@ const getTenant = async (req, res) => {
       meter: tenant.electricMeterNumber,
       type: tenant.tenantType,
       typeBadge: tenant.tenantType === 'new' ? 'New' : tenant.tenantType === 'existing' ? 'Existing' : 'Transfer',
-      status: tenant.status
+      status: tenant.status,
+
+      // Outstanding balances (may exist independently of nextDue status)
+      rentOutstanding: tenant.rentOutstanding || 0,
+      serviceChargeOutstanding: tenant.serviceChargeOutstanding || 0,
+      totalOutstanding: (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0),
+      hasOutstanding: ((tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0)) > 0,
+      // How many months past nextDue (0 if current)
+      arrearsMonths: renewalStart < new Date()
+        ? Math.floor((new Date() - renewalStart) / (1000 * 60 * 60 * 24 * 30))
+        : 0
     };
 
     // Add financial summary
