@@ -379,16 +379,26 @@ const getTenants = async (req, res) => {
 
       const totalMonthlyFees = currentPrice + currentService;
 
-      // Project nextDueDate forward if it's in the past (same logic as getTenant)
+      // Project nextDueDate forward ONLY for legacy onboarding where nextDueDate was never
+      // updated from the entryDate default. If nextDueDate was set by a real payment cycle
+      // (i.e. it differs from entryDate) and is now past, the tenant is genuinely overdue —
+      // do not project so the overdue status is correctly shown.
       let projectedDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
       const _today = new Date();
       _today.setHours(0, 0, 0, 0);
       if (projectedDueDate && projectedDueDate < _today && tenant.entryDate) {
-        const anchor = new Date(tenant.entryDate);
-        projectedDueDate = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate()));
-        while (projectedDueDate <= _today) {
-          projectedDueDate.setUTCFullYear(projectedDueDate.getUTCFullYear() + 1);
+        const entry = new Date(tenant.entryDate);
+        const isLegacyDefault =
+          projectedDueDate.getUTCMonth() === entry.getUTCMonth() &&
+          projectedDueDate.getUTCDate() === entry.getUTCDate();
+        if (isLegacyDefault) {
+          const anchor = new Date(Date.UTC(entry.getUTCFullYear(), entry.getUTCMonth(), entry.getUTCDate()));
+          while (anchor <= _today) {
+            anchor.setUTCFullYear(anchor.getUTCFullYear() + 1);
+          }
+          projectedDueDate = anchor;
         }
+        // else: nextDueDate differs from entryDate → genuine overdue, keep the past date
       }
 
       const diffTime = projectedDueDate ? projectedDueDate - _today : 0;
@@ -667,18 +677,27 @@ const getTenant = async (req, res) => {
     const serviceBase = serviceBase0;
 
     // Anchor to nextDueDate so existing tenants see their actual upcoming renewal period.
-    // If nextDueDate is in the past (e.g. entry date was used as default), project it
-    // forward by 12-month steps until it lands in the future.
+    // Only project forward when nextDueDate matches entryDate (day+month) — meaning it was
+    // never updated from the onboarding default. If they differ, the tenant had a real payment
+    // cycle and a past nextDueDate means they are genuinely overdue; keep the original date so
+    // the yearlyBreakdown shows the current (unpaid) period, not a phantom future one.
     let renewalStart = tenant.nextDueDate
       ? new Date(tenant.nextDueDate)
       : (() => { const d = new Date(rentOrigin); d.setFullYear(d.getFullYear() + 1); return d; })();
     const _now = new Date();
     if (renewalStart <= _now) {
       const anchorDate = tenant.entryDate ? new Date(tenant.entryDate) : new Date(rentOrigin);
-      renewalStart = new Date(Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()));
-      while (renewalStart <= _now) {
-        renewalStart.setUTCFullYear(renewalStart.getUTCFullYear() + 1);
+      const isLegacyDefault = tenant.nextDueDate &&
+        renewalStart.getUTCMonth() === anchorDate.getUTCMonth() &&
+        renewalStart.getUTCDate() === anchorDate.getUTCDate();
+      if (!tenant.nextDueDate || isLegacyDefault) {
+        renewalStart = new Date(Date.UTC(anchorDate.getUTCFullYear(), anchorDate.getUTCMonth(), anchorDate.getUTCDate()));
+        while (renewalStart <= _now) {
+          renewalStart.setUTCFullYear(renewalStart.getUTCFullYear() + 1);
+        }
       }
+      // else: nextDueDate was set by a real payment cycle and is now past → tenant is overdue,
+      // keep renewalStart as-is so the yearly breakdown shows the current unpaid period.
     }
     const billingStart = new Date(renewalStart);
     billingStart.setUTCFullYear(billingStart.getUTCFullYear() - 1);
