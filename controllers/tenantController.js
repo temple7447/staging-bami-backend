@@ -379,15 +379,26 @@ const getTenants = async (req, res) => {
 
       const totalMonthlyFees = currentPrice + currentService;
 
-      // Project nextDueDate forward ONLY for legacy onboarding (nextDueDate matches entryDate
-      // day+month, meaning the system never updated it) AND the tenant has no recorded
-      // outstanding balance. If they have a balance, keep the past date — they are overdue.
-      let projectedDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
       const _today = new Date();
       _today.setHours(0, 0, 0, 0);
       const totalOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
-      if (projectedDueDate && projectedDueDate < _today && tenant.entryDate) {
-        const entry = new Date(tenant.entryDate);
+
+      // Resolve effective nextDueDate:
+      //   1. If missing entirely → derive from entryDate + 1 year (sensible first-renewal estimate)
+      //   2. If before entryDate → data error (bad import), treat same as missing
+      //   3. If equals entryDate day+month (legacy onboarding default) AND no outstanding
+      //      balance → project forward to next future anniversary
+      //   4. Any other past date → genuine overdue, keep it
+      const entry = tenant.entryDate ? new Date(tenant.entryDate) : null;
+      let projectedDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
+
+      // Case 1 & 2: no nextDueDate or nextDueDate is before entryDate (data error)
+      if ((!projectedDueDate || (entry && projectedDueDate < entry)) && entry) {
+        projectedDueDate = new Date(Date.UTC(entry.getUTCFullYear() + 1, entry.getUTCMonth(), entry.getUTCDate()));
+      }
+
+      // Case 3: legacy onboarding default (day+month matches entryDate, no balance)
+      if (projectedDueDate && projectedDueDate < _today && entry) {
         const isLegacyDefault =
           projectedDueDate.getUTCMonth() === entry.getUTCMonth() &&
           projectedDueDate.getUTCDate() === entry.getUTCDate();
@@ -398,27 +409,34 @@ const getTenants = async (req, res) => {
           }
           projectedDueDate = anchor;
         }
-        // else: has outstanding balance OR real payment cycle date → genuinely overdue
+        // Case 4: else → genuine overdue, keep the past date
       }
 
       const diffTime = projectedDueDate ? projectedDueDate - _today : 0;
-      const daysUntilDue = projectedDueDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : 0;
+      const daysUntilDue = projectedDueDate ? Math.ceil(diffTime / (1000 * 60 * 60 * 24)) : null;
 
-      // Determine how many months/years overdue (for chronic arrears display)
-      const arrearsMonths = daysUntilDue < 0 ? Math.floor(Math.abs(daysUntilDue) / 30) : 0;
+      // How many months past due (0 if current)
+      const arrearsMonths = daysUntilDue !== null && daysUntilDue < 0
+        ? Math.floor(Math.abs(daysUntilDue) / 30) : 0;
 
       // Status colour rules (Nigerian context):
-      //   RED    — past nextDueDate (genuine overdue or chronic arrears)
-      //   ORANGE — nextDueDate still in future but has an unpaid outstanding balance
-      //            (partial payment last cycle, service charge held, onboarding arrears)
-      //   YELLOW — due within 7 days, no balance
-      //   GREEN  — current, no balance
+      //   PURPLE — evicted: in legal dispute, not paying, still in unit
+      //   BLUE   — pending: pre-approved, not yet moved in
+      //   RED    — occupied + past nextDueDate (genuine overdue / chronic arrears)
+      //   ORANGE — occupied + nextDueDate in future BUT has outstanding balance
+      //            (partial payment, service charge held, onboarding arrears)
+      //   ORANGE — occupied + due within 7 days, no balance (due soon)
+      //   GREEN  — occupied, current, no balance
       let statusColor = '#4caf50'; // Green
-      if (daysUntilDue < 0) {
-        statusColor = '#ff0000'; // Red — overdue by nextDueDate
+      if (tenant.status === 'evicted') {
+        statusColor = '#9c27b0'; // Purple — legal dispute
+      } else if (tenant.status === 'pending') {
+        statusColor = '#2196f3'; // Blue — pre-move-in
+      } else if (daysUntilDue !== null && daysUntilDue < 0) {
+        statusColor = '#ff0000'; // Red — overdue
       } else if (totalOutstanding > 0) {
-        statusColor = '#ff9800'; // Orange — has balance even though not yet at next due date
-      } else if (daysUntilDue <= 7) {
+        statusColor = '#ff9800'; // Orange — has balance
+      } else if (daysUntilDue !== null && daysUntilDue <= 7) {
         statusColor = '#ff9800'; // Orange — due soon
       }
 
