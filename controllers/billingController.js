@@ -210,7 +210,27 @@ async function buildTenantDetail(tenant) {
     const unit = tenant.unit;
     const now = new Date();
 
-    const dueIn = daysFromNow(tenant.nextDueDate);
+    // Project nextDueDate using the same logic as the tenant list:
+    // If stored date matches entryDate day+month (legacy default) and is in the past
+    // with no onboarding outstanding, advance to the next future anniversary.
+    const entry = tenant.entryDate ? new Date(tenant.entryDate) : null;
+    let effectiveNextDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
+    if (!effectiveNextDueDate && entry) {
+        effectiveNextDueDate = new Date(Date.UTC(entry.getUTCFullYear() + 1, entry.getUTCMonth(), entry.getUTCDate()));
+    }
+    if (effectiveNextDueDate && effectiveNextDueDate < now && entry) {
+        const totalOnboardingOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
+        const isLegacyDefault =
+            effectiveNextDueDate.getUTCMonth() === entry.getUTCMonth() &&
+            effectiveNextDueDate.getUTCDate() === entry.getUTCDate();
+        if (isLegacyDefault && totalOnboardingOutstanding === 0) {
+            const anchor = new Date(Date.UTC(entry.getUTCFullYear(), entry.getUTCMonth(), entry.getUTCDate()));
+            while (anchor <= now) anchor.setUTCFullYear(anchor.getUTCFullYear() + 1);
+            effectiveNextDueDate = anchor;
+        }
+    }
+
+    const dueIn = daysFromNow(effectiveNextDueDate);
     const isOverdue = dueIn !== null && dueIn < 0;
 
     // ── 1. Recurring charges ──────────────────────────────────────────────────
@@ -230,7 +250,7 @@ async function buildTenantDetail(tenant) {
             effectiveAmount: effectiveRent,
             isIncreased: effectiveRent > (tenant.rentAmount || 0),
             frequency: 'monthly',
-            nextDueDate: tenant.nextDueDate,
+            nextDueDate: effectiveNextDueDate || tenant.nextDueDate,
             daysUntilDue: dueIn,
             isOverdue
         });
@@ -250,7 +270,7 @@ async function buildTenantDetail(tenant) {
             effectiveAmount: effectiveService,
             isIncreased: effectiveService > serviceBase,
             frequency: 'monthly',
-            nextDueDate: tenant.nextDueDate,
+            nextDueDate: effectiveNextDueDate || tenant.nextDueDate,
             daysUntilDue: dueIn,
             isOverdue
         });
@@ -382,7 +402,7 @@ async function buildTenantDetail(tenant) {
             phone: tenant.tenantPhone,
             unit: tenant.unitLabel || unit?.label,
             estate: tenant.estate?.name || tenant.estate,
-            nextDueDate: tenant.nextDueDate,
+            nextDueDate: effectiveNextDueDate || tenant.nextDueDate,
             daysUntilDue: dueIn,
             isOverdue,
             tenantType: tenant.tenantType,

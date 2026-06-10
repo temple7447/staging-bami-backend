@@ -115,12 +115,25 @@ const getTenantOverview = async (userId) => {
     const corrected = await reconcileNextDueDate(tenant, Payment);
     if (corrected) tenant.nextDueDate = corrected;
 
-    // Before first payment, nextDueDate == entryDate (payment due on move-in).
-    // Show entryDate+12 as display-only expected lease end without saving to DB.
-    let nextDueDate = tenant.nextDueDate;
-    if (tenant.entryDate && nextDueDate && new Date(nextDueDate).getTime() <= new Date(tenant.entryDate).getTime()) {
-      nextDueDate = new Date(tenant.entryDate);
-      nextDueDate.setMonth(nextDueDate.getMonth() + 12);
+    // Project nextDueDate forward to the next future anniversary when the stored date
+    // matches entryDate day+month and the tenant has no onboarding outstanding balance
+    // (legacy-default case — same logic as the tenant list endpoint).
+    const _now = new Date();
+    let nextDueDate = tenant.nextDueDate ? new Date(tenant.nextDueDate) : null;
+    const _entry = tenant.entryDate ? new Date(tenant.entryDate) : null;
+    if (!nextDueDate && _entry) {
+      nextDueDate = new Date(Date.UTC(_entry.getUTCFullYear() + 1, _entry.getUTCMonth(), _entry.getUTCDate()));
+    }
+    if (nextDueDate && nextDueDate < _now && _entry) {
+      const _onboardingOutstanding = (tenant.rentOutstanding || 0) + (tenant.serviceChargeOutstanding || 0);
+      const isLegacyDefault =
+        nextDueDate.getUTCMonth() === _entry.getUTCMonth() &&
+        nextDueDate.getUTCDate() === _entry.getUTCDate();
+      if (isLegacyDefault && _onboardingOutstanding === 0) {
+        const anchor = new Date(Date.UTC(_entry.getUTCFullYear(), _entry.getUTCMonth(), _entry.getUTCDate()));
+        while (anchor <= _now) anchor.setUTCFullYear(anchor.getUTCFullYear() + 1);
+        nextDueDate = anchor;
+      }
     }
 
     // Apartment info

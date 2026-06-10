@@ -1654,16 +1654,20 @@ async function paySelectedBillingItems(req, res) {
             amount: rentResult.totalAmount,
             duration: durationMonths
           });
-        } else if (itemId === 'service_charge' && tenant.unit?.serviceChargeMonthly > 0) {
-          const serviceChargeTotal = tenant.unit.serviceChargeMonthly * durationMonths;
-          totalAmount += serviceChargeTotal;
-          itemsToProcess.push({
-            type: 'predefined',
-            code: 'service_charge',
-            label: `Service Charge (${durationMonths} months)`,
-            amount: serviceChargeTotal,
-            duration: durationMonths
-          });
+        } else if (itemId === 'service_charge') {
+          const serviceBase = tenant.serviceChargeAmount || tenant.unit?.serviceChargeMonthly || 0;
+          if (serviceBase > 0) {
+            const svcOrigin = tenant.entryDate || tenant.createdAt;
+            const svcResult = calculateEffectiveRent(serviceBase, svcOrigin, durationMonths, false, svcOrigin);
+            totalAmount += svcResult.totalAmount;
+            itemsToProcess.push({
+              type: 'predefined',
+              code: 'service_charge',
+              label: `Service Charge (${durationMonths} months)`,
+              amount: svcResult.totalAmount,
+              duration: durationMonths
+            });
+          }
         } else if (itemId === 'caution_fee' && tenant.unit?.cautionFee > 0) {
           const paidCaution = await Payment.exists({
             tenant: tenant._id,
@@ -1935,6 +1939,10 @@ async function reconcileNextDueDate(tenant, PaymentModel) {
     paymentType: { $in: ['rent', 'bundle', 'initial'] },
     paymentStatus: 'completed',
   }, 'paystackResponse paymentDate paymentType').sort({ paymentDate: 1 }).lean();
+
+  // No payment history yet — the stored nextDueDate was explicitly set (e.g. admin onboarding
+  // an existing tenant). Overwriting it with entryDate would destroy the correct value.
+  if (allPayments.length === 0) return null;
 
   // Compute expected due date: entryDate + sum of all rent-covering paid durations
   let computed = new Date(tenant.entryDate);
