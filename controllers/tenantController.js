@@ -732,6 +732,16 @@ const getTenant = async (req, res) => {
       // else: nextDueDate was set by a real payment cycle and is now past → tenant is overdue,
       // keep renewalStart as-is so the yearly breakdown shows the current unpaid period.
     }
+
+    // Recalculate leaseDurationMonths using the projected renewalStart (initial calculation above
+    // used raw tenant.nextDueDate which equals entryDate for legacy-default tenants → 0 months).
+    if (tenant.entryDate) {
+      const _eDate = new Date(tenant.entryDate);
+      leaseDurationMonths = (renewalStart.getFullYear() - _eDate.getFullYear()) * 12 + (renewalStart.getMonth() - _eDate.getMonth());
+      leaseDurationMonths = Math.max(0, leaseDurationMonths);
+      totalLeaseAmount = (leaseDurationMonths * (currentCalculatedRent + currentCalculatedService)) + finalCalculatedCaution + finalCalculatedLegal;
+    }
+
     const billingStart = new Date(renewalStart);
     billingStart.setUTCFullYear(billingStart.getUTCFullYear() - 1);
 

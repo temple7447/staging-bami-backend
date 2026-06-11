@@ -299,9 +299,10 @@ const getTenantOverview = async (userId) => {
     const baseMonthlyRent = tenant.rentAmount || 0;
     const baseMonthlyService = tenant.serviceChargeAmount || 0;
 
-    // Renewal year starts at nextDueDate; current year is the 12-month period ending there.
-    const renewalStart = tenant.nextDueDate
-      ? new Date(tenant.nextDueDate)
+    // Renewal year starts at the projected nextDueDate (local variable already advanced to the
+    // next future anniversary for legacy-default tenants); current year is the 12-month period ending there.
+    const renewalStart = nextDueDate
+      ? new Date(nextDueDate)
       : (() => { const d = new Date(rentOrigin); d.setFullYear(d.getFullYear() + 1); return d; })();
     const billingStart = new Date(renewalStart);
     billingStart.setFullYear(billingStart.getFullYear() - 1);
