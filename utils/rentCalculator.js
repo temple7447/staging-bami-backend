@@ -47,10 +47,11 @@ const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originD
     const start  = new Date(startDate);
     const origin = originDate ? new Date(originDate) : start;
 
-    // Use integer year/month arithmetic to avoid setMonth day-overflow.
-    // e.g. May 31 + 1 month via setMonth = July 1 (June skipped), breaking cycle counts.
-    const startY  = start.getFullYear(),  startM  = start.getMonth();
-    const originY = origin.getFullYear(), originM = origin.getMonth();
+    // Use UTC to match the anchor projection in dashboardController (which uses getUTC* methods).
+    // Local-time getMonth() diverges from UTC when dates are stored near midnight UTC (e.g. Lagos UTC+1),
+    // causing a 1-month off-by-one that puts the first renewal month in the wrong cycle.
+    const startY  = start.getUTCFullYear(),  startM  = start.getUTCMonth();
+    const originY = origin.getUTCFullYear(), originM = origin.getUTCMonth();
 
     let currentRent = baseAmount;
     let totalTotal  = 0;
