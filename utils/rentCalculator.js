@@ -50,8 +50,14 @@ const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originD
     // Use UTC to match the anchor projection in dashboardController (which uses getUTC* methods).
     // Local-time getMonth() diverges from UTC when dates are stored near midnight UTC (e.g. Lagos UTC+1),
     // causing a 1-month off-by-one that puts the first renewal month in the wrong cycle.
-    const startY  = start.getUTCFullYear(),  startM  = start.getUTCMonth();
-    const originY = origin.getUTCFullYear(), originM = origin.getUTCMonth();
+    const startY  = start.getUTCFullYear(),  startM  = start.getUTCMonth(),  startD  = start.getUTCDate();
+    const originY = origin.getUTCFullYear(), originM = origin.getUTCMonth(), originD = origin.getUTCDate();
+
+    // Fold the day-of-month gap into a fractional month so a period that begins a few days BEFORE an
+    // anniversary still rounds to the correct cycle. Without this, a nextDueDate of June 30 against a
+    // July 1 entry counts the first renewal month as 23 months (base) instead of 24 (increased),
+    // shaving one month off the 26% increase for the whole renewal year.
+    const dayOffset = (startD - originD) / 30;
 
     let currentRent = baseAmount;
     let totalTotal  = 0;
@@ -61,8 +67,8 @@ const calculateEffectiveRent = (baseAmount, startDate, months, isVacant, originD
         const curY = startY + Math.floor(absMonth / 12);
         const curM = absMonth % 12;
 
-        const monthsSinceOrigin = (curY - originY) * 12 + (curM - originM);
-        const cycles = Math.floor(Math.max(0, monthsSinceOrigin) / cycleMonths);
+        const monthsSinceOrigin = (curY - originY) * 12 + (curM - originM) + dayOffset;
+        const cycles = Math.floor(Math.max(0, Math.round(monthsSinceOrigin)) / cycleMonths);
 
         const monthlyRent = Math.round(baseAmount * Math.pow(INCREASE_RATE, cycles));
         totalTotal  += monthlyRent;
