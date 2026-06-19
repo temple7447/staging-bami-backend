@@ -1,0 +1,72 @@
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from core.config import settings
+import re
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+bearer_scheme = HTTPBearer()
+
+
+def hash_password(password: str) -> str:
+    return pwd_context.hash(password)
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain, hashed)
+
+
+def create_access_token(user_id: str, role: str) -> str:
+    # Parse expiry like "30d", "24h", "60m"
+    expire_str = settings.JWT_EXPIRE
+    match = re.match(r"(\d+)([dhm])", expire_str)
+    if match:
+        val, unit = int(match.group(1)), match.group(2)
+        delta = {"d": timedelta(days=val), "h": timedelta(hours=val), "m": timedelta(minutes=val)}[unit]
+    else:
+        delta = timedelta(days=30)
+
+    expire = datetime.now(timezone.utc) + delta
+    return jwt.encode(
+        {"id": user_id, "role": role, "exp": expire},
+        settings.JWT_SECRET,
+        algorithm=settings.JWT_ALGORITHM,
+    )
+
+
+def decode_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authorized to access this resource")
+
+
+# ── Dependency: get current user from Bearer token ────────────────────────────
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)):
+    from models.user import User
+    payload = decode_token(credentials.credentials)
+    user = await User.get(payload["id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="No user found with this token")
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="User account has been deactivated")
+    return user
+
+
+# ── Role guards (use as Depends) ──────────────────────────────────────────────
+
+def require_roles(*roles: str):
+    async def checker(user=Depends(get_current_user)):
+        if user.role not in roles:
+            raise HTTPException(status_code=403, detail=f"Role '{user.role}' is not authorized")
+        return user
+    return checker
+
+
+require_super_admin     = require_roles("super_admin")
+require_admin_or_above  = require_roles("super_admin", "admin", "super_manager")
+require_business_owner  = require_roles("super_admin", "business_owner")
