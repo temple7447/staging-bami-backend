@@ -28,8 +28,11 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200/15minutes"])
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_db(app)
+    from utils.scheduler import start_scheduler, stop_scheduler
+    start_scheduler()
     logger.info("BamiHustle FastAPI server started")
     yield
+    stop_scheduler()
     await disconnect_db()
     logger.info("BamiHustle FastAPI server stopped")
 

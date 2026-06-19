@@ -5,7 +5,7 @@ implemented.  Paystack-initialised payment flows are stubbed and will be wired
 in Phase 6 (Paystack webhooks / email / PDF).
 """
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from datetime import datetime
 from bson import ObjectId
 from typing import Optional
@@ -94,8 +94,50 @@ async def verify_payment(reference: str, user: User = Depends(get_current_user))
 
 
 @router.post("/callback")
-async def payment_callback(body: dict):
-    return {"success": True, "message": "Callback received"}
+async def payment_callback(request: Request):
+    """
+    Paystack webhook — verifies HMAC-SHA512 signature then processes event.
+    Supported events: charge.success, transfer.success, transfer.failed
+    """
+    import hashlib, hmac, os
+
+    secret   = os.getenv("PAYSTACK_SECRET_KEY", "")
+    raw_body = await request.body()
+    sig      = request.headers.get("x-paystack-signature", "")
+
+    if secret:
+        expected = hmac.new(secret.encode(), raw_body, hashlib.sha512).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(status_code=400, detail="Invalid Paystack signature")
+
+    try:
+        payload    = await request.json()
+    except Exception:
+        import json
+        payload = json.loads(raw_body)
+
+    event = payload.get("event", "")
+    data  = payload.get("data", {})
+
+    if event == "charge.success":
+        reference = data.get("reference", "")
+        amount    = data.get("amount", 0) / 100  # Paystack sends kobo
+        coll      = Payment.get_motor_collection()
+        await coll.update_one(
+            {"reference": reference},
+            {"$set": {"payment_status": "completed", "amount": amount, "updated_at": datetime.utcnow()}},
+            upsert=False,
+        )
+    elif event in ("transfer.success", "transfer.failed"):
+        reference = data.get("reference", "")
+        status    = "completed" if event == "transfer.success" else "failed"
+        coll      = Payment.get_motor_collection()
+        await coll.update_one(
+            {"reference": reference},
+            {"$set": {"payment_status": status, "updated_at": datetime.utcnow()}},
+        )
+
+    return {"success": True, "event": event}
 
 
 # ── Manual payment recording (Admin) ─────────────────────────────────────────

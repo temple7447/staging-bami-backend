@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from api.v1.endpoints import auth, estates, units, tenants, dashboard
 from api.v1.endpoints import wallet, billing, payments
 from api.v1.endpoints import notifications, issues, service_requests, enquiries
+from api.v1.endpoints import subscriptions, withdrawals, misc
 
 api_router = APIRouter(prefix="/api")
 
@@ -17,8 +18,6 @@ api_router.include_router(notifications.router)
 api_router.include_router(issues.router)
 api_router.include_router(service_requests.router)
 api_router.include_router(enquiries.router)
-
-# ── Remaining routers — uncomment as each phase is complete ──────────────────
-# from api.v1.endpoints import subscriptions, withdrawals
-# from api.v1.endpoints import rental_applications, bank_deposits
-# from api.v1.endpoints import business_types, upload, vendor_manager_payout
+api_router.include_router(subscriptions.router)
+api_router.include_router(withdrawals.router)
+api_router.include_router(misc.router)
