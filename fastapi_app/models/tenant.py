@@ -1,5 +1,5 @@
 from beanie import Document
-from pydantic import Field
+from pydantic import BaseModel, Field
 from typing import Optional, List, Any
 from datetime import datetime
 from enum import Enum
@@ -19,24 +19,13 @@ class TenantType(str, Enum):
     transfer = "transfer"
 
 
-class HistoryEvent(str, Enum):
-    created    = "created"
-    moved_in   = "moved_in"
-    moved_out  = "moved_out"
-    rent_update = "rent_update"
-    payment    = "payment"
-    note       = "note"
-
-
-class TenantHistory(Document):
-    event:      HistoryEvent
+class TenantHistory(BaseModel):
+    """Embedded history entry — stored inline inside the tenant document."""
+    event:      str
     note:       Optional[str] = None
     meta:       Optional[Any] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    created_by: Optional[ObjectId] = None
-
-    class Settings:
-        name = "tenant_history"
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_by: Optional[str] = None
 
 
 class Tenant(Document):
@@ -53,8 +42,8 @@ class Tenant(Document):
     service_charge_amount:  float = 0.0
     base_service_charge:    float = 0.0
 
-    tenant_type: TenantType   = TenantType.new
-    status:      TenantStatus = TenantStatus.occupied
+    tenant_type: str = "new"
+    status:      str = "occupied"
 
     electric_meter_number: str = ""
     entry_date:            Optional[datetime] = None
@@ -67,7 +56,7 @@ class Tenant(Document):
     history: List[TenantHistory] = Field(default_factory=list)
 
     is_active:  bool = True
-    created_by: ObjectId = ...
+    created_by: Optional[ObjectId] = None
     updated_by: Optional[ObjectId] = None
 
     rent_outstanding:            float = 0.0
