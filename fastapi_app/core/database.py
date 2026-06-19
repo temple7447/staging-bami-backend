@@ -2,6 +2,7 @@ from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import FastAPI
 from core.config import settings
+import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,8 +12,16 @@ client: AsyncIOMotorClient = None
 
 async def connect_db(app: FastAPI):
     global client
-    client = AsyncIOMotorClient(settings.MONGODB_URI)
-    db = client.get_default_database()
+    client = AsyncIOMotorClient(
+        settings.MONGODB_URI,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        tlsAllowInvalidCertificates=True,
+    )
+    try:
+        db = client.get_default_database()
+    except Exception:
+        db = client["bamihustle"]
 
     # Import all Beanie document models here so they are registered
     from models.user import User
@@ -37,16 +46,22 @@ async def connect_db(app: FastAPI):
     from models.reminder_log import ReminderLog
     from models.setting import Setting
 
-    await init_beanie(
-        database=db,
-        document_models=[
-            User, Tenant, Estate, Unit, Payment, Wallet, WalletAccount,
-            Transaction, Notification, Issue, BillingItem, Subscription,
-            ServiceRequest, RentalApplication, Enquiry, BankDeposit,
-            Withdrawal, BusinessType, Visit, ReminderLog, Setting,
-        ]
-    )
-    logger.info("Database connected and Beanie initialised")
+    try:
+        await asyncio.wait_for(
+            init_beanie(
+                database=db,
+                document_models=[
+                    User, Tenant, Estate, Unit, Payment, Wallet, WalletAccount,
+                    Transaction, Notification, Issue, BillingItem, Subscription,
+                    ServiceRequest, RentalApplication, Enquiry, BankDeposit,
+                    Withdrawal, BusinessType, Visit, ReminderLog, Setting,
+                ]
+            ),
+            timeout=8.0,
+        )
+        logger.info("Database connected and Beanie initialised")
+    except Exception as e:
+        logger.warning(f"Database connection failed: {e}. Starting without DB.")
 
 
 async def disconnect_db():
