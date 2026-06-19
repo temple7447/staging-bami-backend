@@ -254,17 +254,106 @@ async def get_estate_payments(
 
 @router.get("/{payment_id}/download")
 async def download_payment_receipt(payment_id: str, user: User = Depends(get_current_user)):
-    return {"success": True, "message": "PDF receipt generation pending (Phase 6)", "payment_id": payment_id}
+    from fastapi.responses import Response
+    from utils.pdf_service import generate_receipt_pdf
+    from utils.rent_calculator import calculate_effective_rent
+
+    coll    = Payment.get_motor_collection()
+    payment = await coll.find_one({"_id": ObjectId(payment_id)})
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    tenant = await Tenant.get(payment.get("tenant"))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    estate = await Estate.get(tenant.estate) if tenant.estate else None
+
+    now         = datetime.utcnow()
+    entry       = tenant.entry_date or now
+    rent_info   = calculate_effective_rent(tenant.rent_amount or 0, entry, now)
+    next_due    = tenant.next_due_date or now
+
+    receipt_data = {
+        "paymentDate":              payment.get("created_at", now).strftime("%d/%m/%Y") if hasattr(payment.get("created_at", now), "strftime") else str(payment.get("created_at", "")),
+        "moveInDate":               entry.strftime("%d/%m/%Y"),
+        "expiryDate":               next_due.strftime("%d/%m/%Y"),
+        "currentYear":              str(now.year),
+        "nextYear":                 str(now.year + 1),
+        "yearDuration":             rent_info.get("year_label", "1st YEAR"),
+        "tenancyDuration":          "1 YEAR",
+        "tenantTotalStay":          rent_info.get("year_label", "1st YEAR"),
+        "rentAmount":               tenant.rent_amount or 0,
+        "rentOutstanding":          0,
+        "serviceCharge":            tenant.service_charge or 0,
+        "serviceChargeOutstanding": 0,
+        "cautionFee":               tenant.caution_fee or 0,
+        "legalFee":                 tenant.legal_fee or 0,
+        "outstandingBalance":       tenant.outstanding_balance or 0,
+        "currentTotalTenancyRate":  (tenant.rent_amount or 0) + (tenant.service_charge or 0),
+        "nextTotalTenancyRate":     rent_info.get("next_effective_rent", 0) + (tenant.service_charge or 0) * 1.26,
+        "nextIncreaseDate":         rent_info.get("next_increase_date", ""),
+        "nextRentIncrease":         rent_info.get("next_effective_rent", 0),
+        "nextServiceChargeIncrease": (tenant.service_charge or 0) * 1.26,
+        "totalTenancyRateIncrease": rent_info.get("next_effective_rent", 0) + (tenant.service_charge or 0) * 1.26,
+    }
+    tenant_info = {
+        "tenantName": f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
+        "unitLabel":  tenant.unit_label or "Standard",
+    }
+    estate_info = {"name": estate.name if estate else ""}
+
+    pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
+    fname = f"receipt_{payment_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 @router.post("/{payment_id}/receipt")
 async def send_payment_receipt(payment_id: str, user: User = Depends(get_current_user)):
-    return {"success": True, "message": "Email receipt pending (Phase 6)", "payment_id": payment_id}
+    from utils.email_service import send_payment_confirmation
+
+    coll    = Payment.get_motor_collection()
+    payment = await coll.find_one({"_id": ObjectId(payment_id)})
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    tenant = await Tenant.get(payment.get("tenant"))
+    if not tenant or not tenant.email:
+        return {"success": False, "message": "Tenant email not available"}
+
+    result = await send_payment_confirmation(
+        recipient_email = tenant.email,
+        name            = f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
+        amount          = payment.get("amount", 0),
+        reference       = payment.get("reference", payment_id),
+        payment_type    = payment.get("payment_type", "rent"),
+    )
+    return {"success": result.get("success", False), "message": "Receipt email sent" if result.get("success") else result.get("error")}
 
 
 @router.post("/tenant/{tenant_id}/receipt")
 async def send_tenant_receipt(tenant_id: str, user: User = Depends(get_current_user)):
-    return {"success": True, "message": "Email receipt pending (Phase 6)", "tenant_id": tenant_id}
+    from utils.email_service import send_rent_reminder
+
+    tenant = await _get_tenant_or_400(tenant_id)
+    if not tenant.email:
+        return {"success": False, "message": "Tenant has no email on record"}
+
+    from utils.tenant_helpers import process_tenant
+    from utils.rent_calculator import calculate_effective_rent
+
+    info   = process_tenant(tenant)
+    result = await send_rent_reminder(
+        recipient_email = tenant.email,
+        name            = f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
+        amount          = info.get("current_effective_rent", tenant.rent_amount or 0),
+        due_date        = str(info.get("next_due_date", "")),
+    )
+    return {"success": result.get("success", False), "message": "Reminder sent" if result.get("success") else result.get("error")}
 
 
 @router.post("/{payment_id}/refund")
