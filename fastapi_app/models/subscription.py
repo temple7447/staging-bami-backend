@@ -5,7 +5,7 @@ from datetime import datetime
 from bson import ObjectId
 
 
-class Usubscription(Document):
+class Subscription(Document):
     """Stub — full fields to be added in the relevant phase."""
     data: Optional[Any] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

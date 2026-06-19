@@ -6,8 +6,15 @@ from bson import ObjectId
 
 
 class Transaction(Document):
+    # Rent/billing transactions (used by tenants endpoint)
     tenant:       Optional[ObjectId] = None
     estate:       Optional[ObjectId] = None
+
+    # Wallet transactions (used by wallet endpoint)
+    user:         Optional[ObjectId] = None
+    wallet_id:    Optional[ObjectId] = None
+    description:  Optional[str] = None
+
     amount:       float = 0.0
     type:         str = "rent"
     method:       Optional[str] = None
@@ -25,5 +32,6 @@ class Transaction(Document):
         name = "transactions"
         indexes = [
             [("tenant", 1), ("status", 1)],
+            [("user", 1), ("created_at", -1)],
             [("estate", 1)],
         ]

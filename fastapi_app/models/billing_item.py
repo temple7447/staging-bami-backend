@@ -20,6 +20,7 @@ class BillingItem(Document):
     category:     Optional[str] = None
     frequency:    Optional[str] = None
     created_by:   Optional[ObjectId] = None
+    updated_by:   Optional[ObjectId] = None
     created_at:   datetime = Field(default_factory=datetime.utcnow)
     updated_at:   datetime = Field(default_factory=datetime.utcnow)
 
