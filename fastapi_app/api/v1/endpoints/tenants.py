@@ -522,7 +522,17 @@ async def delete_tenant(
         if u:
             u.is_active = False
             await save(db, u)
+    # Free the unit
+    if tenant.unit:
+        unit = await db.get(Unit, tenant.unit)
+        if unit:
+            unit.status = "vacant"
+            unit.occupied_by = None
+            unit.occupied_since = None
+            unit.updated_by = user.id
+            await save(db, unit)
     tenant.is_active = False
+    tenant.status = "vacant"
     tenant.updated_by = user.id
     tenant.updated_at = datetime.utcnow()
     await save(db, tenant)

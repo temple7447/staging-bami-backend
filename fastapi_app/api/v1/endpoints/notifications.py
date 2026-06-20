@@ -26,15 +26,15 @@ async def get_notifications(
             "data": [_n(n) for n in items]}
 
 
-@router.put("/{nid}/read")
-async def mark_read(nid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    n = await find_one(db, Notification, Notification.id == nid, Notification.user == user.id)
-    if not n:
-        raise HTTPException(status_code=404, detail="Notification not found")
-    n.is_read = True
-    n.read_at = datetime.utcnow()
-    await save(db, n)
-    return {"success": True, "data": _n(n)}
+@router.get("/count")
+async def get_notification_count(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    items = await find_all(db, Notification,
+                           Notification.user == user.id, Notification.is_active == True,
+                           Notification.is_read == False)
+    return {"success": True, "count": len(items), "unread": len(items)}
 
 
 @router.put("/read-all")
@@ -47,6 +47,17 @@ async def mark_all_read(db: AsyncSession = Depends(get_db), user: User = Depends
     )
     await db.commit()
     return {"success": True, "message": "All notifications marked as read"}
+
+
+@router.put("/{nid}/read")
+async def mark_read(nid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    n = await find_one(db, Notification, Notification.id == nid, Notification.user == user.id)
+    if not n:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    n.is_read = True
+    n.read_at = datetime.utcnow()
+    await save(db, n)
+    return {"success": True, "data": _n(n)}
 
 
 @router.delete("/{nid}")

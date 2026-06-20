@@ -5,7 +5,8 @@ from typing import Optional
 class EstateCreate(BaseModel):
     name:        str
     description: Optional[str] = None
-    total_units: int
+    address:     Optional[str] = None
+    total_units: int = 0
 
     @field_validator("total_units")
     @classmethod

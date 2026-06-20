@@ -62,17 +62,22 @@ async def list_units(
 @router.post("/", status_code=201)
 async def create_unit(
     body: UnitCreate,
+    estate_id: Optional[str] = Query(None, alias="estateId"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
-    estate = await find_one(db, Estate, Estate.id == body.estate, Estate.is_active == True)
+    eid = estate_id or body.estate
+    if not eid:
+        raise HTTPException(status_code=400, detail="estateId is required")
+    estate = await find_one(db, Estate, Estate.id == eid, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
-    unit = Unit(id=gen_uuid(), **body.model_dump(), created_by=user.id)
+    data = body.model_dump()
+    data["estate"] = eid
+    unit = Unit(id=gen_uuid(), **data, created_by=user.id)
     await save(db, unit)
-    # bump estate total_units
     estate.total_units = (estate.total_units or 0) + 1
     await save(db, estate)
     return {"success": True, "data": _u(unit)}

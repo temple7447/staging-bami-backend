@@ -178,8 +178,8 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
 
 @router.get("/summary")
 async def get_billing_summary(
-    estate_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    estate_id: Optional[str] = Query(None, alias="estateId"),
+    tenant_id: Optional[str] = Query(None, alias="tenantId"),
     status: Optional[str] = None,
     page: int = 1,
     limit: int = 20,

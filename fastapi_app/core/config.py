@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = (
         "http://localhost:3000,"
         "http://localhost:5173,"
+        "http://localhost:8080,"
+        "http://localhost:4200,"
         "https://www.bamihost.com,"
         "https://staging-baminhost.vercel.app"
     )

@@ -20,6 +20,7 @@ class UnitCreate(BaseModel):
     amenities:             dict = {}
     street_address:        Optional[str] = None
     features:              List[dict] = []
+    estate:                Optional[str] = None
 
 
 class UnitUpdate(BaseModel):
@@ -32,6 +33,7 @@ class UnitUpdate(BaseModel):
     description:           Optional[str]   = None
     category:              Optional[str] = None
     listing_type:          Optional[str] = None
+    status:                Optional[str] = None
     available_date:        Optional[datetime] = None
     bedrooms:              Optional[int]   = None
     bathrooms:             Optional[int]   = None
