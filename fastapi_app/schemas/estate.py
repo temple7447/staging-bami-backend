@@ -1,8 +1,11 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic.alias_generators import to_camel
 from typing import Optional
 
 
 class EstateCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     name:        str
     description: Optional[str] = None
     address:     Optional[str] = None
@@ -17,6 +20,8 @@ class EstateCreate(BaseModel):
 
 
 class EstateUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     name:        Optional[str] = None
     description: Optional[str] = None
     total_units: Optional[int] = None

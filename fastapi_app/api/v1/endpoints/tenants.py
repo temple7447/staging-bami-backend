@@ -283,6 +283,25 @@ async def get_my_billing_items(db: AsyncSession = Depends(get_db), user: User = 
     return {"success": True, "data": {"recurring": recurring, "one_time": one_time, "optional": []}}
 
 
+@router.get("/me/transactions")
+async def list_my_transactions(
+    page: int = 1, limit: int = 20,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant record not found")
+    total = await count(db, Transaction, Transaction.user == user.id)
+    skip  = (page - 1) * limit
+    items = await find_all(db, Transaction, Transaction.user == user.id,
+                           order_by=Transaction.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "data": [
+        {"id": t.id, "amount": t.amount, "type": t.type, "method": t.method,
+         "status": t.status, "reference": t.reference, "created_at": t.created_at}
+        for t in items
+    ]}
+
+
 @router.post("/me/billing/pay")
 async def pay_billing_items(
     body: PayBillingItemsRequest,

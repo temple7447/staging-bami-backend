@@ -20,6 +20,7 @@ import models.subscription, models.service_request, models.rental_application  #
 import models.enquiry, models.bank_deposit, models.withdrawal  # noqa: F401
 import models.business_type, models.visit, models.reminder_log, models.setting  # noqa: F401
 from middleware.logging import logging_middleware
+from middleware.camelize import camelize_response_middleware
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -70,6 +71,9 @@ app.add_middleware(
 
 # Request logging
 app.middleware("http")(logging_middleware)
+
+# Convert all JSON response keys from snake_case to camelCase
+app.middleware("http")(camelize_response_middleware)
 
 # Routes
 app.include_router(api_router)

@@ -137,7 +137,11 @@ async def list_bank_deposits(
     if status:
         conditions.append(BankDeposit.status == status)
     items = await find_all(db, BankDeposit, *conditions, order_by=BankDeposit.created_at.desc())
-    return {"success": True, "data": [{"id": i.id, "amount": i.amount, "status": i.status, "bank_name": i.bank_name} for i in items]}
+    return {"success": True, "count": len(items), "data": [
+        {"id": i.id, "amount": i.amount, "status": i.status, "bank_name": i.bank_name,
+         "reference": i.reference, "paid_for": i.paid_for, "notes": i.notes, "created_at": i.created_at}
+        for i in items
+    ]}
 
 
 @router.patch("/bank-deposits/{dep_id}/approve")
