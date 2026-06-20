@@ -97,7 +97,7 @@ async def get_overall_overview(
     }}
 
 
-@router.get("/")
+@router.get("")
 async def list_estates(
     page: int = 1,
     limit: int = 20,
@@ -113,7 +113,7 @@ async def list_estates(
     return {"success": True, "count": len(items), "data": [_e(e) for e in items]}
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_estate(
     body: EstateCreate,
     db: AsyncSession = Depends(get_db),

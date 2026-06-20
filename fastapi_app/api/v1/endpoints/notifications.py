@@ -13,7 +13,7 @@ from models.base import gen_uuid
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
-@router.get("/")
+@router.get("")
 async def get_notifications(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),

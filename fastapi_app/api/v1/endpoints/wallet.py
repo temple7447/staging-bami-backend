@@ -48,7 +48,7 @@ async def _record_transaction(
     return tx
 
 
-@router.get("/")
+@router.get("")
 async def get_wallet(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     wallet = await _get_or_create_wallet(db, user.id)
     return {"success": True, "data": {
@@ -59,7 +59,7 @@ async def get_wallet(db: AsyncSession = Depends(get_db), user: User = Depends(ge
     }}
 
 
-@router.post("/")
+@router.post("/create")
 async def create_wallet(
     body: CreateWalletRequest,
     db: AsyncSession = Depends(get_db),

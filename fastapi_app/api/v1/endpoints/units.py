@@ -35,7 +35,7 @@ def _u(u: Unit) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 async def list_units(
     estate_id: Optional[str] = Query(None, alias="estateId"),
     status: Optional[str] = None,
@@ -59,7 +59,7 @@ async def list_units(
     }
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_unit(
     body: UnitCreate,
     estate_id: Optional[str] = Query(None, alias="estateId"),

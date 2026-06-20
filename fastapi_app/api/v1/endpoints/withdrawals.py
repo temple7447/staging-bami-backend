@@ -26,7 +26,7 @@ class WithdrawalRequest(BaseModel):
     notes: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 @router.post("/request", status_code=201)
 async def request_withdrawal(
     body: WithdrawalRequest,

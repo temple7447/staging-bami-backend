@@ -25,14 +25,14 @@ class EnquiryCreate(BaseModel):
     unit: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def submit_enquiry(body: EnquiryCreate, db: AsyncSession = Depends(get_db)):
     eq = Enquiry(id=gen_uuid(), **body.model_dump())
     await save(db, eq)
     return {"success": True, "message": "Enquiry submitted successfully", "data": _e(eq)}
 
 
-@router.get("/")
+@router.get("")
 async def list_enquiries(
     status: Optional[str] = None,
     estate: Optional[str] = None,

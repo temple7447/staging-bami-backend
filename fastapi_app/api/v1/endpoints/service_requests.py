@@ -25,7 +25,7 @@ class ServiceRequestCreate(BaseModel):
     unit: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_service_request(
     body: ServiceRequestCreate,
     db: AsyncSession = Depends(get_db),
@@ -36,7 +36,7 @@ async def create_service_request(
     return {"success": True, "data": _sr(sr)}
 
 
-@router.get("/")
+@router.get("")
 async def list_service_requests(
     status: Optional[str] = None,
     estate: Optional[str] = None,

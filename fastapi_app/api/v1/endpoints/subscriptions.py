@@ -38,7 +38,7 @@ class SubscriptionUpdate(BaseModel):
     status: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_subscription(
     body: SubscriptionCreate,
     db: AsyncSession = Depends(get_db),
@@ -57,7 +57,7 @@ async def create_subscription(
     return {"success": True, "data": _s(sub)}
 
 
-@router.get("/")
+@router.get("")
 async def list_subscriptions(
     billing_period: Optional[str] = None,
     status: Optional[str] = None,

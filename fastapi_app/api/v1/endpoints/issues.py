@@ -26,7 +26,7 @@ class IssueCreate(BaseModel):
     tenant: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_issue(
     body: IssueCreate,
     db: AsyncSession = Depends(get_db),
@@ -37,7 +37,7 @@ async def create_issue(
     return {"success": True, "data": _i(issue)}
 
 
-@router.get("/")
+@router.get("")
 async def list_issues(
     status: Optional[str] = None,
     priority: Optional[str] = None,

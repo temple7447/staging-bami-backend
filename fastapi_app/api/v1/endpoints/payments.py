@@ -31,7 +31,7 @@ class PaymentCreate(BaseModel):
     reference: Optional[str] = None
 
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_payment(
     body: PaymentCreate,
     db: AsyncSession = Depends(get_db),
@@ -42,7 +42,7 @@ async def create_payment(
     return {"success": True, "data": _p(payment)}
 
 
-@router.get("/")
+@router.get("")
 async def list_payments(
     tenant_id: Optional[str] = None,
     estate_id: Optional[str] = None,

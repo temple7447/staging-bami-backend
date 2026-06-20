@@ -60,7 +60,7 @@ async def _reconcile_next_due_date(db: AsyncSession, tenant: Tenant) -> datetime
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
-@router.post("/", status_code=201)
+@router.post("", status_code=201)
 async def create_tenant(
     body: TenantCreate,
     estate_id: Optional[str] = Query(None, alias="estateId"),
@@ -172,7 +172,7 @@ async def create_tenant(
 
 # ── List ──────────────────────────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("")
 async def list_tenants(
     estate_id: Optional[str] = Query(None, alias="estateId"),
     page: int = 1, limit: int = 20,
