@@ -11,6 +11,14 @@ from slowapi.errors import RateLimitExceeded
 from core.config import settings
 from core.database import connect_db, disconnect_db
 from api.v1.router import api_router
+
+# Import all models so SQLAlchemy registers them before create_all
+import models.user, models.estate, models.unit, models.tenant  # noqa: F401
+import models.payment, models.wallet, models.wallet_account, models.transaction  # noqa: F401
+import models.notification, models.issue, models.billing_item  # noqa: F401
+import models.subscription, models.service_request, models.rental_application  # noqa: F401
+import models.enquiry, models.bank_deposit, models.withdrawal  # noqa: F401
+import models.business_type, models.visit, models.reminder_log, models.setting  # noqa: F401
 from middleware.logging import logging_middleware
 
 # ── Logging setup ─────────────────────────────────────────────────────────────

@@ -1,29 +1,24 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class RentalApplication(Document):
-    first_name:   str = ""
-    last_name:    str = ""
-    email:        str = ""
-    phone:        Optional[str] = None
-    unit:         Optional[ObjectId] = None
-    estate:       Optional[ObjectId] = None
-    message:      Optional[str] = None
-    move_in_date: Optional[str] = None
-    status:       str = "pending"  # pending | approved | rejected | waitlisted
-    submitted_by: Optional[ObjectId] = None
-    updated_by:   Optional[ObjectId] = None
-    is_active:    bool = True
-    created_at:   datetime = Field(default_factory=datetime.utcnow)
-    updated_at:   datetime = Field(default_factory=datetime.utcnow)
+class RentalApplication(Base):
+    __tablename__ = "rental_applications"
 
-    class Settings:
-        name = "rental-applications"
-        indexes = [
-            [("email", 1)],
-            [("estate", 1), ("status", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    first_name: Mapped[str] = mapped_column(String(255), default="")
+    last_name: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="", index=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    unit: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    estate: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    move_in_date: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    submitted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

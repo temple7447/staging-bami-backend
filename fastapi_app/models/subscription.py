@@ -1,23 +1,21 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional, List
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class Subscription(Document):
-    name:           str = ""
-    price:          float = 0.0
-    billing_period: str = "month"   # month | year | week | day | one-time
-    description:    Optional[str] = None
-    icon:           Optional[str] = None
-    status:         str = "Active"  # Active | Inactive
-    features:       List[str] = Field(default_factory=list)
-    is_active:      bool = True
-    created_by:     Optional[ObjectId] = None
-    created_at:     datetime = Field(default_factory=datetime.utcnow)
-    updated_at:     datetime = Field(default_factory=datetime.utcnow)
+class Subscription(Base):
+    __tablename__ = "subscriptions"
 
-    class Settings:
-        name = "subscriptions"
-        indexes = [[("status", 1)]]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    billing_period: Mapped[str] = mapped_column(String(50), default="month")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="Active")
+    features: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

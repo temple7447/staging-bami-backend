@@ -1,23 +1,21 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Float, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class BankDeposit(Document):
-    amount:       float = 0.0
-    bank_name:    Optional[str] = None
-    reference:    Optional[str] = None
-    paid_for:     Optional[str] = None
-    status:       str = "pending"   # pending | approved | rejected
-    submitted_by: Optional[ObjectId] = None
-    approved_by:  Optional[ObjectId] = None
-    notes:        Optional[str] = None
-    is_active:    bool = True
-    created_at:   datetime = Field(default_factory=datetime.utcnow)
-    updated_at:   datetime = Field(default_factory=datetime.utcnow)
+class BankDeposit(Base):
+    __tablename__ = "bank_deposits"
 
-    class Settings:
-        name = "bank-deposits"
-        indexes = [[("status", 1), ("created_at", -1)]]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    bank_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    paid_for: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    submitted_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

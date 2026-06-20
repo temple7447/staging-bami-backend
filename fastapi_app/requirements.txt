@@ -2,21 +2,21 @@
 fastapi==0.115.12
 uvicorn[standard]==0.34.3
 
-# MongoDB (async)
-motor==3.7.1
-beanie==1.29.0
+# Database (SQLite locally, Postgres on prod)
+sqlalchemy==2.0.41
+aiosqlite==0.21.0
 
 # Auth
 python-jose==3.3.0
 passlib[bcrypt]==1.7.4
 
-# Validation / Settings  (pydantic 2.13.4 ships Python 3.14 wheels)
+# Validation / Settings
 pydantic==2.13.4
 pydantic-settings==2.9.1
 email-validator==2.2.0
 python-multipart==0.0.20
 
-# HTTP client (Paystack, external APIs)
+# HTTP client
 httpx==0.28.1
 
 # Email
@@ -25,7 +25,6 @@ jinja2==3.1.6
 
 # File uploads
 cloudinary==1.42.1
-python-magic==0.4.27
 
 # Scheduling
 apscheduler==3.10.4

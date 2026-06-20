@@ -1,37 +1,27 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Float, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class Transaction(Document):
-    # Rent/billing transactions (used by tenants endpoint)
-    tenant:       Optional[ObjectId] = None
-    estate:       Optional[ObjectId] = None
+class Transaction(Base):
+    __tablename__ = "transactions"
 
-    # Wallet transactions (used by wallet endpoint)
-    user:         Optional[ObjectId] = None
-    wallet_id:    Optional[ObjectId] = None
-    description:  Optional[str] = None
-
-    amount:       float = 0.0
-    type:         str = "rent"
-    method:       Optional[str] = None
-    status:       str = "paid"
-    reference:    Optional[str] = None
-    period_month: Optional[int] = None
-    period_year:  Optional[int] = None
-    notes:        Optional[str] = None
-    is_active:    bool = True
-    created_by:   Optional[ObjectId] = None
-    created_at:   datetime = Field(default_factory=datetime.utcnow)
-    updated_at:   datetime = Field(default_factory=datetime.utcnow)
-
-    class Settings:
-        name = "transactions"
-        indexes = [
-            [("tenant", 1), ("status", 1)],
-            [("user", 1), ("created_at", -1)],
-            [("estate", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    tenant: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    estate: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    user: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    wallet_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    type: Mapped[str] = mapped_column(String(100), default="rent")
+    method: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="paid")
+    reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    period_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    period_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

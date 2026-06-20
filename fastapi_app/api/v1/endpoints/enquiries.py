@@ -1,125 +1,83 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
-from bson import ObjectId
-from pydantic import BaseModel, EmailStr
 from typing import Optional
+from pydantic import BaseModel
 
-from models.user import User
 from models.enquiry import Enquiry
+from models.user import User
 from core.security import get_current_user
+from core.database import get_db
+from core.db_helpers import find_all, find_one, save
+from models.base import gen_uuid
 
 router = APIRouter(prefix="/enquiries", tags=["Enquiries"])
 
-ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
-
 
 class EnquiryCreate(BaseModel):
-    name:        str
-    email:       str
-    phone:       Optional[str] = None
-    message:     str
-    subject:     Optional[str] = None
-    estate_id:   Optional[str] = None
-    unit_id:     Optional[str] = None
-    enquiry_type: Optional[str] = "general"
+    name: str
+    email: str
+    phone: Optional[str] = None
+    subject: Optional[str] = None
+    message: str
+    enquiry_type: str = "general"
+    estate: Optional[str] = None
+    unit: Optional[str] = None
 
-
-class StatusUpdate(BaseModel):
-    status: str
-    note:   Optional[str] = None
-
-
-# ── Public endpoint ───────────────────────────────────────────────────────────
 
 @router.post("/", status_code=201)
-async def submit_enquiry(body: EnquiryCreate):
-    coll = Enquiry.get_motor_collection()
-    doc  = {
-        "name":         body.name,
-        "email":        body.email.lower().strip(),
-        "phone":        body.phone,
-        "message":      body.message,
-        "subject":      body.subject,
-        "estate":       ObjectId(body.estate_id) if body.estate_id else None,
-        "unit":         ObjectId(body.unit_id)   if body.unit_id   else None,
-        "enquiry_type": body.enquiry_type,
-        "status":       "pending",
-        "is_active":    True,
-        "created_at":   datetime.utcnow(),
-        "updated_at":   datetime.utcnow(),
-    }
-    result = await coll.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    return {"success": True, "message": "Enquiry submitted successfully", "data": doc}
+async def submit_enquiry(body: EnquiryCreate, db: AsyncSession = Depends(get_db)):
+    eq = Enquiry(id=gen_uuid(), **body.model_dump())
+    await save(db, eq)
+    return {"success": True, "message": "Enquiry submitted successfully", "data": _e(eq)}
 
-
-# ── Protected endpoints ───────────────────────────────────────────────────────
 
 @router.get("/")
-async def get_enquiries(
-    estate_id: Optional[str] = None,
-    status_:   Optional[str] = Query(None, alias="status"),
-    page:      int = 1,
-    limit:     int = 20,
+async def list_enquiries(
+    status: Optional[str] = None,
+    estate: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
+    if user.role not in {"super_admin", "admin", "super_manager", "business_owner", "manager"}:
         raise HTTPException(status_code=403, detail="Admins only")
-
-    coll = Enquiry.get_motor_collection()
-    f: dict = {"is_active": True}
-    if estate_id: f["estate"] = ObjectId(estate_id)
-    if status_:   f["status"] = status_
-
-    total = await coll.count_documents(f)
-    skip  = (page - 1) * limit
-    items = await coll.find(f).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
+    conditions = [Enquiry.is_active == True]
+    if status:
+        conditions.append(Enquiry.status == status)
+    if estate:
+        conditions.append(Enquiry.estate == estate)
+    skip = (page - 1) * limit
+    items = await find_all(db, Enquiry, *conditions,
+                           order_by=Enquiry.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": len(items), "data": [_e(e) for e in items]}
 
 
-@router.get("/{enquiry_id}")
-async def get_enquiry(enquiry_id: str, user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    coll = Enquiry.get_motor_collection()
-    doc  = await coll.find_one({"_id": ObjectId(enquiry_id), "is_active": True})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Enquiry not found")
-    return {"success": True, "data": doc}
-
-
-@router.patch("/{enquiry_id}/status")
-async def update_enquiry_status(
-    enquiry_id: str, body: StatusUpdate, user: User = Depends(get_current_user)
+@router.patch("/{eq_id}/status")
+async def update_status(
+    eq_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
+    if user.role not in {"super_admin", "admin", "super_manager", "business_owner", "manager"}:
         raise HTTPException(status_code=403, detail="Admins only")
-
-    coll   = Enquiry.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(enquiry_id), "is_active": True},
-        {"$set": {"status": body.status, "note": body.note,
-                  "updated_at": datetime.utcnow(), "updated_by": user.id}},
-        return_document=True
-    )
-    if not result:
+    eq = await find_one(db, Enquiry, Enquiry.id == eq_id)
+    if not eq:
         raise HTTPException(status_code=404, detail="Enquiry not found")
-    return {"success": True, "message": "Enquiry status updated", "data": result}
+    eq.status = body.get("status", eq.status)
+    eq.note = body.get("note", eq.note)
+    eq.updated_by = user.id
+    eq.updated_at = datetime.utcnow()
+    await save(db, eq)
+    return {"success": True, "data": _e(eq)}
 
 
-@router.delete("/{enquiry_id}")
-async def delete_enquiry(enquiry_id: str, user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    coll   = Enquiry.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(enquiry_id), "is_active": True},
-        {"$set": {"is_active": False, "updated_at": datetime.utcnow()}},
-        return_document=True
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Enquiry not found")
-    return {"success": True, "message": "Enquiry deleted successfully"}
+def _e(e: Enquiry) -> dict:
+    return {
+        "id": e.id, "name": e.name, "email": e.email, "phone": e.phone,
+        "subject": e.subject, "message": e.message, "enquiry_type": e.enquiry_type,
+        "status": e.status, "estate": e.estate, "unit": e.unit,
+        "note": e.note, "created_at": e.created_at,
+    }

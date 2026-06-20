@@ -1,71 +1,29 @@
-from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
-from fastapi import FastAPI
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy import event
 from core.config import settings
-import asyncio
+from models.base import Base
 import logging
 
 logger = logging.getLogger(__name__)
 
-client: AsyncIOMotorClient = None
+DB_PATH = "bamihustle.db"
+DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+
+engine = create_async_engine(DATABASE_URL, echo=False)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
-async def connect_db(app: FastAPI):
-    global client
-    client = AsyncIOMotorClient(
-        settings.MONGODB_URI,
-        serverSelectionTimeoutMS=5000,
-        connectTimeoutMS=5000,
-        tlsAllowInvalidCertificates=True,
-    )
-    try:
-        db = client.get_default_database()
-    except Exception:
-        db = client["bamihustle"]
-
-    # Import all Beanie document models here so they are registered
-    from models.user import User
-    from models.tenant import Tenant
-    from models.estate import Estate
-    from models.unit import Unit
-    from models.payment import Payment
-    from models.wallet import Wallet
-    from models.wallet_account import WalletAccount
-    from models.transaction import Transaction
-    from models.notification import Notification
-    from models.issue import Issue
-    from models.billing_item import BillingItem
-    from models.subscription import Subscription
-    from models.service_request import ServiceRequest
-    from models.rental_application import RentalApplication
-    from models.enquiry import Enquiry
-    from models.bank_deposit import BankDeposit
-    from models.withdrawal import Withdrawal
-    from models.business_type import BusinessType
-    from models.visit import Visit
-    from models.reminder_log import ReminderLog
-    from models.setting import Setting
-
-    try:
-        await asyncio.wait_for(
-            init_beanie(
-                database=db,
-                document_models=[
-                    User, Tenant, Estate, Unit, Payment, Wallet, WalletAccount,
-                    Transaction, Notification, Issue, BillingItem, Subscription,
-                    ServiceRequest, RentalApplication, Enquiry, BankDeposit,
-                    Withdrawal, BusinessType, Visit, ReminderLog, Setting,
-                ]
-            ),
-            timeout=8.0,
-        )
-        logger.info("Database connected and Beanie initialised")
-    except Exception as e:
-        logger.warning(f"Database connection failed: {e}. Starting without DB.")
+async def connect_db(app=None):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("SQLite database ready — tables created/verified")
 
 
 async def disconnect_db():
-    global client
-    if client:
-        client.close()
-        logger.info("Database connection closed")
+    await engine.dispose()
+    logger.info("Database connection closed")
+
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session

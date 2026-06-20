@@ -1,32 +1,27 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Float, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class BillingItem(Document):
-    user:         Optional[ObjectId] = None
-    tenant:       Optional[ObjectId] = None
-    estate:       Optional[ObjectId] = None
-    label:        str = ""
-    item_type:    str = "other"
-    amount:       float = 0.0
-    due_date:     Optional[datetime] = None
-    description:  Optional[str] = None
-    is_recurring: bool = False
-    is_paid:      bool = False
-    is_active:    bool = True
-    category:     Optional[str] = None
-    frequency:    Optional[str] = None
-    created_by:   Optional[ObjectId] = None
-    updated_by:   Optional[ObjectId] = None
-    created_at:   datetime = Field(default_factory=datetime.utcnow)
-    updated_at:   datetime = Field(default_factory=datetime.utcnow)
+class BillingItem(Base):
+    __tablename__ = "billing_items"
 
-    class Settings:
-        name = "billing-items"
-        indexes = [
-            [("user", 1), ("is_active", 1), ("is_paid", 1)],
-            [("tenant", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    tenant: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    estate: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    label: Mapped[str] = mapped_column(String(255), default="")
+    item_type: Mapped[str] = mapped_column(String(100), default="other")
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    frequency: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

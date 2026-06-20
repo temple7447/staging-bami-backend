@@ -1,81 +1,38 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional, List
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from enum import Enum
-from bson import ObjectId
 
 
-class UnitStatus(str, Enum):
-    vacant      = "vacant"
-    occupied    = "occupied"
-    maintenance = "maintenance"
-    reserved    = "reserved"
+class Unit(Base):
+    __tablename__ = "units"
 
-
-class UnitCategory(str, Enum):
-    apartment = "Apartment"
-    house     = "House"
-    villa     = "Villa"
-    office    = "Office"
-    studio    = "Studio"
-    penthouse = "Penthouse"
-    other     = "Other"
-
-
-class ListingType(str, Enum):
-    rent = "Rent"
-    sale = "Sale"
-
-
-class Amenities(Document):
-    wifi:        bool = False
-    pool:        bool = False
-    gym:         bool = False
-    parking:     bool = False
-    ac:          bool = False
-    security:    bool = False
-    pet_friendly: bool = False
-    balcony:     bool = False
-    laundry:     bool = False
-
-    class Settings:
-        name = "amenities"
-
-
-class Unit(Document):
-    estate:               ObjectId
-    label:                str
-    monthly_price:        float = 0.0
-    service_charge_monthly: float = 0.0
-    caution_fee:          float = 0.0
-    legal_fee:            float = 0.0
-    meter_number:         Optional[str] = None
-    description:          Optional[str] = None
-    category:             UnitCategory = UnitCategory.apartment
-    listing_type:         ListingType  = ListingType.rent
-    available_date:       Optional[datetime] = None
-    bedrooms:             int = 0
-    bathrooms:            int = 0
-    area:                 float = 0.0
-    amenities:            dict = Field(default_factory=dict)
-    street_address:       Optional[str] = None
-    images:               List[dict] = Field(default_factory=list)   # [{url, public_id, caption}]
-    videos:               List[dict] = Field(default_factory=list)   # [{url, public_id, thumbnail, caption}]
-    status:               UnitStatus = UnitStatus.vacant
-    occupied_by:          Optional[ObjectId] = None
-    occupied_since:       Optional[datetime] = None
-    features:             List[dict] = Field(default_factory=list)   # [{name, value}]
-    condition_reports:    List[dict] = Field(default_factory=list)
-    is_active:            bool = True
-    created_by:           Optional[ObjectId] = None
-    updated_by:           Optional[ObjectId] = None
-    created_at:           datetime = Field(default_factory=datetime.utcnow)
-    updated_at:           datetime = Field(default_factory=datetime.utcnow)
-
-    class Settings:
-        name = "units"
-        indexes = [
-            [("estate", 1), ("status", 1)],
-            [("estate", 1), ("label", 1), ("is_active", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    estate: Mapped[str] = mapped_column(String(36), index=True)
+    label: Mapped[str] = mapped_column(String(255))
+    monthly_price: Mapped[float] = mapped_column(Float, default=0.0)
+    service_charge_monthly: Mapped[float] = mapped_column(Float, default=0.0)
+    caution_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    legal_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    meter_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(String(50), default="Apartment")
+    listing_type: Mapped[str] = mapped_column(String(50), default="Rent")
+    available_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    bedrooms: Mapped[int] = mapped_column(Integer, default=0)
+    bathrooms: Mapped[int] = mapped_column(Integer, default=0)
+    area: Mapped[float] = mapped_column(Float, default=0.0)
+    amenities: Mapped[dict] = mapped_column(JSON, default=dict)
+    street_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    images: Mapped[list] = mapped_column(JSON, default=list)
+    videos: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(50), default="vacant")
+    occupied_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    occupied_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    features: Mapped[list] = mapped_column(JSON, default=list)
+    condition_reports: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

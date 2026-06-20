@@ -1,99 +1,85 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
-from bson import ObjectId
-from pydantic import BaseModel
 from typing import Optional
+from pydantic import BaseModel
 
-from models.user import User
 from models.service_request import ServiceRequest
-from models.tenant import Tenant
+from models.user import User
 from core.security import get_current_user
+from core.database import get_db
+from core.db_helpers import find_all, find_one, save
+from models.base import gen_uuid
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
-ADMIN_ROLES  = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
-VENDOR_ROLES = {"vendor", "super_vendor"}
+ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
 
 
 class ServiceRequestCreate(BaseModel):
-    title:       str
+    title: str
     description: str
-    category:    Optional[str] = "general"
-    priority:    Optional[str] = "medium"
-    estate_id:   Optional[str] = None
-    unit_id:     Optional[str] = None
-
-
-class StatusUpdate(BaseModel):
-    status: str
-    note:   Optional[str] = None
+    category: str = "general"
+    priority: str = "medium"
+    estate: Optional[str] = None
+    unit: Optional[str] = None
 
 
 @router.post("/", status_code=201)
-async def create_service_request(body: ServiceRequestCreate, user: User = Depends(get_current_user)):
-    tenant = await Tenant.find_one({"user": user.id, "is_active": True})
-    coll   = ServiceRequest.get_motor_collection()
-    doc    = {
-        "title":       body.title,
-        "description": body.description,
-        "category":    body.category,
-        "priority":    body.priority,
-        "requester":   user.id,
-        "estate":      ObjectId(body.estate_id) if body.estate_id else (tenant.estate if tenant else None),
-        "unit":        ObjectId(body.unit_id)   if body.unit_id   else (tenant.unit   if tenant else None),
-        "tenant":      tenant.id if tenant else None,
-        "status":      "pending",
-        "is_active":   True,
-        "created_at":  datetime.utcnow(),
-        "updated_at":  datetime.utcnow(),
-    }
-    result = await coll.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    return {"success": True, "message": "Service request created", "data": doc}
-
-
-@router.get("/my-requests")
-async def get_my_requests(
-    page: int = 1, limit: int = 20,
+async def create_service_request(
+    body: ServiceRequestCreate,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    coll  = ServiceRequest.get_motor_collection()
-    f     = {"requester": user.id, "is_active": True}
-    total = await coll.count_documents(f)
-    items = await coll.find(f).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
+    sr = ServiceRequest(id=gen_uuid(), **body.model_dump(), requester=user.id)
+    await save(db, sr)
+    return {"success": True, "data": _sr(sr)}
 
 
-@router.get("/vendor-tasks")
-async def get_vendor_tasks(
-    page: int = 1, limit: int = 20,
+@router.get("/")
+async def list_service_requests(
+    status: Optional[str] = None,
+    estate: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in VENDOR_ROLES and user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Vendors and admins only")
-
-    coll  = ServiceRequest.get_motor_collection()
-    f: dict = {"is_active": True}
-    if user.role in VENDOR_ROLES:
-        f["assigned_to"] = user.id
-    total = await coll.count_documents(f)
-    items = await coll.find(f).sort("created_at", -1).skip((page-1)*limit).limit(limit).to_list(limit)
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
+    conditions = [ServiceRequest.is_active == True]
+    if user.role not in ADMIN_ROLES:
+        conditions.append(ServiceRequest.requester == user.id)
+    if status:
+        conditions.append(ServiceRequest.status == status)
+    if estate:
+        conditions.append(ServiceRequest.estate == estate)
+    items = await find_all(db, ServiceRequest, *conditions, order_by=ServiceRequest.created_at.desc())
+    return {"success": True, "count": len(items), "data": [_sr(s) for s in items]}
 
 
-@router.put("/{request_id}/status")
-async def update_service_request_status(
-    request_id: str, body: StatusUpdate, user: User = Depends(get_current_user)
+@router.patch("/{sr_id}/status")
+async def update_status(
+    sr_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    coll   = ServiceRequest.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(request_id), "is_active": True},
-        {"$set": {"status": body.status, "note": body.note, "updated_at": datetime.utcnow(),
-                  "updated_by": user.id}},
-        return_document=True
-    )
-    if not result:
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admins only")
+    sr = await find_one(db, ServiceRequest, ServiceRequest.id == sr_id)
+    if not sr:
         raise HTTPException(status_code=404, detail="Service request not found")
-    return {"success": True, "message": "Status updated", "data": result}
+    sr.status = body.get("status", sr.status)
+    sr.assigned_to = body.get("assigned_to", sr.assigned_to)
+    sr.note = body.get("note", sr.note)
+    sr.updated_by = user.id
+    sr.updated_at = datetime.utcnow()
+    await save(db, sr)
+    return {"success": True, "data": _sr(sr)}
+
+
+def _sr(s: ServiceRequest) -> dict:
+    return {
+        "id": s.id, "title": s.title, "description": s.description,
+        "category": s.category, "priority": s.priority, "status": s.status,
+        "requester": s.requester, "assigned_to": s.assigned_to,
+        "estate": s.estate, "unit": s.unit, "note": s.note,
+        "created_at": s.created_at,
+    }

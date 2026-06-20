@@ -1,18 +1,17 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class BusinessType(Document):
-    name:        str = ""
-    description: Optional[str] = None
-    icon:        Optional[str] = None
-    is_active:   bool = True
-    created_by:  Optional[ObjectId] = None
-    created_at:  datetime = Field(default_factory=datetime.utcnow)
-    updated_at:  datetime = Field(default_factory=datetime.utcnow)
+class BusinessType(Base):
+    __tablename__ = "business_types"
 
-    class Settings:
-        name = "business-types"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

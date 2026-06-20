@@ -1,13 +1,12 @@
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
-from models.user import UserRole
 
 
 class RegisterRequest(BaseModel):
     name:     str
     email:    EmailStr
     password: str
-    role:     UserRole = UserRole.tenant
+    role:     str = "tenant"
     phone:    Optional[str] = None
 
     @field_validator("password")

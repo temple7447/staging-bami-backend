@@ -1,7 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-from models.unit import UnitCategory, ListingType
 
 
 class UnitCreate(BaseModel):
@@ -12,8 +11,8 @@ class UnitCreate(BaseModel):
     legal_fee:             float = 0.0
     meter_number:          Optional[str] = None
     description:           Optional[str] = None
-    category:              UnitCategory = UnitCategory.apartment
-    listing_type:          ListingType  = ListingType.rent
+    category:              str = "apartment"
+    listing_type:          str = "rent"
     available_date:        Optional[datetime] = None
     bedrooms:              int = 0
     bathrooms:             int = 0
@@ -31,8 +30,8 @@ class UnitUpdate(BaseModel):
     legal_fee:             Optional[float] = None
     meter_number:          Optional[str]   = None
     description:           Optional[str]   = None
-    category:              Optional[UnitCategory] = None
-    listing_type:          Optional[ListingType]  = None
+    category:              Optional[str] = None
+    listing_type:          Optional[str] = None
     available_date:        Optional[datetime] = None
     bedrooms:              Optional[int]   = None
     bathrooms:             Optional[int]   = None

@@ -1,30 +1,24 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class Enquiry(Document):
-    name:         str = ""
-    email:        str = ""
-    phone:        Optional[str] = None
-    subject:      Optional[str] = None
-    message:      str = ""
-    enquiry_type: str = "general"
-    status:       str = "pending"  # pending | in_review | responded | closed
-    estate:       Optional[ObjectId] = None
-    unit:         Optional[ObjectId] = None
-    note:         Optional[str] = None
-    updated_by:   Optional[ObjectId] = None
-    is_active:    bool = True
-    created_at:   datetime = Field(default_factory=datetime.utcnow)
-    updated_at:   datetime = Field(default_factory=datetime.utcnow)
+class Enquiry(Base):
+    __tablename__ = "enquiries"
 
-    class Settings:
-        name = "enquiries"
-        indexes = [
-            [("email", 1)],
-            [("status", 1), ("created_at", -1)],
-            [("estate", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), default="")
+    email: Mapped[str] = mapped_column(String(255), default="", index=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    enquiry_type: Mapped[str] = mapped_column(String(100), default="general")
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    estate: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    unit: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -1,76 +1,45 @@
-from beanie import Document
-from pydantic import BaseModel, Field
-from typing import Optional, List, Any
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from enum import Enum
-from bson import ObjectId
 
 
-class TenantStatus(str, Enum):
-    occupied = "occupied"
-    vacant   = "vacant"
-    pending  = "pending"
-    evicted  = "evicted"
+class Tenant(Base):
+    __tablename__ = "tenants"
 
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    estate: Mapped[str] = mapped_column(String(36), index=True)
+    unit: Mapped[str] = mapped_column(String(36), index=True)
+    unit_label: Mapped[str] = mapped_column(String(255), default="")
 
-class TenantType(str, Enum):
-    new      = "new"
-    existing = "existing"
-    transfer = "transfer"
+    tenant_name: Mapped[str] = mapped_column(String(255))
+    tenant_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    tenant_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    rent_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    base_rent: Mapped[float] = mapped_column(Float, default=0.0)
+    service_charge_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    base_service_charge: Mapped[float] = mapped_column(Float, default=0.0)
 
-class TenantHistory(BaseModel):
-    """Embedded history entry — stored inline inside the tenant document."""
-    event:      str
-    note:       Optional[str] = None
-    meta:       Optional[Any] = None
-    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-    created_by: Optional[str] = None
+    tenant_type: Mapped[str] = mapped_column(String(50), default="new")
+    status: Mapped[str] = mapped_column(String(50), default="occupied", index=True)
 
+    electric_meter_number: Mapped[str] = mapped_column(String(100), default="")
+    entry_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
-class Tenant(Document):
-    estate:     ObjectId
-    unit:       ObjectId
-    unit_label: str = ""
+    user: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_image_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    tenant_name:  str
-    tenant_email: Optional[str] = None
-    tenant_phone: Optional[str] = None
+    history: Mapped[list] = mapped_column(JSON, default=list)
 
-    rent_amount:            float = 0.0
-    base_rent:              float = 0.0
-    service_charge_amount:  float = 0.0
-    base_service_charge:    float = 0.0
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    tenant_type: str = "new"
-    status:      str = "occupied"
+    rent_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
+    service_charge_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
 
-    electric_meter_number: str = ""
-    entry_date:            Optional[datetime] = None
-    next_due_date:         Optional[datetime] = None
-
-    user:                    Optional[ObjectId] = None
-    profile_image_url:       Optional[str] = None
-    profile_image_public_id: Optional[str] = None
-
-    history: List[TenantHistory] = Field(default_factory=list)
-
-    is_active:  bool = True
-    created_by: Optional[ObjectId] = None
-    updated_by: Optional[ObjectId] = None
-
-    rent_outstanding:            float = 0.0
-    service_charge_outstanding:  float = 0.0
-
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    class Settings:
-        name = "tenants"
-        indexes = [
-            [("estate", 1), ("is_active", 1), ("status", 1)],
-            [("estate", 1), ("next_due_date", 1)],
-            [("tenant_email", 1)],
-            [("is_active", 1), ("next_due_date", 1)],
-            [("status", 1), ("next_due_date", 1)],
-        ]
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

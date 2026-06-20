@@ -1,52 +1,35 @@
-"""
-WalletAccount — holds the 9 sub-wallet balances for the 50/30/20 split.
-
-Growth Engine (50% of total):
-  marketing 50% · operations 30% · savings 20%
-Fulfillment Engine (30% of total):
-  marketing 50% · operations 30% · savings 20% (family)
-Innovation Engine (20% of total):
-  marketing 50% · operations 30% · savings 20%
-"""
-from beanie import Document
-from pydantic import Field
-from typing import Optional, List, Any
+from sqlalchemy import String, Boolean, DateTime, JSON, Float
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class WalletAccount(Document):
-    estate: Optional[ObjectId] = None
-    currency: str = "NGN"
+class WalletAccount(Base):
+    __tablename__ = "wallet_accounts"
 
-    # Growth Engine (50%)
-    growth_engine_marketing_balance:   float = 0.0
-    growth_engine_operations_balance:  float = 0.0
-    growth_engine_savings_balance:     float = 0.0
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    estate: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    currency: Mapped[str] = mapped_column(String(10), default="NGN")
 
-    # Fulfillment Engine (30%)
-    fulfillment_engine_marketing_balance:   float = 0.0
-    fulfillment_engine_operations_balance:  float = 0.0
-    fulfillment_engine_savings_balance:     float = 0.0
+    growth_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    growth_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    growth_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
 
-    # Innovation Engine (20%)
-    innovation_engine_marketing_balance:   float = 0.0
-    innovation_engine_operations_balance:  float = 0.0
-    innovation_engine_savings_balance:     float = 0.0
+    fulfillment_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    fulfillment_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    fulfillment_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
 
-    total_received:   float = 0.0
-    total_disbursed:  float = 0.0
-    distribution_log: List[Any] = Field(default_factory=list)
+    innovation_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    innovation_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    innovation_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
 
-    is_active:  bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    total_received: Mapped[float] = mapped_column(Float, default=0.0)
+    total_disbursed: Mapped[float] = mapped_column(Float, default=0.0)
+    distribution_log: Mapped[list] = mapped_column(JSON, default=list)
 
-    class Settings:
-        name = "walletaccounts"
-        indexes = [[("estate", 1)]]
-
-    # ── Computed properties ───────────────────────────────────────────────────
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     @property
     def total_balance(self) -> float:
@@ -58,24 +41,17 @@ class WalletAccount(Document):
 
     @property
     def total_marketing(self) -> float:
-        return (self.growth_engine_marketing_balance +
-                self.fulfillment_engine_marketing_balance +
-                self.innovation_engine_marketing_balance)
+        return (self.growth_engine_marketing_balance + self.fulfillment_engine_marketing_balance + self.innovation_engine_marketing_balance)
 
     @property
     def total_operations(self) -> float:
-        return (self.growth_engine_operations_balance +
-                self.fulfillment_engine_operations_balance +
-                self.innovation_engine_operations_balance)
+        return (self.growth_engine_operations_balance + self.fulfillment_engine_operations_balance + self.innovation_engine_operations_balance)
 
     @property
     def total_savings(self) -> float:
-        return (self.growth_engine_savings_balance +
-                self.fulfillment_engine_savings_balance +
-                self.innovation_engine_savings_balance)
+        return (self.growth_engine_savings_balance + self.fulfillment_engine_savings_balance + self.innovation_engine_savings_balance)
 
     def distribute_amount(self, amount: float, payment_id: str = "", payment_type: str = "payment") -> dict:
-        """Apply the 50/30/20 split, update balances, and return a breakdown dict."""
         g = amount * 0.50
         f = amount * 0.30
         i = amount * 0.20
@@ -101,8 +77,7 @@ class WalletAccount(Document):
             "innovationEngine":  {"marketing": i*0.50, "operations": i*0.30, "savings": i*0.20, "total": i},
             "total": amount,
         }
-        self.distribution_log.append({
-            "payment_id": str(payment_id), "payment_type": payment_type,
-            "amount": amount, "breakdown": breakdown, "at": datetime.utcnow().isoformat()
-        })
+        log = self.distribution_log or []
+        log.append({"payment_id": str(payment_id), "payment_type": payment_type, "amount": amount, "breakdown": breakdown, "at": datetime.utcnow().isoformat()})
+        self.distribution_log = log
         return breakdown

@@ -1,44 +1,29 @@
-from beanie import Document, before_event, Insert, Replace, SaveChanges
-from pydantic import Field
-from typing import Optional, List
-from datetime import datetime
-from bson import ObjectId
 import re
+from sqlalchemy import String, Boolean, DateTime, JSON, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
+from datetime import datetime
 
 
-class EstateImage(Document):
-    url:       str
-    public_id: Optional[str] = None
-    caption:   Optional[str] = None
+class Estate(Base):
+    __tablename__ = "estates"
 
-    class Settings:
-        name = "estate_images"
-
-
-class Estate(Document):
-    name:        str
-    slug:        Optional[str] = None
-    description: Optional[str] = None
-    total_units: int = 0
-    owner:       Optional[ObjectId] = None
-    managers:    List[ObjectId] = Field(default_factory=list)
-    images:      List[dict]     = Field(default_factory=list)   # [{url, public_id, caption}]
-    is_active:   bool = True
-    created_by:  Optional[ObjectId] = None
-    updated_by:  Optional[ObjectId] = None
-    created_at:  datetime = Field(default_factory=datetime.utcnow)
-    updated_at:  datetime = Field(default_factory=datetime.utcnow)
-
-    class Settings:
-        name = "estates"
-        indexes = [
-            [("is_active", 1), ("created_at", -1)],
-            [("owner", 1),     ("is_active", 1)],
-            [("managers", 1),  ("is_active", 1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_units: Mapped[int] = mapped_column(Integer, default=0)
+    owner: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    managers: Mapped[list] = mapped_column(JSON, default=list)
+    images: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def set_slug(self):
         slug = self.name.lower()
-        slug = re.sub(r'[^a-z0-9]+', '-', slug)
-        slug = slug.strip('-')
+        slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
         self.slug = slug

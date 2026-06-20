@@ -1,382 +1,195 @@
-"""
-Phase 4 — Payments endpoint.
-Non-Paystack operations (list, manual record, status, receipts) are fully
-implemented.  Paystack-initialised payment flows are stubbed and will be wired
-in Phase 6 (Paystack webhooks / email / PDF).
-"""
-import asyncio
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from datetime import datetime
-from bson import ObjectId
 from typing import Optional
+import hashlib, hmac, os
+from pydantic import BaseModel
 
 from models.user import User
-from models.payment import Payment, PaymentStatus
+from models.payment import Payment
 from models.tenant import Tenant
-from models.estate import Estate
 from models.wallet import Wallet
-from schemas.billing import ManualPaymentRequest
+from models.transaction import Transaction
+from models.wallet_account import WalletAccount
 from core.security import get_current_user
-from utils.tenant_helpers import project_next_due_date
-from utils.rent_calculator import get_current_rent, calculate_effective_rent
+from core.database import get_db
+from core.db_helpers import find_one, find_all, save, count, sum_col
+from core.config import settings
+from models.base import gen_uuid
+from utils.pdf_service import generate_receipt_pdf
+from utils.email_service import send_payment_confirmation, send_rent_reminder
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
-ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
+
+class PaymentCreate(BaseModel):
+    tenant: str
+    estate: Optional[str] = None
+    amount: float
+    payment_type: str
+    reference: Optional[str] = None
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+@router.post("/", status_code=201)
+async def create_payment(
+    body: PaymentCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    payment = Payment(id=gen_uuid(), **body.model_dump(), payment_status="pending", created_by=user.id)
+    await save(db, payment)
+    return {"success": True, "data": _p(payment)}
 
-async def _get_tenant_or_400(tenant_id: str) -> Tenant:
-    t = await Tenant.find_one({"_id": ObjectId(tenant_id), "is_active": True})
-    if not t:
+
+@router.get("/")
+async def list_payments(
+    tenant_id: Optional[str] = None,
+    estate_id: Optional[str] = None,
+    status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    conditions = []
+    if tenant_id:
+        conditions.append(Payment.tenant == tenant_id)
+    if estate_id:
+        conditions.append(Payment.estate == estate_id)
+    if status:
+        conditions.append(Payment.payment_status == status)
+    skip = (page - 1) * limit
+    items = await find_all(db, Payment, *conditions, order_by=Payment.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": len(items), "data": [_p(p) for p in items]}
+
+
+@router.get("/{pid}")
+async def get_payment(pid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    payment = await find_one(db, Payment, Payment.id == pid)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return {"success": True, "data": _p(payment)}
+
+
+@router.put("/{pid}/status")
+async def update_status(
+    pid: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role not in {"super_admin", "admin"}:
+        raise HTTPException(status_code=403, detail="Admins only")
+    payment = await find_one(db, Payment, Payment.id == pid)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    payment.payment_status = body.get("status", payment.payment_status)
+    payment.updated_at = datetime.utcnow()
+    await save(db, payment)
+    return {"success": True, "data": _p(payment)}
+
+
+@router.get("/{pid}/download")
+async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    payment = await find_one(db, Payment, Payment.id == pid)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
+    receipt_data = {
+        "payment_id": payment.id, "reference": payment.reference,
+        "amount": payment.amount, "payment_type": payment.payment_type,
+        "payment_status": payment.payment_status, "created_at": payment.created_at,
+    }
+    tenant_info = {"tenant_name": tenant.tenant_name if tenant else "N/A",
+                   "tenant_email": tenant.tenant_email if tenant else ""}
+    estate_info = {"estate_name": "BamiHustle Estate"}
+    pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=receipt-{pid}.pdf"})
+
+
+@router.post("/{pid}/receipt")
+async def send_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    payment = await find_one(db, Payment, Payment.id == pid)
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
+    await send_payment_confirmation(
+        to_email=tenant.tenant_email if tenant else "",
+        tenant_name=tenant.tenant_name if tenant else "Tenant",
+        amount=payment.amount,
+        reference=payment.reference or payment.id,
+        payment_type=payment.payment_type,
+    )
+    return {"success": True, "message": "Receipt sent"}
+
+
+@router.post("/tenant/{tid}/receipt")
+async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    tenant = await find_one(db, Tenant, Tenant.id == tid)
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    return t
-
-
-async def _estate_filter_for_user(user: User) -> dict:
-    """Build a MongoDB filter scoped to estates this user may view."""
-    role = user.role
-    if role == "super_admin":
-        return {}
-    elif role in ("admin", "super_manager"):
-        ecoll = Estate.get_motor_collection()
-        estates = await ecoll.find({"managers": user.id, "is_active": True}, {"_id": 1}).to_list(None)
-        return {"estate": {"$in": [e["_id"] for e in estates]}}
-    elif role == "business_owner":
-        ids = getattr(user, "assigned_estates", []) or []
-        return {"estate": {"$in": ids}}
-    else:
-        return {"tenant": None}  # non-admin, non-tenant: no access by default
-
-
-# ── Paystack-initialised payment endpoints (stubs) ────────────────────────────
-# Full implementation in Phase 6.
-
-def _paystack_stub(label: str):
-    return {"success": True, "message": f"{label} — Paystack integration pending (Phase 6)",
-            "data": {"note": "Wire PAYSTACK_SECRET_KEY and call paystackService in Phase 6"}}
-
-
-@router.post("/initial")
-async def initiate_initial_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Initial payment")
-
-
-@router.post("/deposit")
-async def initiate_deposit_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Deposit payment")
-
-
-@router.post("/rent")
-async def initiate_rent_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Rent payment")
-
-
-@router.post("/service-charge")
-async def initiate_service_charge_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Service charge payment")
-
-
-@router.post("/caution-fee")
-async def initiate_caution_fee_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Caution fee payment")
-
-
-@router.post("/legal-fee")
-async def initiate_legal_fee_payment(body: dict, user: User = Depends(get_current_user)):
-    return _paystack_stub("Legal fee payment")
-
-
-@router.get("/verify/{reference}")
-async def verify_payment(reference: str, user: User = Depends(get_current_user)):
-    return _paystack_stub(f"Verify payment {reference}")
+    await send_rent_reminder(
+        to_email=tenant.tenant_email or "",
+        tenant_name=tenant.tenant_name,
+        amount_due=tenant.rent_amount,
+        due_date=tenant.next_due_date,
+    )
+    return {"success": True, "message": "Reminder sent"}
 
 
 @router.post("/callback")
-async def payment_callback(request: Request):
-    """
-    Paystack webhook — verifies HMAC-SHA512 signature then processes event.
-    Supported events: charge.success, transfer.success, transfer.failed
-    """
-    import hashlib, hmac, os
-
-    secret   = os.getenv("PAYSTACK_SECRET_KEY", "")
+async def payment_callback(request: Request, db: AsyncSession = Depends(get_db)):
+    secret = os.getenv("PAYSTACK_SECRET_KEY", "")
     raw_body = await request.body()
-    sig      = request.headers.get("x-paystack-signature", "")
-
+    sig = request.headers.get("x-paystack-signature", "")
     if secret:
         expected = hmac.new(secret.encode(), raw_body, hashlib.sha512).hexdigest()
         if not hmac.compare_digest(expected, sig):
             raise HTTPException(status_code=400, detail="Invalid Paystack signature")
 
+    import json
     try:
-        payload    = await request.json()
-    except Exception:
-        import json
         payload = json.loads(raw_body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid payload")
 
-    event = payload.get("event", "")
+    event = payload.get("event")
     data  = payload.get("data", {})
 
     if event == "charge.success":
-        reference = data.get("reference", "")
-        amount    = data.get("amount", 0) / 100  # Paystack sends kobo
-        coll      = Payment.get_motor_collection()
-        await coll.update_one(
-            {"reference": reference},
-            {"$set": {"payment_status": "completed", "amount": amount, "updated_at": datetime.utcnow()}},
-            upsert=False,
-        )
+        ref = data.get("reference")
+        payment = await find_one(db, Payment, Payment.reference == ref)
+        if payment and payment.payment_status == "pending":
+            payment.payment_status = "completed"
+            payment.paystack_response = data
+            payment.updated_at = datetime.utcnow()
+            await save(db, payment)
+            tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
+            if tenant:
+                wallet_account = await find_one(db, WalletAccount, WalletAccount.estate == payment.estate)
+                if not wallet_account:
+                    wallet_account = WalletAccount(id=gen_uuid(), estate=payment.estate)
+                wallet_account.distribute_amount(payment.amount, payment.id, payment.payment_type)
+                await save(db, wallet_account)
+
     elif event in ("transfer.success", "transfer.failed"):
-        reference = data.get("reference", "")
-        status    = "completed" if event == "transfer.success" else "failed"
-        coll      = Payment.get_motor_collection()
-        await coll.update_one(
-            {"reference": reference},
-            {"$set": {"payment_status": status, "updated_at": datetime.utcnow()}},
-        )
+        ref = data.get("reference")
+        payment = await find_one(db, Payment, Payment.reference == ref)
+        if payment:
+            payment.payment_status = "completed" if event == "transfer.success" else "failed"
+            payment.updated_at = datetime.utcnow()
+            await save(db, payment)
 
-    return {"success": True, "event": event}
-
-
-# ── Manual payment recording (Admin) ─────────────────────────────────────────
-
-@router.post("/manual-record")
-async def record_manual_payment(body: ManualPaymentRequest, user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    tenant = await _get_tenant_or_400(body.tenant_id)
-    payment_date = body.payment_date or datetime.utcnow()
-
-    payment = Payment(
-        tenant=tenant.id,
-        estate=tenant.estate,
-        amount=body.amount,
-        payment_type=body.payment_type,
-        payment_status=PaymentStatus.completed,
-        reference=body.reference or f"MAN-{int(datetime.utcnow().timestamp()*1000)}",
-        created_by=user.id,
-        created_at=payment_date,
-    )
-    await payment.insert()
-
-    # Advance nextDueDate for rent payments
-    if body.payment_type in ("rent", "service_charge", "bundle", "initial"):
-        months = body.duration_months or 12
-        base   = tenant.next_due_date or tenant.entry_date or datetime.utcnow()
-        new_due = base
-        for _ in range(months):
-            m = (new_due.month % 12) + 1
-            y = new_due.year + (1 if new_due.month == 12 else 0)
-            new_due = new_due.replace(year=y, month=m)
-        tenant.next_due_date = new_due
-        await tenant.save()
-
-    return {"success": True, "message": "Payment recorded successfully", "data": payment.model_dump()}
+    return {"status": "ok"}
 
 
-# ── Payment listing ───────────────────────────────────────────────────────────
-
-@router.get("/")
-async def get_all_payments(
-    page:      int = 1,
-    limit:     int = 20,
-    status_:   Optional[str] = Query(None, alias="status"),
-    type_:     Optional[str] = Query(None, alias="type"),
-    estate_id: Optional[str] = None,
-    user: User = Depends(get_current_user),
-):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    estate_scope = await _estate_filter_for_user(user)
-    f: dict = {**estate_scope}
-    if estate_id: f["estate"] = ObjectId(estate_id)
-    if status_:   f["payment_status"] = status_
-    if type_:     f["payment_type"]   = type_
-
-    coll  = Payment.get_motor_collection()
-    total = await coll.count_documents(f)
-    skip  = (page - 1) * limit
-    items = await coll.find(f).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
-
-
-@router.get("/receipts")
-async def get_tenant_receipts(user: User = Depends(get_current_user)):
-    tenant = await Tenant.find_one({"user": user.id, "is_active": True})
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant record not found")
-
-    coll  = Payment.get_motor_collection()
-    items = await coll.find(
-        {"tenant": tenant.id, "payment_status": "completed"}
-    ).sort("created_at", -1).to_list(50)
-    return {"success": True, "data": items}
-
-
-@router.get("/tenant/{tenant_id}")
-async def get_tenant_payments(
-    tenant_id: str,
-    page: int = 1, limit: int = 20,
-    user: User = Depends(get_current_user),
-):
-    tenant = await _get_tenant_or_400(tenant_id)
-    coll   = Payment.get_motor_collection()
-    total  = await coll.count_documents({"tenant": tenant.id})
-    skip   = (page - 1) * limit
-    items  = await coll.find({"tenant": tenant.id}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
-
-
-@router.get("/estate/{estate_id}")
-async def get_estate_payments(
-    estate_id: str,
-    page: int = 1, limit: int = 20,
-    user: User = Depends(get_current_user),
-):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    coll  = Payment.get_motor_collection()
-    f     = {"estate": ObjectId(estate_id)}
-    total = await coll.count_documents(f)
-    skip  = (page - 1) * limit
-    items = await coll.find(f).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
-
-
-@router.get("/{payment_id}/download")
-async def download_payment_receipt(payment_id: str, user: User = Depends(get_current_user)):
-    from fastapi.responses import Response
-    from utils.pdf_service import generate_receipt_pdf
-    from utils.rent_calculator import calculate_effective_rent
-
-    coll    = Payment.get_motor_collection()
-    payment = await coll.find_one({"_id": ObjectId(payment_id)})
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    tenant = await Tenant.get(payment.get("tenant"))
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-
-    estate = await Estate.get(tenant.estate) if tenant.estate else None
-
-    now         = datetime.utcnow()
-    entry       = tenant.entry_date or now
-    rent_info   = calculate_effective_rent(tenant.rent_amount or 0, entry, now)
-    next_due    = tenant.next_due_date or now
-
-    receipt_data = {
-        "paymentDate":              payment.get("created_at", now).strftime("%d/%m/%Y") if hasattr(payment.get("created_at", now), "strftime") else str(payment.get("created_at", "")),
-        "moveInDate":               entry.strftime("%d/%m/%Y"),
-        "expiryDate":               next_due.strftime("%d/%m/%Y"),
-        "currentYear":              str(now.year),
-        "nextYear":                 str(now.year + 1),
-        "yearDuration":             rent_info.get("year_label", "1st YEAR"),
-        "tenancyDuration":          "1 YEAR",
-        "tenantTotalStay":          rent_info.get("year_label", "1st YEAR"),
-        "rentAmount":               tenant.rent_amount or 0,
-        "rentOutstanding":          0,
-        "serviceCharge":            tenant.service_charge or 0,
-        "serviceChargeOutstanding": 0,
-        "cautionFee":               tenant.caution_fee or 0,
-        "legalFee":                 tenant.legal_fee or 0,
-        "outstandingBalance":       tenant.outstanding_balance or 0,
-        "currentTotalTenancyRate":  (tenant.rent_amount or 0) + (tenant.service_charge or 0),
-        "nextTotalTenancyRate":     rent_info.get("next_effective_rent", 0) + (tenant.service_charge or 0) * 1.26,
-        "nextIncreaseDate":         rent_info.get("next_increase_date", ""),
-        "nextRentIncrease":         rent_info.get("next_effective_rent", 0),
-        "nextServiceChargeIncrease": (tenant.service_charge or 0) * 1.26,
-        "totalTenancyRateIncrease": rent_info.get("next_effective_rent", 0) + (tenant.service_charge or 0) * 1.26,
+def _p(p: Payment) -> dict:
+    return {
+        "id": p.id, "tenant": p.tenant, "estate": p.estate,
+        "amount": p.amount, "payment_type": p.payment_type,
+        "payment_status": p.payment_status, "reference": p.reference,
+        "created_at": p.created_at,
     }
-    tenant_info = {
-        "tenantName": f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
-        "unitLabel":  tenant.unit_label or "Standard",
-    }
-    estate_info = {"name": estate.name if estate else ""}
-
-    pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
-    fname = f"receipt_{payment_id}.pdf"
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
-    )
-
-
-@router.post("/{payment_id}/receipt")
-async def send_payment_receipt(payment_id: str, user: User = Depends(get_current_user)):
-    from utils.email_service import send_payment_confirmation
-
-    coll    = Payment.get_motor_collection()
-    payment = await coll.find_one({"_id": ObjectId(payment_id)})
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-
-    tenant = await Tenant.get(payment.get("tenant"))
-    if not tenant or not tenant.email:
-        return {"success": False, "message": "Tenant email not available"}
-
-    result = await send_payment_confirmation(
-        recipient_email = tenant.email,
-        name            = f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
-        amount          = payment.get("amount", 0),
-        reference       = payment.get("reference", payment_id),
-        payment_type    = payment.get("payment_type", "rent"),
-    )
-    return {"success": result.get("success", False), "message": "Receipt email sent" if result.get("success") else result.get("error")}
-
-
-@router.post("/tenant/{tenant_id}/receipt")
-async def send_tenant_receipt(tenant_id: str, user: User = Depends(get_current_user)):
-    from utils.email_service import send_rent_reminder
-
-    tenant = await _get_tenant_or_400(tenant_id)
-    if not tenant.email:
-        return {"success": False, "message": "Tenant has no email on record"}
-
-    from utils.tenant_helpers import process_tenant
-    from utils.rent_calculator import calculate_effective_rent
-
-    info   = process_tenant(tenant)
-    result = await send_rent_reminder(
-        recipient_email = tenant.email,
-        name            = f"{tenant.first_name or ''} {tenant.last_name or ''}".strip(),
-        amount          = info.get("current_effective_rent", tenant.rent_amount or 0),
-        due_date        = str(info.get("next_due_date", "")),
-    )
-    return {"success": result.get("success", False), "message": "Reminder sent" if result.get("success") else result.get("error")}
-
-
-@router.post("/{payment_id}/refund")
-async def refund_deposit(payment_id: str, user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    coll = Payment.get_motor_collection()
-    p    = await coll.find_one({"_id": ObjectId(payment_id)})
-    if not p:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    if p.get("payment_status") != "completed":
-        raise HTTPException(status_code=400, detail="Only completed payments can be refunded")
-
-    await coll.update_one({"_id": ObjectId(payment_id)},
-                           {"$set": {"payment_status": "refunded", "updated_at": datetime.utcnow()}})
-    return {"success": True, "message": "Payment marked as refunded"}
-
-
-@router.get("/{payment_id}")
-async def get_payment_status(payment_id: str, user: User = Depends(get_current_user)):
-    coll = Payment.get_motor_collection()
-    p    = await coll.find_one({"_id": ObjectId(payment_id)})
-    if not p:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    return {"success": True, "data": p}

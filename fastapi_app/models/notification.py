@@ -1,25 +1,20 @@
-from beanie import Document
-from pydantic import Field
-from typing import Optional
+from sqlalchemy import String, Boolean, DateTime, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from bson import ObjectId
 
 
-class Notification(Document):
-    user:       Optional[ObjectId] = None
-    title:      str = ""
-    message:    str = ""
-    type:       Optional[str] = None  # payment | issue | system | etc.
-    link:       Optional[str] = None
-    is_read:    bool = False
-    read_at:    Optional[datetime] = None
-    is_active:  bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+class Notification(Base):
+    __tablename__ = "notifications"
 
-    class Settings:
-        name = "notifications"
-        indexes = [
-            [("user", 1), ("is_active", 1), ("is_read", 1)],
-            [("created_at", -1)],
-        ]
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    user: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

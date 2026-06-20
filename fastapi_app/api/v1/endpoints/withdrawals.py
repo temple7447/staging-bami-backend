@@ -1,74 +1,83 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from datetime import datetime
-from bson import ObjectId
-from pydantic import BaseModel
 from typing import Optional
+from pydantic import BaseModel
 
-from models.user import User
 from models.withdrawal import Withdrawal
 from models.wallet import Wallet
+from models.user import User
 from core.security import get_current_user
+from core.database import get_db
+from core.db_helpers import find_all, find_one, save
+from models.base import gen_uuid
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
 
-ADMIN_ROLES = {"super_admin", "admin"}
-
 
 class WithdrawalRequest(BaseModel):
-    amount:       float
+    amount: float
     bank_details: Optional[dict] = None
-    notes:        Optional[str] = None
-
-
-class StatusUpdate(BaseModel):
-    status: str  # approved | rejected | completed
-    notes:  Optional[str] = None
+    notes: Optional[str] = None
 
 
 @router.post("/request", status_code=201)
-async def request_withdrawal(body: WithdrawalRequest, user: User = Depends(get_current_user)):
-    if body.amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
-
-    wallet = await Wallet.find_one({"user_id": user.id})
+async def request_withdrawal(
+    body: WithdrawalRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
     if not wallet or wallet.balance < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient wallet balance")
 
-    import time
     w = Withdrawal(
+        id=gen_uuid(),
         user=user.id,
         amount=body.amount,
-        bank_details=body.bank_details or {},
-        status="pending",
-        reference=f"WD-{int(time.time() * 1000)}",
+        bank_details=body.bank_details,
         notes=body.notes,
+        status="pending",
     )
-    await w.insert()
-    return {"success": True, "message": "Withdrawal request submitted", "data": w.model_dump()}
+    await save(db, w)
+    return {"success": True, "message": "Withdrawal request submitted", "data": _w(w)}
 
 
 @router.get("/my")
-async def get_my_withdrawals(user: User = Depends(get_current_user)):
-    coll  = Withdrawal.get_motor_collection()
-    items = await coll.find({"user": user.id, "is_active": True}).sort("created_at", -1).to_list(50)
-    return {"success": True, "count": len(items), "data": items}
-
-
-@router.put("/{withdrawal_id}/status")
-async def update_withdrawal_status(
-    withdrawal_id: str, body: StatusUpdate, user: User = Depends(get_current_user)
+async def my_withdrawals(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
+    items = await find_all(db, Withdrawal, Withdrawal.user == user.id,
+                           order_by=Withdrawal.created_at.desc())
+    return {"success": True, "count": len(items), "data": [_w(w) for w in items]}
 
-    coll   = Withdrawal.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(withdrawal_id), "is_active": True},
-        {"$set": {"status": body.status, "notes": body.notes,
-                  "reviewed_by": user.id, "reviewed_at": datetime.utcnow(),
-                  "updated_at": datetime.utcnow()}},
-        return_document=True
-    )
-    if not result:
+
+@router.put("/{wid}/status")
+async def update_status(
+    wid: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role not in {"super_admin", "admin"}:
+        raise HTTPException(status_code=403, detail="Admins only")
+    w = await find_one(db, Withdrawal, Withdrawal.id == wid)
+    if not w:
         raise HTTPException(status_code=404, detail="Withdrawal not found")
-    return {"success": True, "message": f"Withdrawal {body.status}", "data": result}
+    w.status = body.get("status", w.status)
+    w.reviewed_by = user.id
+    w.reviewed_at = datetime.utcnow()
+    w.updated_at = datetime.utcnow()
+    await save(db, w)
+    return {"success": True, "data": _w(w)}
+
+
+def _w(w: Withdrawal) -> dict:
+    return {
+        "id": w.id, "user": w.user, "amount": w.amount,
+        "bank_details": w.bank_details, "status": w.status,
+        "notes": w.notes, "reviewed_by": w.reviewed_by,
+        "reviewed_at": w.reviewed_at, "created_at": w.created_at,
+    }

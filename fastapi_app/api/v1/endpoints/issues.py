@@ -1,184 +1,119 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from datetime import datetime
-from bson import ObjectId
-from typing import Optional, List
-import cloudinary, cloudinary.uploader
+from typing import Optional
+from pydantic import BaseModel
 
-from models.user import User
 from models.issue import Issue
-from models.tenant import Tenant
+from models.user import User
 from core.security import get_current_user
+from core.database import get_db
+from core.db_helpers import find_all, find_one, save, count
+from models.base import gen_uuid
 
 router = APIRouter(prefix="/issues", tags=["Issues"])
-
-ADMIN_ROLES  = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
-VALID_STAGES = {"review", "started", "inprogress", "completed"}
+ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
 
 
-async def _upload_files(files: list, folder: str) -> list:
-    uploaded = []
-    for f in files:
-        data   = await f.read()
-        is_vid = f.content_type.startswith("video/")
-        result = cloudinary.uploader.upload(data, folder=folder,
-                                              resource_type="video" if is_vid else "image")
-        uploaded.append({"url": result["secure_url"], "public_id": result["public_id"],
-                          "type": "video" if is_vid else "image"})
-    return uploaded
+class IssueCreate(BaseModel):
+    title: str
+    description: str
+    category: str = "other"
+    priority: str = "medium"
+    estate: Optional[str] = None
+    unit: Optional[str] = None
+    tenant: Optional[str] = None
 
 
 @router.post("/", status_code=201)
 async def create_issue(
-    title:       str = Form(...),
-    description: str = Form(...),
-    category:    str = Form("other"),
-    priority:    str = Form("medium"),
-    estate_id:   Optional[str] = Form(None),
-    unit_id:     Optional[str] = Form(None),
-    images: List[UploadFile] = File(default=[]),
-    videos: List[UploadFile] = File(default=[]),
+    body: IssueCreate,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    tenant = await Tenant.find_one({"user": user.id, "is_active": True})
-
-    media = []
-    all_files = [*images, *videos]
-    if all_files:
-        folder = "bamihustle/issues"
-        media  = await _upload_files(all_files, folder)
-
-    coll = Issue.get_motor_collection()
-    doc  = {
-        "title":       title,
-        "description": description,
-        "category":    category,
-        "priority":    priority,
-        "reporter":    user.id,
-        "estate":      ObjectId(estate_id) if estate_id else (tenant.estate if tenant else None),
-        "unit":        ObjectId(unit_id)   if unit_id   else (tenant.unit   if tenant else None),
-        "tenant":      tenant.id if tenant else None,
-        "status":      "open",
-        "stage":       "review",
-        "media":       media,
-        "timeline":    [{"stage": "review", "note": "Issue submitted for review",
-                          "media": [], "updated_by": str(user.id),
-                          "created_at": datetime.utcnow().isoformat()}],
-        "is_active":   True,
-        "created_at":  datetime.utcnow(),
-        "updated_at":  datetime.utcnow(),
-    }
-    result = await coll.insert_one(doc)
-    doc["_id"] = result.inserted_id
-    return {"success": True, "message": "Issue reported successfully", "data": doc}
+    issue = Issue(id=gen_uuid(), **body.model_dump(), reporter=user.id)
+    await save(db, issue)
+    return {"success": True, "data": _i(issue)}
 
 
 @router.get("/")
-async def get_issues(
-    estate_id: Optional[str] = None,
-    stage:     Optional[str] = None,
-    category:  Optional[str] = None,
-    page:      int = 1,
-    limit:     int = 20,
+async def list_issues(
+    status: Optional[str] = None,
+    priority: Optional[str] = None,
+    estate: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    coll = Issue.get_motor_collection()
-    f: dict = {"is_active": True}
-
-    if user.role in ADMIN_ROLES:
-        if estate_id: f["estate"] = ObjectId(estate_id)
-    else:
-        # Tenants and users see their own issues only
-        f["reporter"] = user.id
-
-    if stage:    f["stage"]    = stage
-    if category: f["category"] = category
-
-    total = await coll.count_documents(f)
-    skip  = (page - 1) * limit
-    items = await coll.find(f).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-
-    return {"success": True, "data": items,
-            "pagination": {"current_page": page, "total_pages": -(-total // limit), "total_items": total}}
+    conditions = [Issue.is_active == True]
+    if user.role not in ADMIN_ROLES:
+        conditions.append(Issue.reporter == user.id)
+    if status:
+        conditions.append(Issue.status == status)
+    if priority:
+        conditions.append(Issue.priority == priority)
+    if estate:
+        conditions.append(Issue.estate == estate)
+    skip = (page - 1) * limit
+    items = await find_all(db, Issue, *conditions,
+                           order_by=Issue.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": len(items), "data": [_i(i) for i in items]}
 
 
 @router.get("/{issue_id}")
-async def get_issue(issue_id: str, user: User = Depends(get_current_user)):
-    coll = Issue.get_motor_collection()
-    doc  = await coll.find_one({"_id": ObjectId(issue_id), "is_active": True})
-    if not doc:
+async def get_issue(issue_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    issue = await find_one(db, Issue, Issue.id == issue_id, Issue.is_active == True)
+    if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
-    return {"success": True, "data": doc}
+    return {"success": True, "data": _i(issue)}
 
 
-@router.patch("/{issue_id}/status")
-async def update_issue_status(
+@router.put("/{issue_id}")
+async def update_issue(
     issue_id: str,
-    stage:    str = Form(...),
-    note:     Optional[str] = Form(None),
-    images:   List[UploadFile] = File(default=[]),
-    videos:   List[UploadFile] = File(default=[]),
+    body: dict,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if stage not in VALID_STAGES:
-        raise HTTPException(status_code=400, detail=f"Invalid stage. Valid: {', '.join(VALID_STAGES)}")
-
-    coll = Issue.get_motor_collection()
-    doc  = await coll.find_one({"_id": ObjectId(issue_id), "is_active": True})
-    if not doc:
+    issue = await find_one(db, Issue, Issue.id == issue_id, Issue.is_active == True)
+    if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    media = []
-    all_files = [*images, *videos]
-    if all_files:
-        folder = f"bamihustle/issues/{issue_id}"
-        media  = await _upload_files(all_files, folder)
-
-    timeline_entry = {"stage": stage, "note": note or f"Status advanced to {stage}",
-                       "media": media, "updated_by": str(user.id),
-                       "created_at": datetime.utcnow().isoformat()}
-
-    new_status = "resolved" if stage == "completed" else "in_progress"
-
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(issue_id)},
-        {"$set": {"stage": stage, "status": new_status, "updated_at": datetime.utcnow()},
-         "$push": {"timeline": timeline_entry}},
-        return_document=True
-    )
-    return {"success": True, "message": f"Issue advanced to {stage}", "data": result}
-
-
-@router.patch("/{issue_id}/assign")
-async def assign_issue(issue_id: str, body: dict, user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    assignee_id = body.get("assigneeId") or body.get("assignee_id")
-    if not assignee_id:
-        raise HTTPException(status_code=400, detail="assigneeId is required")
-
-    coll   = Issue.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(issue_id), "is_active": True},
-        {"$set": {"assigned_to": ObjectId(assignee_id), "updated_at": datetime.utcnow()}},
-        return_document=True
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Issue not found")
-    return {"success": True, "message": "Issue assigned successfully", "data": result}
+    allowed = {"title", "description", "category", "priority", "status", "stage", "assigned_to", "note"}
+    for k, v in body.items():
+        if k in allowed:
+            setattr(issue, k, v)
+    if "stage" in body:
+        tl = list(issue.timeline or [])
+        tl.append({"stage": body["stage"], "by": user.id, "at": datetime.utcnow().isoformat()})
+        issue.timeline = tl
+    issue.updated_at = datetime.utcnow()
+    await save(db, issue)
+    return {"success": True, "data": _i(issue)}
 
 
 @router.delete("/{issue_id}")
-async def cancel_issue(issue_id: str, user: User = Depends(get_current_user)):
-    coll = Issue.get_motor_collection()
-    f    = {"_id": ObjectId(issue_id), "is_active": True}
+async def delete_issue(issue_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if user.role not in ADMIN_ROLES:
-        f["reporter"] = user.id  # non-admins can only cancel own issues
-
-    result = await coll.find_one_and_update(
-        f, {"$set": {"is_active": False, "status": "cancelled", "updated_at": datetime.utcnow()}},
-        return_document=True
-    )
-    if not result:
+        raise HTTPException(status_code=403, detail="Admins only")
+    issue = await find_one(db, Issue, Issue.id == issue_id)
+    if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
-    return {"success": True, "message": "Issue cancelled successfully"}
+    issue.is_active = False
+    issue.updated_at = datetime.utcnow()
+    await save(db, issue)
+    return {"success": True, "message": "Issue deleted"}
+
+
+def _i(i: Issue) -> dict:
+    return {
+        "id": i.id, "title": i.title, "description": i.description,
+        "category": i.category, "priority": i.priority,
+        "status": i.status, "stage": i.stage,
+        "reporter": i.reporter, "assigned_to": i.assigned_to,
+        "estate": i.estate, "unit": i.unit, "tenant": i.tenant,
+        "media": i.media or [], "timeline": i.timeline or [],
+        "created_at": i.created_at,
+    }

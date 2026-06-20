@@ -1,93 +1,52 @@
-from beanie import Document, Link, before_event, Insert
-from pydantic import EmailStr, Field
-from typing import Optional, List
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Integer, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from models.base import Base, gen_uuid
 from datetime import datetime
-from enum import Enum
-from bson import ObjectId
 
 
-class UserRole(str, Enum):
-    super_admin    = "super_admin"
-    admin          = "admin"
-    business_owner = "business_owner"
-    manager        = "manager"
-    super_manager  = "super_manager"
-    vendor         = "vendor"
-    super_vendor   = "super_vendor"
-    tenant         = "tenant"
-    user           = "user"
+class User(Base):
+    __tablename__ = "users"
 
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    password: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(50), default="tenant")
 
-class Service(Document):
-    name: str
-    description: Optional[str] = None
-    price: float
-    rate_type: str = "fixed"   # "fixed" | "hourly"
+    position: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    assigned_estates: Mapped[list] = mapped_column(JSON, default=list)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    class Settings:
-        name = "services"
+    email_verification_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_expire: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    password_reset_otp_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_reset_otp_expire: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_image_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-class BankDetails(Document):
-    account_name:   Optional[str] = None
-    account_number: Optional[str] = None
-    bank_name:      Optional[str] = None
-    bank_code:      Optional[str] = None
+    business_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    business_type_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    specialization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cac_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gov_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    certification: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    business_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    portfolio: Mapped[list] = mapped_column(JSON, default=list)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rating: Mapped[float] = mapped_column(Float, default=0.0)
+    review_count: Mapped[int] = mapped_column(Integer, default=0)
+    location_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    location_state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    op_hours_start: Mapped[str] = mapped_column(String(20), default="9:00 AM")
+    op_hours_end: Mapped[str] = mapped_column(String(20), default="6:00 PM")
+    is_verified_pro: Mapped[bool] = mapped_column(Boolean, default=False)
+    manager: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    class Settings:
-        name = "bank_details"
-
-
-class User(Document):
-    name:     str
-    email:    EmailStr
-    password: str
-    role:     UserRole = UserRole.tenant
-
-    position:           Optional[str] = None
-    assigned_estates:   List[ObjectId] = Field(default_factory=list)
-    phone:              Optional[str]  = None
-    is_active:          bool = True
-    last_login:         Optional[datetime] = None
-    created_by:         Optional[ObjectId] = None
-    email_verified:     bool = False
-
-    email_verification_token:  Optional[str] = None
-    password_reset_token:      Optional[str] = None
-    password_reset_expire:     Optional[datetime] = None
-    password_reset_otp_hash:   Optional[str] = None
-    password_reset_otp_expire: Optional[datetime] = None
-
-    profile_image_url:       Optional[str] = None
-    profile_image_public_id: Optional[str] = None
-
-    # Vendor fields
-    business_name:    Optional[str] = None
-    business_type_id: Optional[ObjectId] = None
-    specialization:   Optional[str] = None
-    cac_number:       Optional[str] = None
-    gov_id:           Optional[str] = None
-    certification:    Optional[str] = None
-    business_address: Optional[str] = None
-    portfolio:        List[str] = Field(default_factory=list)
-    bio:              Optional[str] = None
-    rating:           float = 0.0
-    review_count:     int = 0
-    location_city:    Optional[str] = None
-    location_state:   Optional[str] = None
-    op_hours_start:   str = "9:00 AM"
-    op_hours_end:     str = "6:00 PM"
-    is_verified_pro:  bool = False
-    manager:          Optional[ObjectId] = None
-
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
-
-    class Settings:
-        name = "users"
-        indexes = [
-            [("email", 1), ("is_active", 1)],
-            [("role", 1), ("is_active", 1)],
-            [("assigned_estates", 1)],
-            [("created_at", -1)],
-        ]
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

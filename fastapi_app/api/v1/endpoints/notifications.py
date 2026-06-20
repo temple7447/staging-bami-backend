@@ -1,69 +1,67 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update as sa_update
 from datetime import datetime
-from bson import ObjectId
-from typing import Optional
 
 from models.user import User
 from models.notification import Notification
 from core.security import get_current_user
+from core.database import get_db
+from core.db_helpers import find_all, find_one, save, count
+from models.base import gen_uuid
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
-@router.get("/count")
-async def get_notification_count(user: User = Depends(get_current_user)):
-    coll  = Notification.get_motor_collection()
-    count = await coll.count_documents({"user": user.id, "is_read": False, "is_active": True})
-    return {"success": True, "unread_count": count}
-
-
 @router.get("/")
 async def get_notifications(
-    is_read: Optional[bool] = None,
-    limit:   int = 50,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    coll = Notification.get_motor_collection()
-    f: dict = {"user": user.id, "is_active": True}
-    if is_read is not None:
-        f["is_read"] = is_read
+    items = await find_all(db, Notification,
+                           Notification.user == user.id, Notification.is_active == True,
+                           order_by=Notification.created_at.desc(), limit=50)
+    unread = sum(1 for n in items if not n.is_read)
+    return {"success": True, "count": len(items), "unread": unread,
+            "data": [_n(n) for n in items]}
 
-    items = await coll.find(f).sort("created_at", -1).limit(limit).to_list(limit)
-    unread = await coll.count_documents({"user": user.id, "is_read": False, "is_active": True})
-    return {"success": True, "count": len(items), "unread_count": unread, "data": items}
+
+@router.put("/{nid}/read")
+async def mark_read(nid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    n = await find_one(db, Notification, Notification.id == nid, Notification.user == user.id)
+    if not n:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    n.is_read = True
+    n.read_at = datetime.utcnow()
+    await save(db, n)
+    return {"success": True, "data": _n(n)}
 
 
 @router.put("/read-all")
-async def mark_all_as_read(user: User = Depends(get_current_user)):
-    coll   = Notification.get_motor_collection()
-    result = await coll.update_many(
-        {"user": user.id, "is_read": False, "is_active": True},
-        {"$set": {"is_read": True, "read_at": datetime.utcnow()}}
+async def mark_all_read(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    now = datetime.utcnow()
+    await db.execute(
+        sa_update(Notification)
+        .where(Notification.user == user.id, Notification.is_read == False)
+        .values(is_read=True, read_at=now)
     )
-    return {"success": True, "message": f"{result.modified_count} notifications marked as read"}
+    await db.commit()
+    return {"success": True, "message": "All notifications marked as read"}
 
 
-@router.put("/{notification_id}/read")
-async def mark_as_read(notification_id: str, user: User = Depends(get_current_user)):
-    coll   = Notification.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(notification_id), "user": user.id, "is_active": True},
-        {"$set": {"is_read": True, "read_at": datetime.utcnow()}},
-        return_document=True
-    )
-    if not result:
+@router.delete("/{nid}")
+async def delete_notification(nid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    n = await find_one(db, Notification, Notification.id == nid, Notification.user == user.id)
+    if not n:
         raise HTTPException(status_code=404, detail="Notification not found")
-    return {"success": True, "data": result}
+    n.is_active = False
+    await save(db, n)
+    return {"success": True, "message": "Notification deleted"}
 
 
-@router.delete("/{notification_id}")
-async def delete_notification(notification_id: str, user: User = Depends(get_current_user)):
-    coll   = Notification.get_motor_collection()
-    result = await coll.find_one_and_update(
-        {"_id": ObjectId(notification_id), "user": user.id},
-        {"$set": {"is_active": False}},
-        return_document=True
-    )
-    if not result:
-        raise HTTPException(status_code=404, detail="Notification not found")
-    return {"success": True, "message": "Notification deleted successfully"}
+def _n(n: Notification) -> dict:
+    return {
+        "id": n.id, "title": n.title, "message": n.message,
+        "type": n.type, "link": n.link, "is_read": n.is_read,
+        "read_at": n.read_at, "created_at": n.created_at,
+    }
