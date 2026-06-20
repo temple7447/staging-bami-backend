@@ -16,9 +16,12 @@ router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
 
 class SubscriptionCreate(BaseModel):
-    name: str
+    name: Optional[str] = None
+    plan: Optional[str] = None          # alias for name
     price: float = 0.0
+    amount: Optional[float] = None      # alias for price
     billing_period: str = "month"
+    duration_months: Optional[int] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     features: list[str] = []
@@ -41,9 +44,15 @@ async def create_subscription(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role != "super_admin":
-        raise HTTPException(status_code=403, detail="Super admins only")
-    sub = Subscription(id=gen_uuid(), **body.model_dump(), created_by=user.id)
+    if user.role not in {"super_admin", "admin"}:
+        raise HTTPException(status_code=403, detail="Admins only")
+    data = body.model_dump()
+    data["name"] = data.get("name") or data.get("plan") or "Plan"
+    data["price"] = data.get("price") or data.get("amount") or 0.0
+    data.pop("plan", None)
+    data.pop("amount", None)
+    data.pop("duration_months", None)
+    sub = Subscription(id=gen_uuid(), **data, created_by=user.id)
     await save(db, sub)
     return {"success": True, "data": _s(sub)}
 

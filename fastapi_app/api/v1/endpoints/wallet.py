@@ -152,7 +152,12 @@ async def admin_credit(
 ):
     if user.role not in {"super_admin", "admin"}:
         raise HTTPException(status_code=403, detail="Admins only")
-    target = await db.get(User, str(body.user_id))
+    if body.user_id:
+        target = await db.get(User, str(body.user_id))
+    elif body.email:
+        target = await find_one(db, User, User.email == body.email)
+    else:
+        raise HTTPException(status_code=400, detail="Provide user_id or email")
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
     wallet = await _get_or_create_wallet(db, target.id)

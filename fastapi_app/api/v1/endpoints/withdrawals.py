@@ -18,10 +18,15 @@ router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
 
 class WithdrawalRequest(BaseModel):
     amount: float
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_name: Optional[str] = None
     bank_details: Optional[dict] = None
+    reason: Optional[str] = None
     notes: Optional[str] = None
 
 
+@router.post("/", status_code=201)
 @router.post("/request", status_code=201)
 async def request_withdrawal(
     body: WithdrawalRequest,
@@ -32,12 +37,15 @@ async def request_withdrawal(
     if not wallet or wallet.balance < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient wallet balance")
 
+    bank_details = body.bank_details or {
+        "bank_name": body.bank_name, "account_number": body.account_number, "account_name": body.account_name
+    }
     w = Withdrawal(
         id=gen_uuid(),
         user=user.id,
         amount=body.amount,
-        bank_details=body.bank_details,
-        notes=body.notes,
+        bank_details=bank_details,
+        notes=body.notes or body.reason,
         status="pending",
     )
     await save(db, w)
@@ -55,6 +63,7 @@ async def my_withdrawals(
 
 
 @router.put("/{wid}/status")
+@router.patch("/{wid}/status")
 async def update_status(
     wid: str,
     body: dict,

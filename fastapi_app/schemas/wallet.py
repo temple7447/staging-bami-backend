@@ -31,6 +31,7 @@ class WalletTransactionRequest(BaseModel):
 
 
 class AdminCreditRequest(BaseModel):
-    email:  str
-    amount: float
-    reason: Optional[str] = None
+    user_id: Optional[str] = None
+    email:   Optional[str] = None
+    amount:  float
+    reason:  Optional[str] = None
