@@ -80,18 +80,100 @@ async def add_funds(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-    target_user = await db.get(User, str(body.user_id)) if hasattr(body, "user_id") else user
+    # Admins can credit any user; tenants can only top up their own wallet (test/demo mode)
+    if user.role in ADMIN_ROLES:
+        target_user = await db.get(User, str(body.user_id)) if (hasattr(body, "user_id") and getattr(body, "user_id", None)) else user
+    else:
+        target_user = user
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
     wallet = await _get_or_create_wallet(db, target_user.id)
     wallet.balance += body.amount
     wallet.total_earnings += body.amount
     wallet.updated_at = datetime.utcnow()
     await save(db, wallet)
     await _record_transaction(db, target_user.id, wallet.id, body.amount, "credit",
-                              description=getattr(body, "description", "Admin credit"),
+                              description=getattr(body, "description", None) or "Wallet top-up",
                               created_by=user.id)
-    return {"success": True, "message": "Funds added", "balance": wallet.balance}
+    return {"success": True, "message": "Funds added", "data": {"balance": wallet.balance}}
+
+
+@router.post("/transaction")
+async def wallet_transaction(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Unified transaction endpoint: type = deposit | withdrawal | transfer."""
+    from pydantic import BaseModel
+    tx_type   = (body.get("type") or "").lower()
+    amount    = float(body.get("amount") or 0)
+    desc      = body.get("description") or ""
+    ref       = body.get("reference") or ""
+
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    wallet = await _get_or_create_wallet(db, user.id)
+
+    if tx_type == "deposit":
+        wallet.balance += amount
+        wallet.total_earnings += amount
+        wallet.updated_at = datetime.utcnow()
+        await save(db, wallet)
+        await _record_transaction(db, user.id, wallet.id, amount, "deposit",
+                                  method="bank_transfer", description=desc or "Deposit",
+                                  reference=ref, created_by=user.id)
+        return {"success": True, "message": "Deposit recorded", "data": {"balance": wallet.balance}}
+
+    elif tx_type == "withdrawal":
+        if wallet.balance < amount:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        wallet.balance -= amount
+        wallet.total_spent += amount
+        wallet.updated_at = datetime.utcnow()
+        await save(db, wallet)
+        await _record_transaction(db, user.id, wallet.id, amount, "withdrawal",
+                                  method="bank_transfer", description=desc or "Withdrawal",
+                                  reference=ref, created_by=user.id)
+        return {"success": True, "message": "Withdrawal initiated", "data": {"balance": wallet.balance}}
+
+    elif tx_type == "transfer":
+        recipient_email = body.get("recipientEmail") or body.get("recipient_email")
+        recipient_id    = body.get("recipientId")    or body.get("recipient_id")
+        if wallet.balance < amount:
+            raise HTTPException(status_code=400, detail="Insufficient balance")
+        # Resolve recipient
+        recipient = None
+        if recipient_email:
+            from sqlalchemy import select as _select
+            res = await db.execute(_select(User).where(User.email == recipient_email))
+            recipient = res.scalar_one_or_none()
+        elif recipient_id:
+            recipient = await db.get(User, str(recipient_id))
+        if not recipient:
+            raise HTTPException(status_code=404, detail="Recipient not found")
+        # Debit sender
+        wallet.balance -= amount
+        wallet.total_spent += amount
+        wallet.updated_at = datetime.utcnow()
+        await save(db, wallet)
+        await _record_transaction(db, user.id, wallet.id, amount, "transfer",
+                                  method="internal", description=desc or f"Transfer to {recipient.email}",
+                                  reference=ref, created_by=user.id)
+        # Credit recipient
+        r_wallet = await _get_or_create_wallet(db, recipient.id)
+        r_wallet.balance += amount
+        r_wallet.total_earnings += amount
+        r_wallet.updated_at = datetime.utcnow()
+        await save(db, r_wallet)
+        await _record_transaction(db, recipient.id, r_wallet.id, amount, "deposit",
+                                  method="internal", description=desc or f"Transfer from {user.email}",
+                                  reference=ref, created_by=user.id)
+        return {"success": True, "message": "Transfer successful", "data": {"balance": wallet.balance}}
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown transaction type: {tx_type}")
 
 
 @router.post("/deduct-funds")
