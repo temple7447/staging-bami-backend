@@ -78,7 +78,7 @@ async def create_unit(
     data["estate"] = eid
     unit = Unit(id=gen_uuid(), **data, created_by=user.id)
     await save(db, unit)
-    estate.total_units = (estate.total_units or 0) + 1
+    estate.total_units = await count(db, Unit, Unit.estate == eid, Unit.is_active == True)
     await save(db, estate)
     return {"success": True, "data": _u(unit)}
 
@@ -129,6 +129,10 @@ async def delete_unit(
     unit.updated_by = user.id
     unit.updated_at = datetime.utcnow()
     await save(db, unit)
+    estate = await find_one(db, Estate, Estate.id == unit.estate)
+    if estate:
+        estate.total_units = await count(db, Unit, Unit.estate == unit.estate, Unit.is_active == True)
+        await save(db, estate)
     return {"success": True, "message": "Unit deleted"}
 
 
