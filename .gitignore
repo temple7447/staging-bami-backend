@@ -169,4 +169,5 @@ build/
 
 # Docker
 Dockerfile.prod
-docker-compose.override.yml
+docker-compose.override.yml__pycache__/
+*.pyc
