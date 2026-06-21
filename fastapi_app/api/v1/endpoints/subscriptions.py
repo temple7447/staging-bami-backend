@@ -61,6 +61,8 @@ async def create_subscription(
 async def list_subscriptions(
     billing_period: Optional[str] = None,
     status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db),
 ):
     conditions = [Subscription.is_active == True]
@@ -68,8 +70,13 @@ async def list_subscriptions(
         conditions.append(Subscription.billing_period == billing_period)
     if status:
         conditions.append(Subscription.status == status)
-    items = await find_all(db, Subscription, *conditions, order_by=Subscription.created_at.desc())
-    return {"success": True, "count": len(items), "data": [_s(s) for s in items]}
+    skip = (page - 1) * limit
+    total = await count(db, Subscription, *conditions)
+    items = await find_all(db, Subscription, *conditions,
+                           order_by=Subscription.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_s(s) for s in items]}
 
 
 @router.get("/{sub_id}")

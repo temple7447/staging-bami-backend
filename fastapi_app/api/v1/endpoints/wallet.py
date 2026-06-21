@@ -11,6 +11,7 @@ from models.wallet_account import WalletAccount
 from models.transaction import Transaction
 from models.withdrawal import Withdrawal
 from models.estate import Estate
+from models.tenant import Tenant
 from schemas.wallet import (
     CreateWalletRequest, AddFundsRequest, DeductFundsRequest,
     WalletTransactionRequest, AdminCreditRequest,
@@ -138,10 +139,16 @@ async def get_transactions(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    conditions = [Transaction.is_active == True]
+    if user.role not in ADMIN_ROLES:
+        conditions.append(Transaction.user == user.id)
     skip = (page - 1) * limit
-    items = await find_all(db, Transaction, Transaction.user == user.id, Transaction.is_active == True,
+    total = await count(db, Transaction, *conditions)
+    items = await find_all(db, Transaction, *conditions,
                            order_by=Transaction.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "data": [_tx(t) for t in items]}
+    return {"success": True, "data": await _enrich(db, items),
+            "total": total, "page": page, "limit": limit,
+            "total_pages": -(-total // limit)}
 
 
 @router.get("/transactions/list")
@@ -177,9 +184,9 @@ async def list_transactions_filtered(
     total = await count(db, Transaction, *conditions)
     items = await find_all(db, Transaction, *conditions,
                            order_by=Transaction.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "data": [_tx(t) for t in items],
+    return {"success": True, "data": await _enrich(db, items),
             "total": total, "page": page, "limit": limit,
-            "totalPages": -(-total // limit)}
+            "total_pages": -(-total // limit)}
 
 
 @router.get("/admin/lookup")
@@ -235,9 +242,37 @@ async def admin_credit(
             }}
 
 
-def _tx(t: Transaction) -> dict:
+def _tx(t: Transaction, users: dict = None, tenants: dict = None, estates: dict = None) -> dict:
+    u = (users or {}).get(t.user)
+    tn = (tenants or {}).get(t.tenant)
+    e = (estates or {}).get(t.estate)
     return {
         "id": t.id, "amount": t.amount, "type": t.type, "method": t.method,
         "status": t.status, "reference": t.reference, "description": t.description,
         "created_at": t.created_at,
+        "user": {"id": u.id, "name": u.name, "email": u.email} if u else None,
+        "tenant": {"id": tn.id, "tenant_name": tn.tenant_name, "unit": tn.unit} if tn else None,
+        "estate": {"id": e.id, "name": e.name} if e else None,
     }
+
+
+async def _enrich(db: AsyncSession, items: list[Transaction]) -> list[dict]:
+    user_ids = {t.user for t in items if t.user}
+    tenant_ids = {t.tenant for t in items if t.tenant}
+    estate_ids = {t.estate for t in items if t.estate}
+
+    users = {}
+    tenants = {}
+    estates = {}
+
+    if user_ids:
+        rows = await find_all(db, User, User.id.in_(list(user_ids)))
+        users = {r.id: r for r in rows}
+    if tenant_ids:
+        rows = await find_all(db, Tenant, Tenant.id.in_(list(tenant_ids)))
+        tenants = {r.id: r for r in rows}
+    if estate_ids:
+        rows = await find_all(db, Estate, Estate.id.in_(list(estate_ids)))
+        estates = {r.id: r for r in rows}
+
+    return [_tx(t, users, tenants, estates) for t in items]

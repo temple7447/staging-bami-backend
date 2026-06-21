@@ -8,7 +8,7 @@ from models.service_request import ServiceRequest
 from models.user import User
 from core.security import get_current_user
 from core.database import get_db
-from core.db_helpers import find_all, find_one, save
+from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
@@ -40,6 +40,8 @@ async def create_service_request(
 async def list_service_requests(
     status: Optional[str] = None,
     estate: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -50,8 +52,13 @@ async def list_service_requests(
         conditions.append(ServiceRequest.status == status)
     if estate:
         conditions.append(ServiceRequest.estate == estate)
-    items = await find_all(db, ServiceRequest, *conditions, order_by=ServiceRequest.created_at.desc())
-    return {"success": True, "count": len(items), "data": [_sr(s) for s in items]}
+    skip = (page - 1) * limit
+    total = await count(db, ServiceRequest, *conditions)
+    items = await find_all(db, ServiceRequest, *conditions,
+                           order_by=ServiceRequest.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_sr(s) for s in items]}
 
 
 @router.patch("/{sr_id}/status")

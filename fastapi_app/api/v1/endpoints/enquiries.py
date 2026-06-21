@@ -49,9 +49,13 @@ async def list_enquiries(
     if estate:
         conditions.append(Enquiry.estate == estate)
     skip = (page - 1) * limit
+    from core.db_helpers import count
+    total = await count(db, Enquiry, *conditions)
     items = await find_all(db, Enquiry, *conditions,
                            order_by=Enquiry.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "data": [_e(e) for e in items]}
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_e(e) for e in items]}
 
 
 @router.patch("/{eq_id}/status")

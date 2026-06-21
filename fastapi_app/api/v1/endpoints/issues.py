@@ -57,9 +57,12 @@ async def list_issues(
     if estate:
         conditions.append(Issue.estate == estate)
     skip = (page - 1) * limit
+    total = await count(db, Issue, *conditions)
     items = await find_all(db, Issue, *conditions,
                            order_by=Issue.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "data": [_i(i) for i in items]}
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_i(i) for i in items]}
 
 
 @router.get("/{issue_id}")

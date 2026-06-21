@@ -11,7 +11,7 @@ from models.business_type import BusinessType
 from models.bank_deposit import BankDeposit
 from core.security import get_current_user
 from core.database import get_db
-from core.db_helpers import find_one, find_all, save
+from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 
@@ -45,6 +45,8 @@ async def submit_rental_application(body: RentalApplicationCreate, db: AsyncSess
 async def list_rental_applications(
     status: Optional[str] = None,
     estate: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -55,8 +57,13 @@ async def list_rental_applications(
         conditions.append(RentalApplication.status == status)
     if estate:
         conditions.append(RentalApplication.estate == estate)
-    items = await find_all(db, RentalApplication, *conditions, order_by=RentalApplication.created_at.desc())
-    return {"success": True, "count": len(items), "data": [_ra(a) for a in items]}
+    skip = (page - 1) * limit
+    total = await count(db, RentalApplication, *conditions)
+    items = await find_all(db, RentalApplication, *conditions,
+                           order_by=RentalApplication.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_ra(a) for a in items]}
 
 
 @router.patch("/rental-applications/{app_id}/status")
@@ -136,8 +143,9 @@ async def my_deposits(
     from core.db_helpers import count as db_count
     total = await db_count(db, BankDeposit, *conditions)
     items = await find_all(db, BankDeposit, *conditions, order_by=BankDeposit.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": total, "total": total, "pages": -(-total // limit),
-            "currentPage": page, "data": [_dep(i) for i in items]}
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_dep(i) for i in items]}
 
 
 @router.post("/bank-deposits", status_code=201)
@@ -175,6 +183,8 @@ async def record_bank_deposit(
 @router.get("/bank-deposits")
 async def list_bank_deposits(
     status: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     if user.role not in ADMIN_ROLES:
@@ -182,8 +192,13 @@ async def list_bank_deposits(
     conditions = [BankDeposit.is_active == True]
     if status:
         conditions.append(BankDeposit.status == status)
-    items = await find_all(db, BankDeposit, *conditions, order_by=BankDeposit.created_at.desc())
-    return {"success": True, "count": len(items), "data": [_dep(i) for i in items]}
+    skip = (page - 1) * limit
+    total = await count(db, BankDeposit, *conditions)
+    items = await find_all(db, BankDeposit, *conditions,
+                           order_by=BankDeposit.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_dep(i) for i in items]}
 
 
 @router.get("/bank-deposits/{dep_id}")

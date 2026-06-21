@@ -10,7 +10,7 @@ from models.wallet import Wallet
 from models.user import User
 from core.security import get_current_user
 from core.database import get_db
-from core.db_helpers import find_all, find_one, save
+from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
@@ -54,12 +54,18 @@ async def request_withdrawal(
 
 @router.get("/my")
 async def my_withdrawals(
+    page: int = 1,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    skip = (page - 1) * limit
+    total = await count(db, Withdrawal, Withdrawal.user == user.id)
     items = await find_all(db, Withdrawal, Withdrawal.user == user.id,
-                           order_by=Withdrawal.created_at.desc())
-    return {"success": True, "count": len(items), "data": [_w(w) for w in items]}
+                           order_by=Withdrawal.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "count": total, "total": total,
+            "total_pages": -(-total // limit), "page": page,
+            "data": [_w(w) for w in items]}
 
 
 @router.put("/{wid}/status")
