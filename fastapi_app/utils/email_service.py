@@ -1,39 +1,41 @@
 """
-Email service — uses SMTP (Gmail / any provider).
+Email service — Mailtrap sending API (verified domain required).
 
-Set these env vars:
-  SMTP_HOST     = smtp.gmail.com
-  SMTP_PORT     = 587
-  SMTP_USER     = yourname@gmail.com
-  SMTP_PASS     = your-gmail-app-password   (16-char app password, NOT your Gmail password)
-  FROM_EMAIL    = yourname@gmail.com
-  FROM_NAME     = BamiHustle
+Env vars:
+  MAILTRAP_TOKEN        — API token from Mailtrap > Sending > API Tokens
+  FROM_EMAIL            — verified sender address (e.g. support@bamihost.com)
+  FROM_NAME             — display name (default: BamiHustle)
 """
 import os
 import logging
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import Optional, Union, List
 
 logger = logging.getLogger(__name__)
 
-SMTP_HOST  = os.getenv("SMTP_HOST",  "smtp.gmail.com")
-SMTP_PORT  = int(os.getenv("SMTP_PORT",  "587"))
-SMTP_USER  = os.getenv("SMTP_USER",  "")
-SMTP_PASS  = os.getenv("SMTP_PASS",  "")
-FROM_EMAIL = os.getenv("FROM_EMAIL", SMTP_USER)
-FROM_NAME  = os.getenv("FROM_NAME",  "BamiHustle")
+MAILTRAP_TOKEN = os.getenv("MAILTRAP_TOKEN", "")
+FROM_EMAIL     = os.getenv("FROM_EMAIL", os.getenv("MAILTRAP_SENDER_EMAIL", ""))
+FROM_NAME      = os.getenv("FROM_NAME",  os.getenv("MAILTRAP_SENDER_NAME", "BamiHustle"))
+
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        from mailtrap import MailtrapClient
+        _client = MailtrapClient(token=MAILTRAP_TOKEN)
+    return _client
 
 
 def is_configured() -> bool:
-    return bool(SMTP_USER and SMTP_PASS)
+    return bool(MAILTRAP_TOKEN and FROM_EMAIL)
 
 
 def get_status() -> dict:
     missing = []
-    if not SMTP_USER: missing.append("SMTP_USER")
-    if not SMTP_PASS: missing.append("SMTP_PASS")
-    return {"ok": len(missing) == 0, "missing": missing, "host": SMTP_HOST, "port": SMTP_PORT}
+    if not MAILTRAP_TOKEN: missing.append("MAILTRAP_TOKEN")
+    if not FROM_EMAIL:     missing.append("FROM_EMAIL")
+    return {"ok": len(missing) == 0, "missing": missing}
 
 
 def format_currency(amount: float) -> str:
@@ -47,35 +49,32 @@ async def send_email(
     message: Optional[str] = None,
     name:    Optional[str] = None,
 ) -> dict:
-    """Send an email via SMTP. Falls back to logging when not configured."""
     if not html and not message:
         raise ValueError("Either html or message must be provided")
 
     body_html = html or f"<p>{message}</p>"
 
     if not is_configured():
-        logger.warning("[EMAIL] SMTP not configured. Would send to %s: %s", email, subject)
-        return {"success": False, "error": "SMTP_USER / SMTP_PASS not set"}
+        logger.warning("[EMAIL] Mailtrap not configured. Would send to %s: %s", email, subject)
+        return {"success": False, "error": "MAILTRAP_TOKEN or FROM_EMAIL not set"}
 
     recipients = [email] if isinstance(email, str) else email
 
     try:
-        import aiosmtplib
+        import asyncio
+        from mailtrap import Mail, Address
 
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = f"{FROM_NAME} <{FROM_EMAIL}>"
-        msg["To"]      = ", ".join(recipients)
-        msg.attach(MIMEText(body_html, "html"))
-
-        await aiosmtplib.send(
-            msg,
-            hostname=SMTP_HOST,
-            port=SMTP_PORT,
-            username=SMTP_USER,
-            password=SMTP_PASS,
-            start_tls=True,
+        client = _get_client()
+        mail = Mail(
+            sender=Address(email=FROM_EMAIL, name=FROM_NAME),
+            to=[Address(email=e.strip()) for e in recipients],
+            subject=subject,
+            html=body_html,
         )
+        # SDK send() is sync — run in executor so we don't block the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, client.send, mail)
+
         logger.info("[EMAIL] Sent '%s' to %s", subject, recipients)
         return {"success": True}
     except Exception as e:
@@ -92,7 +91,8 @@ async def send_welcome_email(recipient_email: str, name: str, password: str) -> 
       <p>Hi {name},</p>
       <p>Your account has been created. Use the credentials below to log in:</p>
       <p><strong>Email:</strong> {recipient_email}</p>
-      <p><strong>Temporary Password:</strong> <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">{password}</code></p>
+      <p><strong>Temporary Password:</strong>
+         <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">{password}</code></p>
       <p>Please change your password after your first login.</p>
       <p style="color:#6b7280;font-size:12px">BamiHustle — Property Management</p>
     </div>"""

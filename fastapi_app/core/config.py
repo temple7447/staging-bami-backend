@@ -38,11 +38,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_MS: int = 900000   # 15 min
     RATE_LIMIT_MAX_REQUESTS: int = 200
 
-    # Email (SMTP — works with Gmail, Zoho, any provider)
-    SMTP_HOST:  str = "smtp.gmail.com"
-    SMTP_PORT:  int = 587
-    SMTP_USER:  str = ""
-    SMTP_PASS:  str = ""
+    # Email — Mailtrap sending API
+    MAILTRAP_TOKEN:        str = ""
+    MAILTRAP_SENDER_EMAIL: str = ""
+    MAILTRAP_SENDER_NAME:  str = "BamiHustle"
     FROM_EMAIL: str = ""
     FROM_NAME:  str = "BamiHustle"
 
