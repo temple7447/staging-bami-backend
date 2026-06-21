@@ -9,9 +9,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     PORT: int = 4000
 
-    # Database
+    # Database (PostgreSQL via Neon in production, SQLite locally)
     DATABASE_URL: str = "sqlite+aiosqlite:///bamihustle.db"
-    MONGODB_URI: str = ""
 
     # JWT
     JWT_SECRET: str
