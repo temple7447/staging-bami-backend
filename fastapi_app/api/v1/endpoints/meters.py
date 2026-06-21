@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 
 from models.user import User
 from models.meter_device import MeterDevice
@@ -65,20 +65,22 @@ async def _get_tenant_meter(db: AsyncSession, user: User) -> MeterDevice:
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterMeter(BaseModel):
-    device_id: str
-    device_name: Optional[str] = None
-    unit_id: str
-    meter_number: Optional[str] = None
-    rate_per_kwh: Optional[float] = None
-    prepaid_mode: bool = True
-    low_balance_threshold: float = 500.0
+    model_config = ConfigDict(populate_by_name=True)
+    device_id:            str            = Field(..., alias="deviceId")
+    device_name:          Optional[str]  = Field(None, alias="deviceName")
+    unit_id:              str            = Field(..., alias="unitId")
+    meter_number:         Optional[str]  = Field(None, alias="meterNumber")
+    rate_per_kwh:         Optional[float]= Field(None, alias="ratePerKwh")
+    prepaid_mode:         bool           = Field(True, alias="prepaidMode")
+    low_balance_threshold:float          = Field(500.0, alias="lowBalanceThreshold")
 
 
 class UpdateMeterSettings(BaseModel):
-    device_name: Optional[str] = None
-    rate_per_kwh: Optional[float] = None
-    low_balance_threshold: Optional[float] = None
-    prepaid_mode: Optional[bool] = None
+    model_config = ConfigDict(populate_by_name=True)
+    device_name:           Optional[str]  = Field(None, alias="deviceName")
+    rate_per_kwh:          Optional[float]= Field(None, alias="ratePerKwh")
+    low_balance_threshold: Optional[float]= Field(None, alias="lowBalanceThreshold")
+    prepaid_mode:          Optional[bool] = Field(None, alias="prepaidMode")
 
 
 class TopUpRequest(BaseModel):
