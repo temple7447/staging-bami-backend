@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     PORT: int = 4000
 
-    # MongoDB
-    MONGODB_URI: str
+    # Database
+    DATABASE_URL: str = "sqlite+aiosqlite:///bamihustle.db"
+    MONGODB_URI: str = ""
 
     # JWT
     JWT_SECRET: str
