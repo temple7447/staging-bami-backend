@@ -15,6 +15,19 @@ from models.base import gen_uuid
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
 
+def _parse_date(v) -> "datetime | None":
+    if not v:
+        return None
+    if isinstance(v, datetime):
+        return v
+    for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(v.rstrip("Z").split(".")[0], fmt.rstrip("Z").split(".")[0])
+        except ValueError:
+            continue
+    return None
+
+
 def _parse_features(v) -> list[str]:
     if v is None:
         return []
@@ -38,6 +51,8 @@ class SubscriptionCreate(BaseModel):
     icon: Optional[str] = None
     features: Union[list[str], str, None] = []
     status: str = "Active"
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+    expires_at: Optional[str] = Field(default=None, alias="expiresAt")
 
     @model_validator(mode="after")
     def normalise(self):
@@ -57,6 +72,8 @@ class SubscriptionUpdate(BaseModel):
     icon: Optional[str] = None
     features: Union[list[str], str, None] = None
     status: Optional[str] = None
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+    expires_at: Optional[str] = Field(default=None, alias="expiresAt")
 
     @model_validator(mode="after")
     def normalise(self):
@@ -80,6 +97,8 @@ async def create_subscription(
         billing_period=body.billing_period or "month",
         description=body.description, icon=body.icon,
         features=body.features, status=body.status,
+        start_date=_parse_date(body.start_date),
+        expires_at=_parse_date(body.expires_at),
         created_by=user.id,
     )
     await save(db, sub)
@@ -128,7 +147,11 @@ async def update_subscription(
     sub = await find_one(db, Subscription, Subscription.id == sub_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
-    for k, v in body.model_dump(exclude_none=True, by_alias=False).items():
+    updates = body.model_dump(exclude_none=True, by_alias=False)
+    for k in ("start_date", "expires_at"):
+        if k in updates:
+            updates[k] = _parse_date(updates[k])
+    for k, v in updates.items():
         setattr(sub, k, v)
     sub.updated_at = datetime.utcnow()
     await save(db, sub)
@@ -157,5 +180,9 @@ def _s(s: Subscription) -> dict:
         "id": s.id, "name": s.name, "price": s.price,
         "billing_period": s.billing_period, "description": s.description,
         "icon": s.icon, "status": s.status, "features": s.features or [],
-        "is_active": s.is_active, "created_at": s.created_at,
+        "is_active": s.is_active,
+        "start_date": s.start_date,
+        "expires_at": s.expires_at,
+        "created_at": s.created_at,
+        "updated_at": s.updated_at,
     }
