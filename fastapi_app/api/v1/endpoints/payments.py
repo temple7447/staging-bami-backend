@@ -53,15 +53,26 @@ async def list_payments(
     user: User = Depends(get_current_user),
 ):
     conditions = []
-    if tenant_id:
-        conditions.append(Payment.tenant == tenant_id)
-    if estate_id:
-        conditions.append(Payment.estate == estate_id)
+    # Tenants only see their own payments
+    if user.role == "tenant":
+        tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+        if tenant:
+            conditions.append(Payment.tenant == tenant.id)
+    else:
+        if tenant_id:
+            conditions.append(Payment.tenant == tenant_id)
+        if estate_id:
+            conditions.append(Payment.estate == estate_id)
     if status:
         conditions.append(Payment.payment_status == status)
     skip = (page - 1) * limit
+    total = await count(db, Payment, *conditions)
     items = await find_all(db, Payment, *conditions, order_by=Payment.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "data": [_p(p) for p in items]}
+    return {
+        "success": True, "total": total, "count": len(items),
+        "page": page, "total_pages": -(-total // limit),
+        "data": [_p(p) for p in items],
+    }
 
 
 @router.get("/{pid}")
