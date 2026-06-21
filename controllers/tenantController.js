@@ -13,6 +13,7 @@ const { validationResult } = require('express-validator');
 const { logError, logInfo, logWarning } = require('../utils/logger');
 const { sendActivityToSlack } = require('../utils/slackService');
 const { distributePayment } = require('../utils/distributionService');
+const { getCurrentRent, calculateEffectiveRent } = require('../utils/rentCalculator');
 
 // Generate a random alphanumeric password of given length (at least one letter and one digit)
 function generateTempPassword(len = 6) {
@@ -594,7 +595,6 @@ const getTenant = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    const { getCurrentRent, calculateEffectiveRent } = require('../utils/rentCalculator');
     // Only new tenants owe caution/legal. Renewal/existing tenants already paid these (one-time fees).
     const isApplicable = tenant.tenantType === 'new';
 
@@ -1647,7 +1647,6 @@ async function paySelectedBillingItems(req, res) {
       // 2. Check predefined codes (Only if user has a Tenant record)
       if (tenant) {
         if (itemId === 'rent' && tenant.rentAmount > 0) {
-          const { calculateEffectiveRent } = require('../utils/rentCalculator');
           const rentOrigin = tenant.entryDate || tenant.createdAt;
           const rentResult = calculateEffectiveRent(
             tenant.rentAmount,
