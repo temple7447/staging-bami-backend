@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
-from typing import Optional
-from pydantic import BaseModel
+from typing import Optional, Union
+from pydantic import BaseModel, Field, model_validator
 
 from models.subscription import Subscription
 from models.user import User
@@ -15,27 +15,54 @@ from models.base import gen_uuid
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
 
+def _parse_features(v) -> list[str]:
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return [s.strip() for s in v if s.strip()]
+    if isinstance(v, str):
+        return [s.strip() for s in v.splitlines() if s.strip()]
+    return []
+
+
 class SubscriptionCreate(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: Optional[str] = None
-    plan: Optional[str] = None          # alias for name
+    plan: Optional[str] = None
     price: float = 0.0
-    amount: Optional[float] = None      # alias for price
-    billing_period: str = "month"
+    amount: Optional[float] = None
+    billing_period: Optional[str] = Field(default=None, alias="billingPeriod")
     duration_months: Optional[int] = None
     description: Optional[str] = None
     icon: Optional[str] = None
-    features: list[str] = []
+    features: Union[list[str], str, None] = []
     status: str = "Active"
+
+    @model_validator(mode="after")
+    def normalise(self):
+        if not self.billing_period:
+            self.billing_period = "month"
+        self.features = _parse_features(self.features)
+        return self
 
 
 class SubscriptionUpdate(BaseModel):
+    model_config = {"populate_by_name": True}
+
     name: Optional[str] = None
     price: Optional[float] = None
-    billing_period: Optional[str] = None
+    billing_period: Optional[str] = Field(default=None, alias="billingPeriod")
     description: Optional[str] = None
     icon: Optional[str] = None
-    features: Optional[list[str]] = None
+    features: Union[list[str], str, None] = None
     status: Optional[str] = None
+
+    @model_validator(mode="after")
+    def normalise(self):
+        if self.features is not None:
+            self.features = _parse_features(self.features)
+        return self
 
 
 @router.post("", status_code=201)
@@ -46,13 +73,15 @@ async def create_subscription(
 ):
     if user.role not in {"super_admin", "admin"}:
         raise HTTPException(status_code=403, detail="Admins only")
-    data = body.model_dump()
-    data["name"] = data.get("name") or data.get("plan") or "Plan"
-    data["price"] = data.get("price") or data.get("amount") or 0.0
-    data.pop("plan", None)
-    data.pop("amount", None)
-    data.pop("duration_months", None)
-    sub = Subscription(id=gen_uuid(), **data, created_by=user.id)
+    name = body.name or body.plan or "Plan"
+    price = body.price or body.amount or 0.0
+    sub = Subscription(
+        id=gen_uuid(), name=name, price=price,
+        billing_period=body.billing_period or "month",
+        description=body.description, icon=body.icon,
+        features=body.features, status=body.status,
+        created_by=user.id,
+    )
     await save(db, sub)
     return {"success": True, "data": _s(sub)}
 
@@ -99,7 +128,7 @@ async def update_subscription(
     sub = await find_one(db, Subscription, Subscription.id == sub_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
-    for k, v in body.model_dump(exclude_none=True).items():
+    for k, v in body.model_dump(exclude_none=True, by_alias=False).items():
         setattr(sub, k, v)
     sub.updated_at = datetime.utcnow()
     await save(db, sub)
