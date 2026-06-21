@@ -14,9 +14,12 @@ from models.base import gen_uuid
 router = APIRouter(prefix="/enquiries", tags=["Enquiries"])
 
 
+ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
+
+
 class EnquiryCreate(BaseModel):
-    name: str
-    email: str
+    name: Optional[str] = None
+    email: Optional[str] = None
     phone: Optional[str] = None
     subject: Optional[str] = None
     message: str
@@ -26,8 +29,16 @@ class EnquiryCreate(BaseModel):
 
 
 @router.post("", status_code=201)
-async def submit_enquiry(body: EnquiryCreate, db: AsyncSession = Depends(get_db)):
-    eq = Enquiry(id=gen_uuid(), **body.model_dump())
+async def submit_enquiry(
+    body: EnquiryCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    name  = body.name  or user.name  or "Anonymous"
+    email = body.email or user.email or ""
+    eq = Enquiry(id=gen_uuid(), name=name, email=email, phone=body.phone,
+                 subject=body.subject, message=body.message,
+                 enquiry_type=body.enquiry_type, estate=body.estate, unit=body.unit)
     await save(db, eq)
     return {"success": True, "message": "Enquiry submitted successfully", "data": _e(eq)}
 
@@ -41,15 +52,18 @@ async def list_enquiries(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in {"super_admin", "admin", "super_manager", "business_owner", "manager"}:
-        raise HTTPException(status_code=403, detail="Admins only")
-    conditions = [Enquiry.is_active == True]
-    if status:
-        conditions.append(Enquiry.status == status)
-    if estate:
-        conditions.append(Enquiry.estate == estate)
-    skip = (page - 1) * limit
     from core.db_helpers import count
+    conditions = [Enquiry.is_active == True]
+    if user.role in ADMIN_ROLES:
+        # admins see everything
+        if status:
+            conditions.append(Enquiry.status == status)
+        if estate:
+            conditions.append(Enquiry.estate == estate)
+    else:
+        # tenants see only their own enquiries
+        conditions.append(Enquiry.email == user.email)
+    skip = (page - 1) * limit
     total = await count(db, Enquiry, *conditions)
     items = await find_all(db, Enquiry, *conditions,
                            order_by=Enquiry.created_at.desc(), skip=skip, limit=limit)

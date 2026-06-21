@@ -75,6 +75,60 @@ async def list_payments(
     }
 
 
+@router.get("/receipts")
+async def get_payment_receipts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return structured receipts for the current tenant's payments."""
+    tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+    if not tenant:
+        return {"success": True, "count": 0, "receipts": []}
+
+    payments = await find_all(db, Payment, Payment.tenant == tenant.id,
+                              order_by=Payment.created_at.desc(), limit=100)
+
+    receipts = []
+    for p in payments:
+        year = p.created_at.year if p.created_at else 0
+        receipts.append({
+            "receipt_id": p.id,
+            "reference": p.reference or p.id,
+            "payment_date": p.created_at,
+            "payment_method": "wallet",
+            "payment_type": p.payment_type,
+            "description": p.payment_type,
+            "tenant_name": tenant.tenant_name,
+            "phone": tenant.tenant_phone or "",
+            "meter_no": tenant.electric_meter_number or "",
+            "bedroom_type": "",
+            "flat_type": tenant.unit_label or "",
+            "move_in_date": tenant.entry_date,
+            "expiry_date": tenant.next_due_date,
+            "amount_paid": p.amount,
+            "breakdown": {},
+            "rent": tenant.rent_amount,
+            "service_charge": tenant.service_charge_amount,
+            "caution_fee": 0,
+            "legal_fee": 0,
+            "rent_outstanding": tenant.rent_outstanding,
+            "service_charge_outstanding": tenant.service_charge_outstanding,
+            "outstanding_balance": tenant.rent_outstanding + tenant.service_charge_outstanding,
+            "current_total_tenancy_rate": tenant.rent_amount + tenant.service_charge_amount,
+            "next_total_tenancy_rate": tenant.rent_amount + tenant.service_charge_amount,
+            "tenancy_duration": "12 months",
+            "tenant_total_stay": "",
+            "year_duration": "12 months",
+            "current_year": year,
+            "next_year": year + 1,
+            "next_increase_date": None,
+            "next_rent_increase": 0,
+            "next_service_charge_increase": 0,
+            "total_tenancy_rate_increase": 0,
+        })
+    return {"success": True, "count": len(receipts), "receipts": receipts}
+
+
 @router.get("/{pid}")
 async def get_payment(pid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     payment = await find_one(db, Payment, Payment.id == pid)

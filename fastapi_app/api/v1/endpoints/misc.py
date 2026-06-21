@@ -20,9 +20,9 @@ ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner"}
 
 
 class RentalApplicationCreate(BaseModel):
-    first_name: str
-    last_name: str
-    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    email: Optional[str] = None
     phone: Optional[str] = None
     unit_id: Optional[str] = None
     estate_id: Optional[str] = None
@@ -31,10 +31,18 @@ class RentalApplicationCreate(BaseModel):
 
 
 @router.post("/rental-applications", status_code=201)
-async def submit_rental_application(body: RentalApplicationCreate, db: AsyncSession = Depends(get_db)):
+async def submit_rental_application(
+    body: RentalApplicationCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    name_parts = (user.name or "").split(" ", 1)
+    first = body.first_name or name_parts[0]
+    last  = body.last_name  or (name_parts[1] if len(name_parts) > 1 else "")
+    email = body.email or user.email
     app = RentalApplication(
-        id=gen_uuid(), first_name=body.first_name, last_name=body.last_name,
-        email=body.email, phone=body.phone, unit=body.unit_id, estate=body.estate_id,
+        id=gen_uuid(), first_name=first, last_name=last, email=email,
+        phone=body.phone, unit=body.unit_id, estate=body.estate_id,
         message=body.message, move_in_date=body.move_in_date,
     )
     await save(db, app)
@@ -50,13 +58,15 @@ async def list_rental_applications(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     conditions = [RentalApplication.is_active == True]
-    if status:
-        conditions.append(RentalApplication.status == status)
-    if estate:
-        conditions.append(RentalApplication.estate == estate)
+    if user.role in ADMIN_ROLES:
+        if status:
+            conditions.append(RentalApplication.status == status)
+        if estate:
+            conditions.append(RentalApplication.estate == estate)
+    else:
+        # tenants see only their own applications
+        conditions.append(RentalApplication.email == user.email)
     skip = (page - 1) * limit
     total = await count(db, RentalApplication, *conditions)
     items = await find_all(db, RentalApplication, *conditions,
