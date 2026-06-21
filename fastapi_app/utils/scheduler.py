@@ -133,6 +133,159 @@ async def _backup_database():
         logger.error("[SCHEDULER] Backup failed: %s", e)
 
 
+async def _sync_meters():
+    """Every 30 min: pull live readings from all active Tuya meters, store snapshot, check low balance."""
+    try:
+        from core.database import async_session
+        from models.meter_device import MeterDevice
+        from models.meter_reading import MeterReading
+        from models.notification import Notification
+        from core.db_helpers import find_all, save
+        from models.base import gen_uuid
+        import utils.tuya as tuya
+        from core.config import settings
+
+        if not settings.TUYA_CLIENT_ID:
+            return  # Tuya not configured — skip silently
+
+        async with async_session() as db:
+            meters = await find_all(db, MeterDevice, MeterDevice.is_active == True)
+            synced = 0
+            for meter in meters:
+                try:
+                    raw = await tuya.get_device_status(meter.device_id)
+                    parsed = tuya.parse_status(raw)
+                    now = datetime.utcnow()
+
+                    meter.last_kwh = parsed["kwh"]
+                    meter.last_voltage = parsed["voltage"]
+                    meter.last_current = parsed["current"]
+                    meter.last_power = parsed["power"]
+                    meter.last_power_factor = parsed["power_factor"]
+                    meter.is_online = True
+                    meter.last_synced_at = now
+                    meter.raw_status = parsed.get("raw", {})
+                    await save(db, meter)
+
+                    # Store reading snapshot
+                    reading = MeterReading(
+                        id=gen_uuid(),
+                        meter_device=meter.id,
+                        unit=meter.unit,
+                        estate=meter.estate,
+                        tenant=meter.tenant,
+                        kwh=parsed["kwh"],
+                        voltage=parsed["voltage"],
+                        current=parsed["current"],
+                        power=parsed["power"],
+                        power_factor=parsed["power_factor"],
+                        credit_balance=meter.credit_balance,
+                        rate_per_kwh=meter.rate_per_kwh,
+                        period_month=now.month,
+                        period_year=now.year,
+                        recorded_at=now,
+                    )
+                    await save(db, reading)
+
+                    # Low balance alert (once per threshold cross)
+                    if (meter.prepaid_mode and meter.tenant
+                            and meter.credit_balance <= meter.low_balance_threshold
+                            and meter.credit_balance > 0):
+                        notif = Notification(
+                            id=gen_uuid(), user=meter.tenant,
+                            title="Low Electricity Balance",
+                            message=(
+                                f"Your electricity balance is low: ₦{meter.credit_balance:,.0f} remaining. "
+                                "Top up now to avoid disconnection."
+                            ),
+                            type="meter_low_balance",
+                        )
+                        await save(db, notif)
+
+                    # Auto-disconnect at zero balance
+                    if meter.prepaid_mode and meter.credit_balance <= 0 and meter.is_connected:
+                        try:
+                            await tuya.set_switch(meter.device_id, False)
+                            meter.is_connected = False
+                            await save(db, meter)
+                            if meter.tenant:
+                                notif = Notification(
+                                    id=gen_uuid(), user=meter.tenant,
+                                    title="Power Disconnected — Zero Balance",
+                                    message="Your electricity has been disconnected. Top up your meter to restore power.",
+                                    type="meter_disconnect",
+                                )
+                                await save(db, notif)
+                        except Exception:
+                            pass
+
+                    synced += 1
+                except Exception as e:
+                    logger.warning("[METERS] Sync failed for %s: %s", meter.device_id, e)
+                    meter.is_online = False
+                    await save(db, meter)
+
+            logger.info("[METERS] Sync complete — %d/%d meters updated", synced, len(meters))
+    except Exception as e:
+        logger.error("[METERS] Sync job failed: %s", e)
+
+
+async def _generate_monthly_electricity_bills():
+    """Monthly 1st: generate electricity bill transactions for all meters."""
+    try:
+        from core.database import async_session
+        from models.meter_device import MeterDevice
+        from models.transaction import Transaction
+        from models.notification import Notification
+        from core.db_helpers import find_all, save
+        from models.base import gen_uuid
+        import time as _time
+
+        async with async_session() as db:
+            meters = await find_all(db, MeterDevice, MeterDevice.is_active == True)
+            now = datetime.utcnow()
+            billed = 0
+            for meter in meters:
+                if not meter.tenant:
+                    continue
+                kwh_used = max(0.0, meter.last_kwh - meter.baseline_kwh)
+                if kwh_used <= 0:
+                    continue
+                amount = round(kwh_used * meter.rate_per_kwh, 2)
+
+                tx = Transaction(
+                    id=gen_uuid(), user=meter.tenant,
+                    amount=amount, type="electricity_bill", status="pending",
+                    method="wallet",
+                    reference=f"BILL-ELEC-{int(_time.time()*1000)}",
+                    description=(
+                        f"Electricity bill — {now.strftime('%B %Y')} "
+                        f"({kwh_used:.2f} kWh × ₦{meter.rate_per_kwh}/kWh)"
+                    ),
+                    estate=meter.estate, created_by="system",
+                    period_month=now.month, period_year=now.year,
+                )
+                await save(db, tx)
+
+                # Reset baseline for next month
+                meter.baseline_kwh = meter.last_kwh
+                meter.baseline_date = now
+                await save(db, meter)
+
+                notif = Notification(
+                    id=gen_uuid(), user=meter.tenant,
+                    title=f"Electricity Bill — {now.strftime('%B %Y')}",
+                    message=f"Your electricity bill for {now.strftime('%B %Y')} is ₦{amount:,.2f} ({kwh_used:.2f} kWh). It will be deducted from your wallet.",
+                    type="electricity_bill",
+                )
+                await save(db, notif)
+                billed += 1
+
+            logger.info("[METERS] Monthly bills generated for %d meters", billed)
+    except Exception as e:
+        logger.error("[METERS] Monthly bill job failed: %s", e)
+
+
 def _wrap(coro_fn):
     def job():
         asyncio.get_event_loop().create_task(coro_fn())
@@ -159,8 +312,15 @@ def start_scheduler():
         # Daily 02:00 — backup
         _scheduler.add_job(_wrap(_backup_database),       "cron", hour=2,  minute=0, id="db_backup")
 
+        # Every 30 min — sync Tuya meter readings
+        _scheduler.add_job(_wrap(_sync_meters), "interval", minutes=30, id="meter_sync")
+
+        # Monthly 1st 03:00 — generate electricity bills
+        _scheduler.add_job(_wrap(_generate_monthly_electricity_bills), "cron",
+                           day=1, hour=3, minute=0, id="electricity_bills")
+
         _scheduler.start()
-        logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00")
+        logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min")
     except Exception as e:
         logger.error("[SCHEDULER] Failed to start: %s", e)
 

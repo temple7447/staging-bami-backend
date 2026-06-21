@@ -58,6 +58,12 @@ class Settings(BaseSettings):
     # Slack
     SLACK_WEBHOOK_URL: str = ""
 
+    # Tuya IoT (smart meters)
+    TUYA_CLIENT_ID: str = ""
+    TUYA_CLIENT_SECRET: str = ""
+    TUYA_BASE_URL: str = "https://openapi.tuyaeu.com"
+    TUYA_ELECTRICITY_RATE: float = 70.0   # ₦ per kWh default tariff
+
     # Environment
     NODE_ENV: str = "development"
 
