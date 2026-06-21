@@ -38,13 +38,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_MS: int = 900000   # 15 min
     RATE_LIMIT_MAX_REQUESTS: int = 200
 
-    # Email (Mailtrap)
-    MAILTRAP_HOST: str = ""
-    MAILTRAP_PORT: int = 587
-    MAILTRAP_USER: str = ""
-    MAILTRAP_PASS: str = ""
-    FROM_EMAIL: str = "noreply@bamihost.com"
-    FROM_NAME: str = "BamiHost"
+    # Email (SMTP — works with Gmail, Zoho, any provider)
+    SMTP_HOST:  str = "smtp.gmail.com"
+    SMTP_PORT:  int = 587
+    SMTP_USER:  str = ""
+    SMTP_PASS:  str = ""
+    FROM_EMAIL: str = ""
+    FROM_NAME:  str = "BamiHustle"
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: str = ""
