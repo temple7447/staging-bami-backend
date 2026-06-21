@@ -144,7 +144,65 @@ async def get_transactions(
     return {"success": True, "count": len(items), "data": [_tx(t) for t in items]}
 
 
+@router.get("/transactions/list")
+async def list_transactions_filtered(
+    type: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    start_date: Optional[str] = Query(None, alias="startDate"),
+    end_date: Optional[str] = Query(None, alias="endDate"),
+    page: int = 1,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from sqlalchemy import and_
+    from datetime import datetime as dt
+
+    conditions = [Transaction.is_active == True]
+    if user.role not in {"super_admin", "admin"}:
+        conditions.append(Transaction.user == user.id)
+    if type:
+        conditions.append(Transaction.type == type)
+    if status:
+        conditions.append(Transaction.status == status)
+    if start_date:
+        try: conditions.append(Transaction.created_at >= dt.fromisoformat(start_date))
+        except: pass
+    if end_date:
+        try: conditions.append(Transaction.created_at <= dt.fromisoformat(end_date))
+        except: pass
+
+    skip = (page - 1) * limit
+    total = await count(db, Transaction, *conditions)
+    items = await find_all(db, Transaction, *conditions,
+                           order_by=Transaction.created_at.desc(), skip=skip, limit=limit)
+    return {"success": True, "data": [_tx(t) for t in items],
+            "total": total, "page": page, "limit": limit,
+            "totalPages": -(-total // limit)}
+
+
+@router.get("/admin/lookup")
+async def admin_lookup_user(
+    email: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if user.role not in {"super_admin", "admin"}:
+        raise HTTPException(status_code=403, detail="Admins only")
+    target = await find_one(db, User, User.email == email)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    wallet = await _get_or_create_wallet(db, target.id)
+    return {"success": True, "data": {
+        "userId": target.id, "name": target.name, "email": target.email,
+        "role": target.role, "phone": target.phone,
+        "walletBalance": wallet.balance, "currency": wallet.currency,
+    }}
+
+
 @router.post("/admin-credit")
+@router.post("/admin/credit")
 async def admin_credit(
     body: AdminCreditRequest,
     db: AsyncSession = Depends(get_db),
@@ -165,9 +223,16 @@ async def admin_credit(
     wallet.total_earnings += body.amount
     wallet.updated_at = datetime.utcnow()
     await save(db, wallet)
-    await _record_transaction(db, target.id, wallet.id, body.amount, "admin_credit",
-                              description=getattr(body, "reason", "Admin credit"), created_by=user.id)
-    return {"success": True, "message": "Credit applied", "balance": wallet.balance}
+    tx = await _record_transaction(db, target.id, wallet.id, body.amount, "admin_credit",
+                                   description=body.reason or "Admin credit", created_by=user.id)
+    return {"success": True, "message": "Credit applied",
+            "balance": wallet.balance,
+            "data": {
+                "transactionId": tx.id,
+                "recipient": {"id": target.id, "name": target.name, "email": target.email},
+                "amountCredited": body.amount,
+                "newBalance": wallet.balance,
+            }}
 
 
 def _tx(t: Transaction) -> dict:
