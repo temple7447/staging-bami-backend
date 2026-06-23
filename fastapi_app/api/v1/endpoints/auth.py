@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
-import hashlib, secrets
+import hashlib, secrets, random
 
 from models.user import User
 from models.wallet import Wallet
@@ -13,6 +13,7 @@ from schemas.auth import (
 from core.security import hash_password, verify_password, create_access_token, get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, save
+from utils.email_service import send_welcome_email, send_password_reset
 from models.base import gen_uuid
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -49,6 +50,8 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     wallet = Wallet(id=gen_uuid(), user_id=user.id, balance=0, currency="NGN")
     await save(db, wallet)
+
+    await send_welcome_email(user.email, user.name, body.password)
 
     token = create_access_token(user.id, user.role)
     return {"success": True, "token": token, "user": _user_dict(user)}
@@ -109,15 +112,17 @@ async def update_password(
 async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     user = await find_one(db, User, User.email == body.email)
     if not user:
-        return {"success": True, "message": "If that email exists, a reset link has been sent"}
+        return {"success": True, "message": "If that email exists, a reset code has been sent"}
 
-    token = secrets.token_urlsafe(32)
-    user.password_reset_token = token
+    otp = str(random.randint(100000, 999999))
+    user.password_reset_token = otp
     from datetime import timedelta
     user.password_reset_expire = datetime.utcnow() + timedelta(hours=1)
     await save(db, user)
 
-    return {"success": True, "message": "Password reset link sent", "debug_token": token}
+    await send_password_reset(user.email, user.name or "User", otp)
+
+    return {"success": True, "message": "Password reset code sent to your email"}
 
 
 @router.post("/reset-password")

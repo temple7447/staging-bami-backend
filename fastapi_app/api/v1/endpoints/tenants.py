@@ -20,6 +20,7 @@ from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date
 from utils.rent_calculator import get_current_rent, calculate_effective_rent
+from utils.email_service import send_welcome_email
 from models.base import gen_uuid
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
@@ -165,6 +166,9 @@ async def create_tenant(
     unit.occupied_since = parsed_entry or today
     unit.updated_by = user.id
     await save(db, unit)
+
+    if email_addr and generated_password:
+        await send_welcome_email(email_addr, full_name or "Tenant", generated_password)
 
     return {"success": True, "message": "Tenant created successfully",
             "data": {"id": tenant.id, "temp_password": generated_password}}
