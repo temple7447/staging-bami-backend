@@ -10,13 +10,13 @@ Per-user productivity endpoints:
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 from models.user import User
 from models.billionaire import SignalMission, TimeBlock, KingsAuditItem, TimeValueProfile
 from schemas.billionaire import (
-    MissionCreate, MissionUpdate,
+    MissionCreate, MissionUpdate, RolloverRequest,
     TimeBlockCreate, TimeBlockUpdate, SeedRequest,
     KingsAuditCreate, TimeValueUpdate,
 )
@@ -137,6 +137,99 @@ async def get_summary(
     }
 
 
+# ── analytics (real data — streak, SNR trend, time split) ───────────────────────
+
+@router.get("/analytics")
+async def get_analytics(
+    days: int = Query(7, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    today = date.fromisoformat(_today())
+    window_start = (today - timedelta(days=days - 1)).isoformat()
+    streak_start = (today - timedelta(days=89)).isoformat()  # look back up to 90 days
+
+    # All missions in the streak lookback window (covers the chart window too)
+    all_missions = await find_all(
+        db, SignalMission,
+        SignalMission.user_id == user.id,
+        SignalMission.mission_date >= streak_start,
+        SignalMission.mission_date <= today.isoformat(),
+    )
+    by_date: dict[str, dict] = {}
+    for m in all_missions:
+        slot = by_date.setdefault(m.mission_date, {"total": 0, "done": 0})
+        slot["total"] += 1
+        if m.completed:
+            slot["done"] += 1
+
+    # Daily SNR series for the chart window
+    daily = []
+    win_total = win_done = 0
+    for i in range(days):
+        d = (today - timedelta(days=days - 1 - i)).isoformat()
+        s = by_date.get(d, {"total": 0, "done": 0})
+        t, dn = s["total"], s["done"]
+        win_total += t
+        win_done += dn
+        snr = round(96 + (dn / t * 4), 1) if t else None
+        daily.append({"date": d, "total": t, "done": dn, "snr": snr})
+
+    completion_rate = round(win_done / win_total * 100, 1) if win_total else 0.0
+
+    # Streak: consecutive days (ending today) where every mission was completed.
+    # Today is skipped without breaking if nothing has been planned yet.
+    streak = 0
+    cursor = today
+    first = True
+    for _ in range(90):
+        key = cursor.isoformat()
+        s = by_date.get(key, {"total": 0, "done": 0})
+        if s["total"] == 0:
+            if first:
+                cursor -= timedelta(days=1)
+                first = False
+                continue
+            break
+        if s["done"] == s["total"]:
+            streak += 1
+            cursor -= timedelta(days=1)
+            first = False
+        else:
+            break
+
+    # Time-block split across the chart window (real time audit data)
+    blocks = await find_all(
+        db, TimeBlock,
+        TimeBlock.user_id == user.id,
+        TimeBlock.block_date >= window_start,
+        TimeBlock.block_date <= today.isoformat(),
+    )
+    time_split = {"signal": 0, "noise": 0, "reminder": 0, "neutral": 0}
+    for b in blocks:
+        time_split[b.block_type] = time_split.get(b.block_type, 0) + 1
+    tracked = time_split["signal"] + time_split["noise"]
+    time_snr = round(time_split["signal"] / tracked * 100, 1) if tracked else 0.0
+
+    # King's audit composition
+    kings = await find_all(db, KingsAuditItem, KingsAuditItem.user_id == user.id)
+    kings_split = {
+        "high": sum(1 for k in kings if k.bucket == "high"),
+        "low": sum(1 for k in kings if k.bucket == "low"),
+    }
+
+    return {
+        "success": True,
+        "days": days,
+        "daily": daily,
+        "streak": streak,
+        "completion_rate": completion_rate,
+        "time_split": time_split,
+        "time_snr": time_snr,
+        "kings_split": kings_split,
+    }
+
+
 # ── signal missions ─────────────────────────────────────────────────────────────
 
 @router.get("/missions")
@@ -181,6 +274,46 @@ async def create_mission(
     )
     await save(db, mission)
     return {"success": True, "data": _mission_dict(mission)}
+
+
+@router.post("/missions/rollover", status_code=201)
+async def rollover_missions(
+    body: RolloverRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Carry unfinished missions from one day to another (default: today -> tomorrow)."""
+    src = body.from_date or _today()
+    dst = body.to_date or (date.fromisoformat(_today()) + timedelta(days=1)).isoformat()
+    if src == dst:
+        raise HTTPException(status_code=400, detail="Source and target dates must differ")
+
+    incomplete = await find_all(
+        db, SignalMission,
+        SignalMission.user_id == user.id, SignalMission.mission_date == src,
+        SignalMission.completed == False,  # noqa: E712
+        order_by=SignalMission.sort_order,
+    )
+    existing_dst = await find_all(
+        db, SignalMission,
+        SignalMission.user_id == user.id, SignalMission.mission_date == dst,
+    )
+    slots = MAX_MISSIONS - len(existing_dst)
+    if slots <= 0:
+        raise HTTPException(status_code=400, detail="Target day already has 5 missions")
+
+    created = []
+    for i, m in enumerate(incomplete[:slots]):
+        new = SignalMission(
+            id=gen_uuid(), user_id=user.id, title=m.title, deadline=m.deadline,
+            mission_date=dst, sort_order=len(existing_dst) + i,
+        )
+        db.add(new)
+        created.append(new)
+    await db.commit()
+    for n in created:
+        await db.refresh(n)
+    return {"success": True, "carried": len(created), "date": dst, "data": [_mission_dict(m) for m in created]}
 
 
 @router.patch("/missions/{mid}")
@@ -382,10 +515,7 @@ async def _get_or_create_profile(db: AsyncSession, user: User) -> TimeValueProfi
     if not profile:
         profile = TimeValueProfile(
             id=gen_uuid(), user_id=user.id,
-            delegate=["Email management", "Customer support", "Scheduling", "Data entry"],
-            outsource=["House cleaning", "Meal prep", "Bookkeeping", "Running errands"],
-            automate=["Email follow-up sequences", "Lead capture forms", "Social media posting"],
-            delete_list=["Scrolling social media", "Unnecessary meetings", "Busywork"],
+            delegate=[], outsource=[], automate=[], delete_list=[],
         )
         await save(db, profile)
     return profile

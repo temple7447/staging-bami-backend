@@ -18,6 +18,12 @@ class MissionUpdate(BaseModel):
     completed: Optional[bool] = None
 
 
+class RolloverRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    from_date: Optional[str] = Field(None, alias="fromDate")   # default: today
+    to_date:   Optional[str] = Field(None, alias="toDate")     # default: tomorrow
+
+
 # ── Time-audit blocks ───────────────────────────────────────────────────────────
 
 class TimeBlockCreate(BaseModel):
