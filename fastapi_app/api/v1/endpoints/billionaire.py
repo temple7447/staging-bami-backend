@@ -35,19 +35,20 @@ def _today() -> str:
     return date.today().isoformat()
 
 
-# Default 18-hour schedule seeded into the Time Audit on request
+# Default 18-hour schedule seeded into the Time Audit on request.
+# Times are stored 24-hour "HH:MM" so string ordering == chronological order.
 DEFAULT_SCHEDULE = [
-    ("4:00 AM",  "Morning routine / prayer", "neutral",  "Start of 18hr window"),
-    ("4:30 AM",  "Deep work — signal mission 1", "signal", "Mission 1"),
-    ("6:30 AM",  "Review & plan", "reminder", "Check mission progress"),
-    ("8:00 AM",  "Team comms (batched)", "noise", "Max 15 min — no reactive"),
-    ("8:30 AM",  "Lead generation / signal mission", "signal", "Mission 2"),
-    ("11:30 AM", "Mid-day check", "reminder", "SNR audit — on track?"),
-    ("12:30 PM", "Email batch (15 min)", "noise", "Batch only"),
-    ("1:00 PM",  "Deep work — signal mission 3", "signal", "Mission 3"),
-    ("3:30 PM",  "Metrics review", "reminder", "Are missions on track?"),
-    ("5:30 PM",  "Evening planning", "reminder", "Set tomorrow's 3-5 signals"),
-    ("10:00 PM", "End of 18hr window", "reminder", "Missions complete?"),
+    ("04:00", "Morning routine / prayer", "neutral",  "Start of 18hr window"),
+    ("04:30", "Deep work — signal mission 1", "signal", "Mission 1"),
+    ("06:30", "Review & plan", "reminder", "Check mission progress"),
+    ("08:00", "Team comms (batched)", "noise", "Max 15 min — no reactive"),
+    ("08:30", "Lead generation / signal mission", "signal", "Mission 2"),
+    ("11:30", "Mid-day check", "reminder", "SNR audit — on track?"),
+    ("12:30", "Email batch (15 min)", "noise", "Batch only"),
+    ("13:00", "Deep work — signal mission 3", "signal", "Mission 3"),
+    ("15:30", "Metrics review", "reminder", "Are missions on track?"),
+    ("17:30", "Evening planning", "reminder", "Set tomorrow's 3-5 signals"),
+    ("22:00", "End of 18hr window", "reminder", "Missions complete?"),
 ]
 
 DEFAULT_KINGS_AUDIT = {
