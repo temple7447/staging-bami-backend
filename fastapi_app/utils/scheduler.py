@@ -17,6 +17,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 _scheduler = None
+_loop = None  # main event loop, captured at startup
 
 
 async def _check_rent_reminders():
@@ -277,14 +278,25 @@ async def _generate_monthly_electricity_bills():
 
 def _wrap(coro_fn):
     def job():
-        asyncio.get_event_loop().create_task(coro_fn())
+        # APScheduler runs jobs in a worker thread that has no event loop.
+        # Dispatch the coroutine onto the main loop captured at startup.
+        if _loop is None or _loop.is_closed():
+            logger.error("[SCHEDULER] No event loop available for job %s", getattr(coro_fn, "__name__", coro_fn))
+            return
+        asyncio.run_coroutine_threadsafe(coro_fn(), _loop)
     return job
 
 
 def start_scheduler():
-    global _scheduler
+    global _scheduler, _loop
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
+
+        # Capture the running event loop so worker threads can dispatch onto it.
+        try:
+            _loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = asyncio.get_event_loop()
 
         _scheduler = BackgroundScheduler()
         _scheduler.add_job(_wrap(_check_rent_reminders), "cron", hour=8,  minute=0, id="reminders_am")
