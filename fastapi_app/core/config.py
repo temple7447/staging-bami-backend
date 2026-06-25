@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     # Slack
     SLACK_WEBHOOK_URL: str = ""
 
+    # Termii (WhatsApp + SMS reminders)
+    TERMII_API_KEY: str = ""
+    TERMII_BASE_URL: str = "https://api.ng.termii.com"
+    TERMII_SENDER_ID: str = "Termii"            # approved SMS sender ID
+    TERMII_WHATSAPP_TEMPLATE_ID: str = ""       # pre-approved WhatsApp template
+    TERMII_WHATSAPP_DEVICE_ID: str = ""         # WhatsApp device/phone id
+    DEFAULT_COUNTRY_CODE: str = "234"           # Nigeria — for phone normalization
+    REMINDER_CHANNEL: str = "whatsapp"          # whatsapp | sms | both
+
     # Tuya IoT (smart meters)
     TUYA_CLIENT_ID: str = ""
     TUYA_CLIENT_SECRET: str = ""

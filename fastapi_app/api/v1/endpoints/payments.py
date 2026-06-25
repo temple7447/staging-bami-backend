@@ -193,16 +193,38 @@ async def send_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User 
 
 @router.post("/tenant/{tid}/receipt")
 async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    from utils import whatsapp_service
+
     tenant = await find_one(db, Tenant, Tenant.id == tid)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    await send_rent_reminder(
-        to_email=tenant.tenant_email or "",
-        tenant_name=tenant.tenant_name,
-        amount_due=tenant.rent_amount,
-        due_date=tenant.next_due_date,
-    )
-    return {"success": True, "message": "Reminder sent"}
+
+    due = str(tenant.next_due_date.date()) if tenant.next_due_date else "soon"
+    channels = []
+
+    if tenant.tenant_email:
+        await send_rent_reminder(
+            recipient_email=tenant.tenant_email,
+            name=tenant.tenant_name or "",
+            amount=tenant.rent_amount or 0,
+            due_date=due,
+        )
+        channels.append("email")
+
+    if tenant.tenant_phone and whatsapp_service.is_configured():
+        res = await whatsapp_service.send_reminder(
+            phone=tenant.tenant_phone,
+            name=tenant.tenant_name or "",
+            amount=tenant.rent_amount or 0,
+            due_date=due,
+            estate=getattr(tenant, "estate", "") or "",
+        )
+        if res.get("success"):
+            channels.append("whatsapp" if whatsapp_service.whatsapp_ready() else "sms")
+
+    if not channels:
+        raise HTTPException(status_code=400, detail="Tenant has no email or phone to notify")
+    return {"success": True, "message": f"Reminder sent via {', '.join(channels)}", "channels": channels}
 
 
 @router.post("/callback")

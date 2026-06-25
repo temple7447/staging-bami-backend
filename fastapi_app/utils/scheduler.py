@@ -26,25 +26,47 @@ async def _check_rent_reminders():
         from models.tenant import Tenant
         from core.db_helpers import find_all
         from utils.email_service import send_rent_reminder
+        from utils import whatsapp_service
 
         now = datetime.utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
 
         sent = 0
+        wa_sent = 0
         for t in tenants:
-            if not t.next_due_date or not t.tenant_email:
+            if not t.next_due_date:
                 continue
             days = (t.next_due_date - now).days
-            if days in (7, 3, 1) or days < 0:
+            if not (days in (7, 3, 1) or days < 0):
+                continue
+
+            due = str(t.next_due_date.date())
+            if t.tenant_email:
                 await send_rent_reminder(
                     recipient_email=t.tenant_email,
                     name=t.tenant_name or "",
                     amount=t.rent_amount or 0,
-                    due_date=str(t.next_due_date.date()),
+                    due_date=due,
                 )
                 sent += 1
-        logger.info("[SCHEDULER] Rent reminders sent: %d", sent)
+
+            # WhatsApp / SMS via Termii (no-op if not configured)
+            if t.tenant_phone and whatsapp_service.is_configured():
+                try:
+                    res = await whatsapp_service.send_reminder(
+                        phone=t.tenant_phone,
+                        name=t.tenant_name or "",
+                        amount=t.rent_amount or 0,
+                        due_date=due,
+                        estate=getattr(t, "estate", "") or "",
+                    )
+                    if res.get("success"):
+                        wa_sent += 1
+                except Exception as we:
+                    logger.error("[SCHEDULER] WhatsApp/SMS reminder failed for %s: %s", t.id, we)
+
+        logger.info("[SCHEDULER] Rent reminders sent — email: %d, whatsapp/sms: %d", sent, wa_sent)
     except Exception as e:
         logger.error("[SCHEDULER] Rent reminder check failed: %s", e)
 
