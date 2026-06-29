@@ -3,6 +3,7 @@ from api.v1.endpoints import auth, estates, units, tenants, dashboard
 from api.v1.endpoints import wallet, billing, payments
 from api.v1.endpoints import notifications, issues, service_requests, enquiries
 from api.v1.endpoints import subscriptions, withdrawals, misc, distribution, wallets, meters, billionaire
+from api.v1.endpoints import coach
 
 api_router = APIRouter(prefix="/api")
 
@@ -25,3 +26,4 @@ api_router.include_router(distribution.router)
 api_router.include_router(wallets.router)
 api_router.include_router(meters.router)
 api_router.include_router(billionaire.router)
+api_router.include_router(coach.router)

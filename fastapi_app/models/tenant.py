@@ -29,6 +29,7 @@ class Tenant(Base):
     next_due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
 
     user: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    telegram_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_image_public_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

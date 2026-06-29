@@ -21,7 +21,7 @@ import utils.tuya as tuya
 import time
 
 router = APIRouter(prefix="/meters", tags=["Meters"])
-ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner"}
+ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

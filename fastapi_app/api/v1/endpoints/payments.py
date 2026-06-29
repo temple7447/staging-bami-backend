@@ -144,8 +144,8 @@ async def update_status(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in {"super_admin", "admin"}:
-        raise HTTPException(status_code=403, detail="Admins only")
+    if user.role not in {"super_admin", "admin", "manager", "super_manager", "business_owner"}:
+        raise HTTPException(status_code=403, detail="Managers and above only")
     payment = await find_one(db, Payment, Payment.id == pid)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")

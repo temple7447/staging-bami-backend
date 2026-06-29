@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e ' *)"
+      "Bash(*)",
+      "WebFetch(domain:developer.tuya.com)"
+    ],
+    "additionalDirectories": [
+      "/Users/temple/Documents/Bami/BamiHustle-frontend/src/store",
+      "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/auth",
+      "/Users/temple/Documents/Bami/BamiHustle-frontend/src"
     ]
   }
 }

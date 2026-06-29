@@ -182,25 +182,133 @@ async def _business_owner_overview(db: AsyncSession, user_id: str) -> dict:
 
 
 async def _manager_overview(db: AsyncSession, user_id: str) -> dict:
+    from datetime import timedelta
+    from models.issue import Issue
+    from models.billing_item import BillingItem
+
+    # Resolve assigned estates (from user.assigned_estates or estate.managers)
     assigned = (await db.execute(select(User.assigned_estates).where(User.id == user_id))).scalar_one_or_none() or []
     if not assigned:
         result = await db.execute(
-            select(Estate.id).where(Estate.is_active == True,
-                                    or_(Estate.owner == user_id, Estate.managers.contains(user_id)))
+            select(Estate.id, Estate.name).where(
+                Estate.is_active == True,
+                or_(Estate.owner == user_id, Estate.managers.contains(user_id))
+            )
         )
-        assigned = [r[0] for r in result.all()]
+        rows = result.all()
+        assigned = [r[0] for r in rows]
+        estate_names = {r[0]: r[1] for r in rows}
+    else:
+        result = await db.execute(select(Estate.id, Estate.name).where(Estate.id.in_(assigned), Estate.is_active == True))
+        estate_names = {r[0]: r[1] for r in result.all()}
 
+    if not assigned:
+        return {
+            "section": "MANAGER_OVERVIEW",
+            "managed_estates": 0,
+            "estate_names": [],
+            "units": {"total": 0, "occupied": 0, "vacant": 0, "occupancy_rate": 0},
+            "tenants": {"total": 0, "overdue": 0},
+            "revenue": {"monthly": 0, "currency": "NGN"},
+            "outstanding": {"rent": 0, "service_charge": 0, "total": 0},
+            "collection_rate": 0,
+            "skills": {},
+        }
+
+    now = datetime.utcnow()
+    thirty_ago = now - timedelta(days=30)
+
+    # Units
     total_units    = await count(db, Unit, Unit.estate.in_(assigned), Unit.is_active == True)
     occupied_units = await count(db, Unit, Unit.estate.in_(assigned), Unit.is_active == True, Unit.status == "occupied")
-    total_tenants  = await count(db, Tenant, Tenant.estate.in_(assigned), Tenant.is_active == True)
-    now = datetime.utcnow()
+
+    # Tenants
+    total_tenants   = await count(db, Tenant, Tenant.estate.in_(assigned), Tenant.is_active == True)
     overdue_tenants = await count(db, Tenant, Tenant.estate.in_(assigned), Tenant.is_active == True, Tenant.next_due_date < now)
+
+    # Financial
+    monthly_revenue = await sum_col(db, Payment, Payment.amount,
+                                    Payment.estate.in_(assigned),
+                                    Payment.payment_status.in_(["completed", "success"]),
+                                    Payment.created_at >= thirty_ago)
+    rent_out = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.estate.in_(assigned), Tenant.is_active == True)
+    svc_out  = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.estate.in_(assigned), Tenant.is_active == True)
+
+    # Monthly rent roll (potential income)
+    monthly_roll = await sum_col(db, Tenant, Tenant.rent_amount + Tenant.service_charge_amount,
+                                 Tenant.estate.in_(assigned), Tenant.is_active == True, Tenant.status == "occupied")
+    collection_rate = round(monthly_revenue / monthly_roll * 100, 1) if monthly_roll else 0
+
+    # Issues
+    open_issues  = await count(db, Issue, Issue.estate.in_(assigned), Issue.status != "closed", Issue.is_active == True)
+    high_issues  = await count(db, Issue, Issue.estate.in_(assigned), Issue.status != "closed", Issue.priority == "high", Issue.is_active == True)
+
+    # Overdue tenant list (top 5)
+    from sqlalchemy import select as sa_select
+    overdue_rows = (await db.execute(
+        sa_select(Tenant).where(Tenant.estate.in_(assigned), Tenant.is_active == True, Tenant.next_due_date < now)
+        .order_by(Tenant.next_due_date.asc()).limit(5)
+    )).scalars().all()
+    overdue_list = [
+        {
+            "id": t.id,
+            "name": t.tenant_name,
+            "unit": t.unit_label,
+            "outstanding": round(t.rent_outstanding + t.service_charge_outstanding, 0),
+            "due_date": t.next_due_date.isoformat() if t.next_due_date else None,
+            "phone": t.tenant_phone,
+            "email": t.tenant_email,
+        }
+        for t in overdue_rows
+    ]
+
+    # Per-estate breakdown
+    estate_breakdown = []
+    for eid in assigned:
+        eu = await count(db, Unit, Unit.estate == eid, Unit.is_active == True)
+        eo = await count(db, Unit, Unit.estate == eid, Unit.is_active == True, Unit.status == "occupied")
+        et = await count(db, Tenant, Tenant.estate == eid, Tenant.is_active == True)
+        eov = await count(db, Tenant, Tenant.estate == eid, Tenant.is_active == True, Tenant.next_due_date < now)
+        erev = await sum_col(db, Payment, Payment.amount, Payment.estate == eid,
+                             Payment.payment_status.in_(["completed", "success"]), Payment.created_at >= thirty_ago)
+        estate_breakdown.append({
+            "id": eid,
+            "name": estate_names.get(eid, "Estate"),
+            "units": {"total": eu, "occupied": eo, "vacant": eu - eo,
+                      "occupancy_rate": round(eo / eu * 100, 1) if eu else 0},
+            "tenants": et,
+            "overdue": eov,
+            "revenue_30d": erev,
+        })
+
+    # Pending billing items (unpaid)
+    pending_bills = await count(db, BillingItem, BillingItem.estate.in_(assigned), BillingItem.is_paid == False, BillingItem.is_active == True)
 
     return {
         "section": "MANAGER_OVERVIEW",
         "managed_estates": len(assigned),
-        "units": {"total": total_units, "occupied": occupied_units, "vacant": total_units - occupied_units},
-        "tenants": {"total": total_tenants, "overdue": overdue_tenants},
+        "estate_names": list(estate_names.values()),
+        "estate_breakdown": estate_breakdown,
+        "units": {
+            "total": total_units,
+            "occupied": occupied_units,
+            "vacant": total_units - occupied_units,
+            "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
+        },
+        "tenants": {
+            "total": total_tenants,
+            "overdue": overdue_tenants,
+            "overdue_list": overdue_list,
+        },
+        "revenue": {"monthly": monthly_revenue, "currency": "NGN"},
+        "outstanding": {"rent": rent_out, "service_charge": svc_out, "total": round(rent_out + svc_out, 0)},
+        "collection_rate": collection_rate,
+        "monthly_rent_roll": monthly_roll,
+        "skills": {
+            "open_issues": open_issues,
+            "high_priority_issues": high_issues,
+            "pending_bills": pending_bills,
+        },
     }
 
 

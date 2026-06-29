@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     TUYA_BASE_URL: str = "https://openapi.tuyaeu.com"
     TUYA_ELECTRICITY_RATE: float = 70.0   # ₦ per kWh default tariff
 
+    # Anthropic (Claude AI)
+    ANTHROPIC_API_KEY: str = ""
+
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_WEBHOOK_SECRET: str = ""
+
     # Environment
     NODE_ENV: str = "development"
 
