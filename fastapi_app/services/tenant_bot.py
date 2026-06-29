@@ -131,6 +131,7 @@ def main_menu(tenant: Tenant) -> str:
         "🔨 /requests — Service requests\n"
         "🔔 /notifications — My notifications\n"
         "👛 /wallet — Wallet balance\n"
+        "🧾 /statement — Payment statement\n"
         "🚪 /logout — Log out"
     )
 
@@ -308,6 +309,22 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
         if cmd in ("/wallet", "wallet"):
             wallet = await get_wallet(db, session.user_id) if session.user_id else None
             return wallet_text(wallet)
+
+        if cmd in ("/statement", "statement"):
+            payments = await get_recent_payments(db, tenant.id)
+            total_paid = sum(p.amount for p in payments if p.payment_status in ("success", "completed"))
+            outstanding = tenant.rent_outstanding + tenant.service_charge_outstanding
+            lines = [f"🧾 *Payment Statement — {tenant.tenant_name}*\n"]
+            for p in payments:
+                icon = "✅" if p.payment_status in ("success", "completed") else "⏳"
+                lines.append(
+                    f"{icon} ₦{p.amount:,.0f} — {p.payment_type}\n"
+                    f"   {p.created_at.strftime('%d %b %Y')}"
+                )
+            lines.append(f"\n💰 *Total Paid (last 5)*: ₦{total_paid:,.0f}")
+            lines.append(f"⚠️ *Outstanding*: ₦{outstanding:,.0f}")
+            lines.append("\n📄 For a full PDF statement, contact management.")
+            return "\n".join(lines)
 
         if cmd in ("/menu", "menu", "/start", "/help"):
             return main_menu(tenant)

@@ -11,6 +11,8 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
+from utils.event_hooks import fire_event
+import asyncio
 
 router = APIRouter(prefix="/issues", tags=["Issues"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -32,8 +34,15 @@ async def create_issue(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    issue = Issue(id=gen_uuid(), **body.model_dump(), reporter=user.id)
+    issue = Issue(id=gen_uuid(), **body.model_dump(), reporter=user.id,
+                  owner_id=str(user.id) if hasattr(Issue, "owner_id") else None)
     await save(db, issue)
+
+    asyncio.ensure_future(fire_event("issue_reported", str(user.id), {
+        "title": body.title, "category": body.category,
+        "priority": body.priority, "estate": body.estate or "",
+    }, db))
+
     return {"success": True, "data": _i(issue)}
 
 

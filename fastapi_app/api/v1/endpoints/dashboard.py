@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from models.user import User
 from models.tenant import Tenant
@@ -341,4 +341,116 @@ async def _super_admin_overview(db: AsyncSession) -> dict:
         "revenue": {"all_time": total_revenue, "currency": "NGN"},
         "outstanding": {"rent": rent_out, "service": svc_out, "total": rent_out + svc_out},
         "overdue_tenants": overdue_tenants,
+    }
+
+
+# ── AI Business Health Score ───────────────────────────────────────────────────
+
+@router.get("/health-score")
+async def get_health_score(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns a 0-100 AI business health score with dimension breakdown and action tips."""
+    import anthropic
+    import json, re
+    from core.config import settings
+    from models.tenant import Tenant
+    from models.unit import Unit
+    from models.estate import Estate
+    from models.enquiry import Enquiry
+    from models.issue import Issue
+    from sqlalchemy import func, extract
+
+    uid = str(current_user.id)
+    now = datetime.utcnow()
+    thirty_days_ago = now - timedelta(days=30)
+
+    # ── Gather metrics ────────────────────────────────────────────────────────
+    tenants = (await db.execute(
+        select(Tenant).where(Tenant.owner_id == uid, Tenant.is_active == True)
+    )).scalars().all()
+
+    units = (await db.execute(
+        select(Unit).where(Unit.owner_id == uid, Unit.is_active == True)
+    )).scalars().all()
+
+    active_count   = len(tenants)
+    total_units    = len(units)
+    vacant_count   = total_units - active_count
+    occupancy_rate = round((active_count / total_units * 100) if total_units else 0, 1)
+
+    overdue   = [t for t in tenants if (t.rent_outstanding or 0) > 0]
+    total_out = sum((t.rent_outstanding or 0) + (t.service_charge_outstanding or 0) for t in tenants)
+    rent_roll = sum((t.rent_amount or 0) + (t.service_charge_amount or 0) for t in tenants)
+    collection_rate = round(((rent_roll - total_out) / rent_roll * 100) if rent_roll else 0, 1)
+
+    open_issues = (await db.execute(
+        select(func.count(Issue.id)).where(
+            Issue.owner_id == uid if hasattr(Issue, 'owner_id') else Issue.reporter == uid,
+            Issue.status.notin_(["closed", "resolved"]),
+            Issue.is_active == True,
+        )
+    )).scalar() or 0
+
+    new_enquiries = (await db.execute(
+        select(func.count(Enquiry.id)).where(
+            Enquiry.owner_id == uid,
+            Enquiry.created_at >= thirty_days_ago,
+        )
+    )).scalar() or 0
+
+    expiring_leases = len([
+        t for t in tenants if t.lease_end_date and
+        now <= t.lease_end_date <= now + timedelta(days=60)
+    ])
+
+    snapshot = (
+        f"Occupancy: {occupancy_rate}% ({active_count}/{total_units} units), "
+        f"Collection rate: {collection_rate}%, "
+        f"Overdue tenants: {len(overdue)}, "
+        f"Total outstanding: ₦{total_out:,.0f}, "
+        f"Open maintenance issues: {open_issues}, "
+        f"New enquiries last 30 days: {new_enquiries}, "
+        f"Leases expiring in 60 days: {expiring_leases}"
+    )
+
+    # ── Ask AI for scored breakdown ──────────────────────────────────────────
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=600,
+        system=(
+            "You are a Nigerian property business analyst. Score this property business and return ONLY JSON. "
+            "Format: {\"overall\": 78, \"dimensions\": [{\"name\": \"Occupancy\", \"score\": 85, \"max\": 100, \"comment\": \"...\"},"
+            "{\"name\": \"Cash Collection\", \"score\": 70, \"max\": 100, \"comment\": \"...\"},"
+            "{\"name\": \"Maintenance\", \"score\": 80, \"max\": 100, \"comment\": \"...\"},"
+            "{\"name\": \"Lead Pipeline\", \"score\": 60, \"max\": 100, \"comment\": \"...\"},"
+            "{\"name\": \"Lease Stability\", \"score\": 75, \"max\": 100, \"comment\": \"...\"}],"
+            "\"summary\": \"...\", \"top_actions\": [\"...\", \"...\", \"...\"]}"
+        ),
+        messages=[{"role": "user", "content": f"Business snapshot: {snapshot}. Score it."}],
+    )
+
+    text = resp.content[0].text.strip() if resp.content else "{}"
+    try:
+        result = json.loads(text)
+    except Exception:
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        result = json.loads(match.group()) if match else {}
+
+    return {
+        "metrics": {
+            "occupancy_rate": occupancy_rate,
+            "collection_rate": collection_rate,
+            "active_tenants": active_count,
+            "total_units": total_units,
+            "vacant_units": vacant_count,
+            "overdue_tenants": len(overdue),
+            "total_outstanding": total_out,
+            "open_issues": open_issues,
+            "new_enquiries_30d": new_enquiries,
+            "expiring_leases_60d": expiring_leases,
+        },
+        "score": result,
     }

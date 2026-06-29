@@ -10,6 +10,7 @@ from core.config import settings
 from core.security import get_current_user
 from models.user import User
 from models.coach import CoachUser, CoachMessage
+from models.base import gen_uuid
 from models.tenant_telegram import TenantTelegramSession
 from services.ai_coach import get_coach_reply, fetch_business_context, _format_context
 import services.tenant_bot as tenant_bot
@@ -256,13 +257,48 @@ class SkillTriggerRequest(BaseModel):
     context: dict = {}  # event-specific data (estate name, unit label, amount, etc.)
 
 
+@router.get("/history")
+async def get_web_chat_history(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the last 30 web chat messages for this user."""
+    result = await db.execute(
+        select(CoachMessage)
+        .where(CoachMessage.web_user_id == str(current_user.id))
+        .order_by(desc(CoachMessage.created_at))
+        .limit(30)
+    )
+    messages = result.scalars().all()
+    return {
+        "history": [
+            {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
+            for m in reversed(messages)
+        ]
+    }
+
+
 @router.post("/chat")
 async def web_chat(
     body: WebChatRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Web-based AI coach chat for the dashboard."""
+    """Web-based AI coach chat — persists history to database."""
+    uid = str(current_user.id)
+
+    # Load last 12 messages from DB for context (ignore frontend-sent history)
+    db_history_result = await db.execute(
+        select(CoachMessage)
+        .where(CoachMessage.web_user_id == uid)
+        .order_by(desc(CoachMessage.created_at))
+        .limit(12)
+    )
+    db_history = [
+        {"role": m.role, "content": m.content}
+        for m in reversed(db_history_result.scalars().all())
+    ]
+
     user_profile = {
         "name": current_user.name,
         "role": current_user.role,
@@ -270,12 +306,18 @@ async def web_chat(
     }
     reply = await get_coach_reply(
         user_profile=user_profile,
-        conversation_history=body.history[-10:],
+        conversation_history=db_history,
         new_message=body.message,
         db=db,
-        user_id=current_user.id,
+        user_id=uid,
         role=current_user.role,
     )
+
+    # Persist both messages
+    db.add(CoachMessage(id=gen_uuid(), web_user_id=uid, role="user",    content=body.message))
+    db.add(CoachMessage(id=gen_uuid(), web_user_id=uid, role="assistant", content=reply))
+    await db.commit()
+
     return {"reply": reply}
 
 

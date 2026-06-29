@@ -26,47 +26,52 @@ async def _check_rent_reminders():
         from models.tenant import Tenant
         from core.db_helpers import find_all
         from utils.email_service import send_rent_reminder
-        from utils import whatsapp_service
+        from utils.telegram_service import send_to_tenant
 
         now = datetime.utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
 
-        sent = 0
-        wa_sent = 0
-        for t in tenants:
-            if not t.next_due_date:
-                continue
-            days = (t.next_due_date - now).days
-            if not (days in (7, 3, 1) or days < 0):
-                continue
+            sent = 0
+            tg_sent = 0
+            for t in tenants:
+                if not t.next_due_date:
+                    continue
+                days = (t.next_due_date - now).days
+                if not (days in (7, 3, 1) or days < 0):
+                    continue
 
-            due = str(t.next_due_date.date())
-            if t.tenant_email:
-                await send_rent_reminder(
-                    recipient_email=t.tenant_email,
-                    name=t.tenant_name or "",
-                    amount=t.rent_amount or 0,
-                    due_date=due,
-                )
-                sent += 1
+                due = str(t.next_due_date.date())
+                outstanding = (t.rent_outstanding or 0) + (t.service_charge_outstanding or 0)
+                label = "overdue" if days < 0 else f"due in {days} day{'s' if days != 1 else ''}"
 
-            # WhatsApp / SMS via Termii (no-op if not configured)
-            if t.tenant_phone and whatsapp_service.is_configured():
-                try:
-                    res = await whatsapp_service.send_reminder(
-                        phone=t.tenant_phone,
+                if t.tenant_email:
+                    await send_rent_reminder(
+                        recipient_email=t.tenant_email,
                         name=t.tenant_name or "",
                         amount=t.rent_amount or 0,
                         due_date=due,
-                        estate=getattr(t, "estate", "") or "",
                     )
-                    if res.get("success"):
-                        wa_sent += 1
-                except Exception as we:
-                    logger.error("[SCHEDULER] WhatsApp/SMS reminder failed for %s: %s", t.id, we)
+                    sent += 1
 
-        logger.info("[SCHEDULER] Rent reminders sent — email: %d, whatsapp/sms: %d", sent, wa_sent)
+                # Telegram reminder (if tenant has linked their Telegram)
+                if t.telegram_id:
+                    msg = (
+                        f"🏠 *Rent Reminder — BamiHustle*\n\n"
+                        f"Hi {t.tenant_name or 'Tenant'}, your rent payment is *{label}*.\n\n"
+                        f"💰 Amount: *₦{(t.rent_amount or 0):,.0f}*"
+                        + (f"\n⚠️ Outstanding: *₦{outstanding:,.0f}*" if outstanding else "") +
+                        f"\n📅 Due: {due}\n\n"
+                        f"Use /balance to see your full account. Contact management if you have questions."
+                    )
+                    try:
+                        res = await send_to_tenant(db, t.id, msg)
+                        if res.get("success"):
+                            tg_sent += 1
+                    except Exception as te:
+                        logger.error("[SCHEDULER] Telegram reminder failed for %s: %s", t.id, te)
+
+        logger.info("[SCHEDULER] Rent reminders — email: %d, telegram: %d", sent, tg_sent)
     except Exception as e:
         logger.error("[SCHEDULER] Rent reminder check failed: %s", e)
 
@@ -298,6 +303,133 @@ async def _generate_monthly_electricity_bills():
         logger.error("[METERS] Monthly bill job failed: %s", e)
 
 
+async def _daily_autopilot_scan():
+    """7am daily: AI scans every business owner and queues actions for the day."""
+    try:
+        from core.database import AsyncSessionLocal
+        from sqlalchemy import select
+        from models.user import User
+        from api.v1.endpoints.autopilot import generate_actions, _serialize
+        from models.autopilot_action import AutopilotAction
+
+        BUSINESS_ROLES = {"business_owner", "manager", "super_manager", "super_admin"}
+        async with AsyncSessionLocal() as db:
+            owners = (await db.execute(
+                select(User).where(User.role.in_(BUSINESS_ROLES), User.is_active == True)
+            )).scalars().all()
+
+            total = 0
+            for owner in owners:
+                try:
+                    # Clear old pending actions
+                    old = (await db.execute(
+                        select(AutopilotAction).where(
+                            AutopilotAction.owner_id == str(owner.id),
+                            AutopilotAction.status.in_(["pending"]),
+                        )
+                    )).scalars().all()
+                    for a in old:
+                        await db.delete(a)
+
+                    actions = await generate_actions(db, owner)
+                    for a in actions:
+                        db.add(a)
+                    total += len(actions)
+                except Exception as e:
+                    logger.warning("[AUTOPILOT] Scan failed for %s: %s", owner.email, e)
+
+            await db.commit()
+            logger.info("[AUTOPILOT] Daily scan complete — %d actions queued across %d owners", total, len(owners))
+
+            # Auto-execute actions matching each owner's rules
+            try:
+                from models.autopilot_settings import AutopilotSettings
+                from utils.telegram_service import send_to_tenant_by_phone as _tg_send
+                auto_executed = 0
+                for owner in owners:
+                    settings_row = (await db.execute(
+                        select(AutopilotSettings).where(
+                            AutopilotSettings.owner_id == str(owner.id),
+                            AutopilotSettings.enabled == True,
+                            AutopilotSettings.daily_scan_enabled == True,
+                        )
+                    )).scalars().first()
+                    if not settings_row or not settings_row.auto_execute_types:
+                        continue
+                    auto_types = set(settings_row.auto_execute_types)
+                    pending = (await db.execute(
+                        select(AutopilotAction).where(
+                            AutopilotAction.owner_id == str(owner.id),
+                            AutopilotAction.status == "pending",
+                            AutopilotAction.action_type.in_(auto_types),
+                        )
+                    )).scalars().all()
+                    for action in pending:
+                        try:
+                            if action.platform in ("telegram", "whatsapp") and action.content and action.recipients:
+                                for r in (action.recipients or []):
+                                    phone = r.get("phone", "")
+                                    if phone:
+                                        await _tg_send(db, phone, action.content)
+                            action.status = "done"
+                            action.executed_at = datetime.utcnow()
+                            action.execution_result = {"auto_executed": True, "source": "daily_scan"}
+                            auto_executed += 1
+                        except Exception as ex:
+                            logger.warning("[AUTO_EXEC] Action %s failed: %s", action.id, ex)
+                await db.commit()
+                logger.info("[AUTO_EXEC] %d actions auto-executed after daily scan", auto_executed)
+            except Exception as e:
+                logger.error("[AUTO_EXEC] Post-scan auto-execute failed: %s", e)
+    except Exception as e:
+        logger.error("[AUTOPILOT] Daily scan job failed: %s", e)
+
+
+async def _check_lease_renewals():
+    """7:30am daily: detect leases expiring in 60/30/14 days and queue renewal actions."""
+    try:
+        from datetime import timedelta
+        from core.database import AsyncSessionLocal
+        from sqlalchemy import select, and_
+        from models.tenant import Tenant
+        from models.estate import Estate
+        from models.unit import Unit
+        from utils.event_hooks import fire_event
+
+        THRESHOLDS = [60, 30, 14]
+        now = datetime.utcnow()
+
+        async with AsyncSessionLocal() as db:
+            for days in THRESHOLDS:
+                target = now + timedelta(days=days)
+                window_start = target.replace(hour=0, minute=0, second=0)
+                window_end   = target.replace(hour=23, minute=59, second=59)
+
+                rows = (await db.execute(
+                    select(Tenant, Unit, Estate)
+                    .join(Unit, Tenant.unit == Unit.id)
+                    .join(Estate, Tenant.estate == Estate.id)
+                    .where(
+                        Tenant.is_active == True,
+                        Tenant.lease_end_date >= window_start,
+                        Tenant.lease_end_date <= window_end,
+                    )
+                )).all()
+
+                for tenant, unit, estate in rows:
+                    await fire_event("lease_expiring", str(estate.owner_id or ""), {
+                        "tenant_name": tenant.tenant_name,
+                        "unit_label": unit.label,
+                        "estate_name": estate.name,
+                        "days_remaining": days,
+                        "phone": tenant.tenant_phone or "",
+                        "email": tenant.tenant_email or "",
+                    }, db)
+                    logger.info("[LEASES] Renewal queued: %s (%d days)", tenant.tenant_name, days)
+    except Exception as e:
+        logger.error("[LEASES] Renewal check failed: %s", e)
+
+
 def _wrap(coro_fn):
     def job():
         # APScheduler runs jobs in a worker thread that has no event loop.
@@ -329,8 +461,12 @@ def start_scheduler():
         _scheduler.add_job(_wrap(_sync_meters),          "interval", minutes=30, id="meter_sync")
         _scheduler.add_job(_wrap(_generate_monthly_electricity_bills), "cron",
                            day=1, hour=3, minute=0, id="electricity_bills")
+        _scheduler.add_job(_wrap(_daily_autopilot_scan), "cron",
+                           hour=7, minute=0, id="autopilot_daily")
+        _scheduler.add_job(_wrap(_check_lease_renewals), "cron",
+                           hour=7, minute=30, id="lease_renewals")
         _scheduler.start()
-        logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min")
+        logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min, autopilot@07:00, leases@07:30")
     except Exception as e:
         logger.error("[SCHEDULER] Failed to start: %s", e)
 

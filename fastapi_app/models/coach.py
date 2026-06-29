@@ -38,11 +38,12 @@ class CoachUser(Base):
 
 
 class CoachMessage(Base):
-    """Individual message in a coaching conversation."""
+    """Individual message in a coaching conversation (Telegram or web)."""
     __tablename__ = "coach_messages"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
-    telegram_id: Mapped[str] = mapped_column(String(50), index=True)
+    telegram_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
+    web_user_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     role: Mapped[str] = mapped_column(String(10))   # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

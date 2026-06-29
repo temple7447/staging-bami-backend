@@ -10,6 +10,8 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save
 from models.base import gen_uuid
+from utils.event_hooks import fire_event
+import asyncio
 
 router = APIRouter(prefix="/enquiries", tags=["Enquiries"])
 
@@ -36,10 +38,18 @@ async def submit_enquiry(
 ):
     name  = body.name  or user.name  or "Anonymous"
     email = body.email or user.email or ""
-    eq = Enquiry(id=gen_uuid(), name=name, email=email, phone=body.phone,
-                 subject=body.subject, message=body.message,
+    eq = Enquiry(id=gen_uuid(), owner_id=str(user.id), name=name, email=email,
+                 phone=body.phone, subject=body.subject, message=body.message,
                  enquiry_type=body.enquiry_type, estate=body.estate, unit=body.unit)
     await save(db, eq)
+
+    # Fire AI event — generate follow-up action and lead score
+    asyncio.ensure_future(fire_event("new_enquiry", str(user.id), {
+        "name": name, "email": email, "phone": body.phone or "",
+        "subject": body.subject or "", "unit_interest": body.subject or "",
+        "enquiry_id": eq.id,
+    }, db))
+
     return {"success": True, "message": "Enquiry submitted successfully", "data": _e(eq)}
 
 
@@ -97,5 +107,6 @@ def _e(e: Enquiry) -> dict:
         "id": e.id, "name": e.name, "email": e.email, "phone": e.phone,
         "subject": e.subject, "message": e.message, "enquiry_type": e.enquiry_type,
         "status": e.status, "estate": e.estate, "unit": e.unit,
-        "note": e.note, "created_at": e.created_at,
+        "note": e.note, "lead_score": e.lead_score,
+        "lead_score_reason": e.lead_score_reason, "created_at": e.created_at,
     }

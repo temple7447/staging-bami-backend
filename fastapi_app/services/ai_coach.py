@@ -1024,7 +1024,8 @@ async def get_coach_reply(
     user_id: str | None = None,
     role: str | None = None,
 ) -> str:
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    # Use AsyncAnthropic to avoid blocking the event loop (sync client causes MissingGreenlet)
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     system = SYSTEM_PROMPT + _build_coach_profile(user_profile)
 
@@ -1038,7 +1039,7 @@ async def get_coach_reply(
     trimmed = conversation_history[-MAX_HISTORY_MESSAGES:]
     messages = trimmed + [{"role": "user", "content": new_message}]
 
-    response = client.messages.create(
+    response = await client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         system=system,

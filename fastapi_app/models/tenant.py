@@ -27,6 +27,8 @@ class Tenant(Base):
     electric_meter_number: Mapped[str] = mapped_column(String(100), default="")
     entry_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    lease_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    lease_duration_months: Mapped[int | None] = mapped_column(nullable=True)
 
     user: Mapped[str | None] = mapped_column(String(36), nullable=True)
     telegram_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)

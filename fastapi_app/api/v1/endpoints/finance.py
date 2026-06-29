@@ -183,3 +183,85 @@ def _group_by(items, attr: str) -> dict:
         key = getattr(item, attr, "other") or "other"
         result[key] = result.get(key, 0) + item.amount
     return result
+
+
+@router.get("/forecast")
+async def get_forecast(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """AI-powered 3-month financial forecast."""
+    import anthropic
+    from core.config import settings
+
+    uid = str(current_user.id)
+    now = datetime.utcnow()
+
+    # Gather current data
+    tenants_q = await db.execute(
+        select(Tenant).where(Tenant.owner_id == uid, Tenant.is_active == True)
+    )
+    tenants = tenants_q.scalars().all()
+
+    active_count = len(tenants)
+    monthly_revenue = sum((t.rent_amount or 0) + (t.service_charge_amount or 0) for t in tenants)
+    total_outstanding = sum((t.rent_outstanding or 0) + (t.service_charge_outstanding or 0) for t in tenants)
+    overdue_count = len([t for t in tenants if (t.rent_outstanding or 0) > 0])
+
+    # Leases expiring in next 90 days
+    expiring_90 = [t for t in tenants if t.lease_end_date and
+                   now <= t.lease_end_date <= now + timedelta(days=90)]
+
+    # Last 3 months actual revenue
+    three_months_ago = now - timedelta(days=90)
+    payments_q = await db.execute(
+        select(Payment).where(
+            Payment.owner_id == uid,
+            Payment.created_at >= three_months_ago,
+            Payment.payment_status.in_(["completed", "success"]),
+        )
+    )
+    recent_payments = payments_q.scalars().all()
+    avg_monthly_collected = sum(p.amount for p in recent_payments) / 3 if recent_payments else 0
+
+    snapshot = (
+        f"Active tenants: {active_count}, Monthly rent roll: ₦{monthly_revenue:,.0f}, "
+        f"Avg collected last 3mo: ₦{avg_monthly_collected:,.0f}, "
+        f"Total outstanding: ₦{total_outstanding:,.0f}, Overdue tenants: {overdue_count}, "
+        f"Leases expiring next 90 days: {len(expiring_90)}"
+    )
+
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    resp = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=600,
+        system=(
+            "You are a Nigerian property finance expert. Generate a 3-month financial forecast "
+            "in JSON format ONLY. No prose outside the JSON. Format:\n"
+            '{"months":[{"month":"Month Year","projected_revenue":0,"projected_collections":0,'
+            '"risk_notes":"..."}],"summary":"...","recommendations":["...","...","..."]}'
+        ),
+        messages=[{"role": "user", "content": f"Business snapshot: {snapshot}. Forecast next 3 months."}],
+    )
+
+    import json
+    text = resp.content[0].text.strip() if resp.content else "{}"
+    try:
+        forecast = json.loads(text)
+    except Exception:
+        # Extract JSON from text if wrapped in markdown
+        import re
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        forecast = json.loads(match.group()) if match else {"error": "Could not parse forecast"}
+
+    return {
+        "snapshot": {
+            "active_tenants": active_count,
+            "monthly_rent_roll": monthly_revenue,
+            "avg_monthly_collected": avg_monthly_collected,
+            "total_outstanding": total_outstanding,
+            "overdue_count": overdue_count,
+            "leases_expiring_90_days": len(expiring_90),
+        },
+        "forecast": forecast,
+    }
