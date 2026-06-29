@@ -4,6 +4,7 @@ from api.v1.endpoints import wallet, billing, payments
 from api.v1.endpoints import notifications, issues, service_requests, enquiries
 from api.v1.endpoints import subscriptions, withdrawals, misc, distribution, wallets, meters, billionaire
 from api.v1.endpoints import coach
+from api.v1.endpoints import brand, marketing, sales, operations, finance, hr
 
 api_router = APIRouter(prefix="/api")
 
@@ -27,3 +28,10 @@ api_router.include_router(wallets.router)
 api_router.include_router(meters.router)
 api_router.include_router(billionaire.router)
 api_router.include_router(coach.router)
+# ── Business Skills ────────────────────────────────────────────────────────────
+api_router.include_router(brand.router)
+api_router.include_router(marketing.router)
+api_router.include_router(sales.router)
+api_router.include_router(operations.router)
+api_router.include_router(finance.router)
+api_router.include_router(hr.router)

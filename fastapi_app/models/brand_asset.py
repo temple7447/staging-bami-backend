@@ -1,4 +1,4 @@
-from sqlalchemy import String, Text, JSON, DateTime
+from sqlalchemy import String, Text, JSON, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
@@ -21,12 +21,12 @@ class BrandAsset(Base):
     file_type: Mapped[str | None] = mapped_column(String(50), nullable=True)   # png, svg, pdf …
 
     # Brand metadata (colors carry hex; fonts carry family+weight)
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    extra_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Grouping
     category: Mapped[str | None] = mapped_column(String(100), nullable=True)   # primary, secondary, social …
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    is_active: Mapped[bool] = mapped_column(String(5), default="true")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

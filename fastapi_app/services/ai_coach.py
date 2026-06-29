@@ -243,6 +243,67 @@ Growth benchmarks:
 • Minimum viable: 90% occupancy + 95% collection = healthy base to build from
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUSINESS SKILLS — AI EXPERTISE MODES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+You are also trained as an expert advisor in all the following business skill areas. When a user asks about any of these, activate the relevant expert mode:
+
+🎨 DESIGNER SKILL (Brand & Visual Identity)
+- Brand architecture: logo, colours, typography, design system
+- Nigerian aesthetics: earthy greens, warm golds, trust-building navy
+- Property listing visuals: hero shots, floor plans, virtual tours
+- Social media templates: Instagram-first, consistency beats creativity
+- Rule: Brand = Trust. A professional listing gets 3× more enquiries.
+- BamiHustle feature: Brand Assets dashboard — upload and organise all brand assets
+- Benchmarks: 3 fonts max, 3 brand colours max, 1 primary logo + variations
+
+📣 MARKETER SKILL (Campaigns, Leads, Conversion)
+- Channels: Instagram Reels, Facebook Groups, WhatsApp Broadcast, Google Ads
+- Nigerian property marketing: location-specific content wins (mention closest landmark, BRT stop, school)
+- Lead funnel: Awareness → Enquiry → Application → Tenant
+- Conversion rate benchmarks: 5–10% enquiry-to-tenant is strong; <3% means messaging/pricing problem
+- Cost per lead targets: ₦500–₦2,000 per qualified lead for property
+- BamiHustle feature: Campaigns dashboard — track spend, leads, conversions per campaign
+- Content rule: Show don't tell. Video walkthroughs convert 5× better than photos.
+
+💼 SALES / BUSINESS DEVELOPMENT SKILL (Pipeline & Deals)
+- Sales is about trust velocity — how fast can you make someone trust you?
+- Nigerian B2B: referrals trump cold outreach every time. Ask for 1 referral per closed deal.
+- Pipeline stages: Lead → Qualified → Proposal → Negotiation → Won/Lost
+- Follow-up rule: 80% of sales happen after the 5th touchpoint. Stay persistent.
+- BamiHustle feature: Deals pipeline — track every opportunity from lead to closed
+- KPIs: Win rate (target: 30%+), average deal value, pipeline velocity
+
+💰 FINANCE DIRECTOR SKILL (P&L, Cash Flow, Profitability)
+- The cash flow statement is more important than the P&L for a property business
+- Nigerian property finance rules:
+  - Annual rent collected upfront → spread across 12 months in your books
+  - Maintenance reserve: 10% of annual rent roll
+  - Management fee: 5–10% of annual rent collected
+  - Target net profit margin: 20%+ (after maintenance, management, vacancy)
+- Red flags: collection rate <90%, outstanding >10% of rent roll, vacancy >2 months
+- BamiHustle feature: Finance dashboard — monthly trend, YTD revenue, cash flow, unpaid bills
+- Tax planning: Keep payment records for every transaction (BamiHustle auto-logs these)
+
+⚙️ OPERATIONS MANAGER SKILL (Systems, Vendors, Processes)
+- A business that depends on the founder is not a business — it's a job
+- SOP rule: If a task is done more than twice, document it
+- Vendor management: Always have 2 vendors per category (plumber, electrician, cleaner)
+- Rating system: Score vendors after every job (BamiHustle vendor rating system)
+- Escalation matrix: Tenant reports issue → Manager acknowledges <24h → Resolution <72h
+- BamiHustle feature: Operations dashboard — vendors, service requests, open issues, maintenance tracking
+- Benchmarks: Issue resolution <72h; vendor response <4h; SLA breach = vendor review
+
+👥 HR DIRECTOR SKILL (Hiring, Team, Talent)
+- You are your team's biggest constraint — hire to your weaknesses
+- Nigerian hiring reality: skills test > CV > interview. Everyone lies in interviews.
+- Halo Research method: 3-stage vetting — skills test → cultural fit → reference check
+- BamiHustle Hiring Trigger levels: hire when revenue = 30× monthly salary of the hire
+- BamiHustle feature: HR pipeline — source → screen → interview → offer → hired
+- Red flags: hire to solve a crisis (always fails), hire a mini-me (limits diversity)
+- Team structure for property business: Property Manager → Maintenance Supervisor → Admin → Finance
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 COACHING RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -254,6 +315,7 @@ COACHING RULES
 6. Reference BamiHustle features — if a problem can be solved in the platform, show them where
 7. Keep it short — Telegram. Bullet points. Max 3–4 paragraphs.
 8. Speak like a Nigerian business advisor — warm, direct, no-nonsense
+9. When asked about a specific skill (design, marketing, sales, finance, operations, HR) — switch to that expert mode. Give specific, actionable advice, not generic theory.
 """
 
 MAX_HISTORY_MESSAGES = 20
@@ -557,6 +619,82 @@ async def fetch_business_context(db: AsyncSession, user_id: str, role: str) -> d
         if wallet:
             ctx["wallet_balance_ngn"] = round(wallet.balance, 2)
 
+        # ── Business Skills data ──────────────────────────────────────────────
+        try:
+            from models.campaign import Campaign
+            from models.deal import Deal
+            from models.candidate import Candidate
+            from models.vendor import Vendor
+            from models.brand_asset import BrandAsset
+
+            campaigns = (await db.execute(
+                select(Campaign).where(Campaign.owner_id == user_id)
+                .order_by(desc(Campaign.created_at)).limit(10)
+            )).scalars().all()
+            ctx["marketing_campaigns"] = [
+                {
+                    "name": c.name,
+                    "channel": c.channel,
+                    "status": c.status,
+                    "budget_ngn": c.budget,
+                    "spend_ngn": c.spend,
+                    "leads": c.leads,
+                    "conversions": c.conversions,
+                    "ctr": round(c.clicks / c.impressions * 100, 1) if c.impressions else 0,
+                }
+                for c in campaigns
+            ]
+
+            deals = (await db.execute(
+                select(Deal).where(Deal.owner_id == user_id)
+                .order_by(desc(Deal.created_at)).limit(10)
+            )).scalars().all()
+            active_deals = [d for d in deals if d.stage not in ("won", "lost")]
+            ctx["sales_pipeline"] = {
+                "total": len(deals),
+                "active": len(active_deals),
+                "pipeline_value_ngn": round(sum(d.value for d in active_deals), 0),
+                "won_value_ngn": round(sum(d.value for d in deals if d.stage == "won"), 0),
+                "deals": [
+                    {"title": d.title, "client": d.client_name, "stage": d.stage, "value_ngn": d.value}
+                    for d in active_deals[:5]
+                ],
+            }
+
+            candidates = (await db.execute(
+                select(Candidate).where(Candidate.owner_id == user_id)
+            )).scalars().all()
+            ctx["hr_pipeline"] = {
+                "total": len(candidates),
+                "active": len([c for c in candidates if c.stage not in ("hired", "rejected", "withdrawn")]),
+                "hired": len([c for c in candidates if c.stage == "hired"]),
+                "by_stage": {
+                    stage: len([c for c in candidates if c.stage == stage])
+                    for stage in ["sourced", "screened", "interview", "offer", "hired"]
+                },
+            }
+
+            vendors = (await db.execute(
+                select(Vendor).where(Vendor.owner_id == user_id, Vendor.status == "active")
+            )).scalars().all()
+            ctx["vendors"] = {
+                "total_active": len(vendors),
+                "categories": list({v.category for v in vendors}),
+                "total_paid_ngn": round(sum(v.total_paid for v in vendors), 0),
+            }
+
+            brand_assets = (await db.execute(
+                select(BrandAsset).where(BrandAsset.owner_id == user_id, BrandAsset.is_active == True)  # noqa: E712
+            )).scalars().all()
+            ctx["brand"] = {
+                "total_assets": len(brand_assets),
+                "has_logo": any(a.asset_type == "logo" for a in brand_assets),
+                "has_color_palette": any(a.asset_type == "color" for a in brand_assets),
+                "has_typography": any(a.asset_type == "font" for a in brand_assets),
+            }
+        except Exception:
+            pass  # Skills data is supplemental — never break the main coach
+
     # ══════════════════════════════════════════════════════════════════════════
     # TENANT VIEW
     # ══════════════════════════════════════════════════════════════════════════
@@ -776,6 +914,47 @@ def _format_context(ctx: dict) -> str:
 
     if "wallet_balance_ngn" in ctx:
         lines.append(f"\nWALLET BALANCE: ₦{ctx['wallet_balance_ngn']:,.2f}")
+
+    # ── Business Skills data ──────────────────────────────────────────────────
+    if ctx.get("marketing_campaigns"):
+        campaigns = ctx["marketing_campaigns"]
+        active_c = [c for c in campaigns if c["status"] == "active"]
+        total_spend = sum(c["spend_ngn"] for c in campaigns)
+        total_leads = sum(c["leads"] for c in campaigns)
+        lines.append(f"\nMARKETING CAMPAIGNS ({len(campaigns)} total | {len(active_c)} active)")
+        lines.append(f"  Total spend: ₦{total_spend:,.0f} | Total leads: {total_leads}")
+        for c in campaigns[:5]:
+            lines.append(
+                f"  [{c['status'].upper()}] {c['name']} ({c['channel']}) | "
+                f"₦{c['spend_ngn']:,.0f} spent of ₦{c['budget_ngn']:,.0f} | "
+                f"{c['leads']} leads | {c['conversions']} conversions | CTR: {c['ctr']}%"
+            )
+
+    if ctx.get("sales_pipeline"):
+        sp = ctx["sales_pipeline"]
+        lines.append(f"\nSALES PIPELINE — {sp['active']} active deals | Pipeline value: ₦{sp['pipeline_value_ngn']:,.0f} | Won: ₦{sp['won_value_ngn']:,.0f}")
+        for d in sp.get("deals", []):
+            lines.append(f"  [{d['stage'].upper()}] {d['title']} ({d['client']}) | ₦{d['value_ngn']:,.0f}")
+
+    if ctx.get("hr_pipeline"):
+        hr = ctx["hr_pipeline"]
+        lines.append(f"\nHR PIPELINE — {hr['total']} candidates | {hr['active']} in pipeline | {hr['hired']} hired")
+        if hr.get("by_stage"):
+            stage_str = " | ".join(f"{k}: {v}" for k, v in hr["by_stage"].items() if v > 0)
+            if stage_str:
+                lines.append(f"  By stage: {stage_str}")
+
+    if ctx.get("vendors"):
+        v = ctx["vendors"]
+        lines.append(f"\nVENDORS — {v['total_active']} active | Categories: {', '.join(v['categories'])} | Total paid: ₦{v['total_paid_ngn']:,.0f}")
+
+    if ctx.get("brand"):
+        b = ctx["brand"]
+        has = []
+        if b["has_logo"]: has.append("Logo ✓")
+        if b["has_color_palette"]: has.append("Colors ✓")
+        if b["has_typography"]: has.append("Fonts ✓")
+        lines.append(f"\nBRAND ASSETS — {b['total_assets']} assets | {', '.join(has) if has else 'No assets yet'}")
 
     # ── Tenant view ───────────────────────────────────────────────────────────
     if "tenancy" in ctx:
