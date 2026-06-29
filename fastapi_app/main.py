@@ -24,6 +24,7 @@ import models.coach  # noqa: F401
 import models.tenant_telegram  # noqa: F401
 import models.brand_asset, models.campaign, models.deal  # noqa: F401
 import models.vendor, models.candidate  # noqa: F401
+import models.autopilot_action  # noqa: F401
 from middleware.logging import logging_middleware
 from middleware.camelize import camelize_response_middleware
 
