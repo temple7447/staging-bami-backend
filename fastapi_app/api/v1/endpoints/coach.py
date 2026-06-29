@@ -1,13 +1,17 @@
 import httpx
 import logging
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
-from core.database import AsyncSessionLocal
+from pydantic import BaseModel
+from typing import Optional
+from core.database import AsyncSessionLocal, get_db
 from core.config import settings
+from core.security import get_current_user
+from models.user import User
 from models.coach import CoachUser, CoachMessage
 from models.tenant_telegram import TenantTelegramSession
-from services.ai_coach import get_coach_reply
+from services.ai_coach import get_coach_reply, fetch_business_context, _format_context
 import services.tenant_bot as tenant_bot
 import services.admin_bot as admin_bot
 
@@ -239,6 +243,134 @@ async def setup_webhook(webhook_url: str):
             timeout=10,
         )
     return resp.json()
+
+
+class WebChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+class SkillTriggerRequest(BaseModel):
+    skill: str          # designer, marketer, sales, finance, operations, hr
+    event: str          # what just happened: "new_property_listed", "new_tenant", "vacancy_opened", etc.
+    context: dict = {}  # event-specific data (estate name, unit label, amount, etc.)
+
+
+@router.post("/chat")
+async def web_chat(
+    body: WebChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Web-based AI coach chat for the dashboard."""
+    user_profile = {
+        "name": current_user.name,
+        "role": current_user.role,
+        "email": current_user.email,
+    }
+    reply = await get_coach_reply(
+        user_profile=user_profile,
+        conversation_history=body.history[-10:],
+        new_message=body.message,
+        db=db,
+        user_id=current_user.id,
+        role=current_user.role,
+    )
+    return {"reply": reply}
+
+
+SKILL_SYSTEM_PROMPTS = {
+    "marketer": (
+        "You are the BamiHustle Marketer AI. You just received a business event notification. "
+        "Give ONE specific, actionable marketing move the user should take RIGHT NOW based on this event. "
+        "Be direct. Reference the specific estate/unit/amount in your response. Max 3 sentences. "
+        "Include: what to post/send, which channel, and what to say."
+    ),
+    "designer": (
+        "You are the BamiHustle Designer AI. You just received a business event notification. "
+        "Give ONE specific, actionable design/branding recommendation based on this event. "
+        "Be direct. Max 3 sentences. Focus on: photos, listing presentation, or brand consistency."
+    ),
+    "sales": (
+        "You are the BamiHustle Sales AI. You just received a business event notification. "
+        "Give ONE specific sales action to take immediately. Max 3 sentences. "
+        "Focus on: who to call, what to say, which stage to move a deal to."
+    ),
+    "finance": (
+        "You are the BamiHustle Finance AI. You just received a business event notification. "
+        "Give ONE specific financial insight or action based on this event. Max 3 sentences. "
+        "Focus on: cash flow impact, what to record, what to watch."
+    ),
+    "operations": (
+        "You are the BamiHustle Operations AI. You just received a business event notification. "
+        "Give ONE specific operational action to take. Max 3 sentences. "
+        "Focus on: vendor assignment, process to follow, SLA to maintain."
+    ),
+    "hr": (
+        "You are the BamiHustle HR AI. You just received a business event notification. "
+        "Give ONE specific people/team action based on this event. Max 3 sentences. "
+        "Focus on: who to involve, what to check, team communication."
+    ),
+}
+
+EVENT_LABELS = {
+    "new_property_listed": "A new property has been listed",
+    "vacancy_opened": "A unit has become vacant",
+    "new_tenant": "A new tenant has moved in",
+    "tenant_overdue": "A tenant is overdue on payment",
+    "issue_reported": "A maintenance issue has been reported",
+    "new_enquiry": "A new property enquiry has come in",
+    "new_application": "A new rental application has been submitted",
+    "payment_received": "A payment has been received",
+    "payment_failed": "A payment has failed",
+    "service_request": "A tenant submitted a service request",
+}
+
+
+@router.post("/skill-trigger")
+async def skill_trigger(
+    body: SkillTriggerRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Called when a business event happens (e.g., new property listed, new enquiry).
+    Returns targeted skill advice for the relevant skill.
+    """
+    import anthropic
+    from core.config import settings
+
+    skill = body.skill.lower()
+    event_label = EVENT_LABELS.get(body.event, body.event.replace("_", " "))
+    context_str = "\n".join(f"{k}: {v}" for k, v in body.context.items()) if body.context else ""
+
+    system = SKILL_SYSTEM_PROMPTS.get(skill, SKILL_SYSTEM_PROMPTS["marketer"])
+
+    # Also fetch live business context so the AI has full visibility
+    live_ctx = await fetch_business_context(db, current_user.id, current_user.role)
+    live_summary = _format_context(live_ctx)
+
+    user_message = (
+        f"Event: {event_label}\n"
+        f"Details: {context_str}\n"
+        f"---\n"
+        f"Business snapshot:{live_summary[:1500]}"  # trim for speed
+    )
+
+    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    response = await client.messages.create(
+        model="claude-haiku-4-5-20251001",  # use Haiku for speed on skill triggers
+        max_tokens=200,
+        system=system,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    advice = response.content[0].text.strip() if response.content else "Check your skill dashboard for next steps."
+
+    return {
+        "skill": skill,
+        "event": body.event,
+        "advice": advice,
+    }
 
 
 @router.get("/user/{telegram_id}")
