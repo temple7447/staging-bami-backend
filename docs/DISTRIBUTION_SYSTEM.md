@@ -1,4 +1,4 @@
-# BamiHustle Global Fund Distribution System (50/30/20)
+# BamiHost Global Fund Distribution System (50/30/20)
 
 ## Overview
 

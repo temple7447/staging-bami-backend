@@ -1,4 +1,4 @@
-# BamiHustle Payment Types - Complete Guide
+# BamiHost Payment Types - Complete Guide
 
 **Status**: ✅ **Production Ready**
 
@@ -6,7 +6,7 @@
 
 ## Overview
 
-The BamiHustle backend now supports **6 different payment types** for tenant transactions. Each payment type is handled through the Paystack payment gateway and can be initiated by admin users on behalf of tenants.
+The BamiHost backend now supports **6 different payment types** for tenant transactions. Each payment type is handled through the Paystack payment gateway and can be initiated by admin users on behalf of tenants.
 
 ---
 

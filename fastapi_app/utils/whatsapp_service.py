@@ -142,7 +142,7 @@ async def send_reminder(
 
     msg = (
         f"Hi {name or 'there'}, your rent of {format_currency(amount)} is due on "
-        f"{due_date}. Please pay on time to avoid disruption. — BamiHustle"
+        f"{due_date}. Please pay on time to avoid disruption. — BamiHost"
     )
     results["sms"] = await send_sms(phone, msg)
     any_ok = any(r.get("success") for r in results.values())

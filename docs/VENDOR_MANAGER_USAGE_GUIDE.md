@@ -41,7 +41,7 @@ curl -X GET "http://localhost:5000/api/auth/managers?page=1&limit=20" \
     {
       "_id": "607f1f77bcf86cd799439011",
       "name": "Ahmed Hassan",
-      "email": "ahmed@bamihustle.com",
+      "email": "ahmed@bamihost.com",
       "phone": "+234812345678",
       "role": "manager",
       "isActive": true,
@@ -50,7 +50,7 @@ curl -X GET "http://localhost:5000/api/auth/managers?page=1&limit=20" \
     {
       "_id": "607f1f77bcf86cd799439012",
       "name": "Chioma Okoro",
-      "email": "chioma@bamihustle.com",
+      "email": "chioma@bamihost.com",
       "phone": "+234812345679",
       "role": "manager",
       "isActive": true,
@@ -133,7 +133,7 @@ curl -X POST "http://localhost:5000/api/auth/onboard-vendor" \
     "manager": {
       "_id": "607f1f77bcf86cd799439011",
       "name": "Ahmed Hassan",
-      "email": "ahmed@bamihustle.com"
+      "email": "ahmed@bamihost.com"
     },
     "isActive": true,
     "createdAt": "2026-03-08T12:00:00.000Z"
@@ -254,7 +254,7 @@ curl -X PUT "http://localhost:5000/api/auth/vendor/69ad65fbcd1b0d2b544b489e" \
     "manager": {
       "_id": "607f1f77bcf86cd799439012",
       "name": "Chioma Okoro",
-      "email": "chioma@bamihustle.com"
+      "email": "chioma@bamihost.com"
     }
   }
 }
@@ -360,7 +360,7 @@ curl -X PUT "http://localhost:5000/api/auth/vendor/69ad65fbcd1b0d2b544b489e" \
 ### Run the Test Suite
 
 ```bash
-cd /path/to/BamiHustle-backend
+cd /path/to/BamiHost-backend
 node tests/test-vendor-manager-setup.js
 ```
 
@@ -381,7 +381,7 @@ All endpoints requiring manager assignment need admin authentication:
 # 1. Login as admin
 POST /api/auth/login
 {
-  "email": "admin@bamihustle.com",
+  "email": "admin@bamihost.com",
   "password": "YourPassword123!"
 }
 

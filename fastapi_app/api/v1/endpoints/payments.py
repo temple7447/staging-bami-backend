@@ -169,7 +169,7 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
     }
     tenant_info = {"tenant_name": tenant.tenant_name if tenant else "N/A",
                    "tenant_email": tenant.tenant_email if tenant else ""}
-    estate_info = {"estate_name": "BamiHustle Estate"}
+    estate_info = {"estate_name": "BamiHost Estate"}
     pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=receipt-{pid}.pdf"})

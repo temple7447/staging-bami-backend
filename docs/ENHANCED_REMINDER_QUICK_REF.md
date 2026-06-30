@@ -91,7 +91,7 @@
 
 ### Syntax Check
 ```bash
-cd /Users/temple/Documents/Bami/BamiHustle-backend
+cd /Users/temple/Documents/Bami/BamiHost-backend
 node -c models/ReminderLog.js
 node -c models/Visit.js
 node -c utils/reminderService.js

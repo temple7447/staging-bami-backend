@@ -168,7 +168,7 @@ manager: {
 ### Setup
 - **Database**: MongoDB (Connected)
 - **Server**: Node.js running on localhost:5000
-- **Admin Account**: test_admin@bamihustle.com
+- **Admin Account**: test_admin@bamihost.com
 - **Managers**: 9 managers available for assignment
 - **Test Data**: Auto-generated during test execution
 

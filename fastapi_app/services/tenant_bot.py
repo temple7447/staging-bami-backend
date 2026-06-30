@@ -416,7 +416,7 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
     # ── Idle / entry ──────────────────────────────────────────────────────────
     await update_session(db, session, state="awaiting_email")
     return (
-        "🏠 *BamiHustle Tenant Portal*\n\n"
+        "🏠 *BamiHost Tenant Portal*\n\n"
         "Enter your registered email address to login.\n\n"
         "/cancel to go back."
     )

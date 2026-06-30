@@ -1,5 +1,5 @@
 """
-BamiHustle Business Autopilot
+BamiHost Business Autopilot
 Monitors the business 24/7, generates AI content, and executes actions
 (WhatsApp blasts, reminders, post captions, follow-ups, reports).
 """
@@ -267,7 +267,7 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
 
     # --- 5. Daily business briefing (always generated) -------------
     briefing = await _ai(
-        "You are the BamiHustle Business AI. Generate a concise morning business briefing "
+        "You are the BamiHost Business AI. Generate a concise morning business briefing "
         "for a Nigerian property manager. Use bullet points. Max 120 words. "
         "Mention what to focus on today: occupancy, cash flow, follow-ups, maintenance.",
         f"Business snapshot: {len(vacant_rows)} vacant units, {len(overdue_rows)} overdue tenants, "
@@ -814,7 +814,7 @@ async def send_payment_links(
         # Build Telegram message
         if payment_url:
             msg = (
-                f"💳 *Payment Request — BamiHustle*\n\n"
+                f"💳 *Payment Request — BamiHost*\n\n"
                 f"Hi {t.tenant_name or 'Tenant'},\n\n"
                 f"You have an outstanding balance of *₦{outstanding:,.0f}*.\n\n"
                 f"Click below to pay securely via Paystack:\n"
@@ -823,7 +823,7 @@ async def send_payment_links(
             )
         else:
             msg = (
-                f"⚠️ *Rent Reminder — BamiHustle*\n\n"
+                f"⚠️ *Rent Reminder — BamiHost*\n\n"
                 f"Hi {t.tenant_name or 'Tenant'},\n\n"
                 f"Your outstanding balance is *₦{outstanding:,.0f}*.\n\n"
                 f"Please contact management to make payment. Thank you."

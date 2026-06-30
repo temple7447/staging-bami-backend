@@ -304,11 +304,11 @@ const onboardVendor = async (formData) => {
 
 ## Files Created/Modified
 
-1. **NEW** [models/BusinessType.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/models/BusinessType.js)
-2. **NEW** [controllers/businessTypeController.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/controllers/businessTypeController.js)
-3. **NEW** [routes/businessTypes.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/routes/businessTypes.js)
-4. **MODIFIED** [server.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/server.js) - Added business types route
-5. **MODIFIED** [controllers/authController.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/controllers/authController.js) - Updated vendor onboarding
-6. **MODIFIED** [routes/auth.js](file:///Users/temple/Documents/Bami/BamiHustle-backend/routes/auth.js) - Updated validation
+1. **NEW** [models/BusinessType.js](file:///Users/temple/Documents/Bami/BamiHost-backend/models/BusinessType.js)
+2. **NEW** [controllers/businessTypeController.js](file:///Users/temple/Documents/Bami/BamiHost-backend/controllers/businessTypeController.js)
+3. **NEW** [routes/businessTypes.js](file:///Users/temple/Documents/Bami/BamiHost-backend/routes/businessTypes.js)
+4. **MODIFIED** [server.js](file:///Users/temple/Documents/Bami/BamiHost-backend/server.js) - Added business types route
+5. **MODIFIED** [controllers/authController.js](file:///Users/temple/Documents/Bami/BamiHost-backend/controllers/authController.js) - Updated vendor onboarding
+6. **MODIFIED** [routes/auth.js](file:///Users/temple/Documents/Bami/BamiHost-backend/routes/auth.js) - Updated validation
 
 🎉 **Business type management system is ready!**

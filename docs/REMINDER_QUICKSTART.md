@@ -2,7 +2,7 @@
 
 ## ✅ Implementation Complete
 
-The automated rent payment reminder system has been successfully implemented in your BamiHustle backend!
+The automated rent payment reminder system has been successfully implemented in your BamiHost backend!
 
 ## 📦 What Was Added
 

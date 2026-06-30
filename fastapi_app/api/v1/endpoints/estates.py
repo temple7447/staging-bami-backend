@@ -240,7 +240,7 @@ async def upload_unit_images(
     uploaded = []
     for file in images:
         buffer = await file.read()
-        result = cloudinary.uploader.upload(buffer, folder=f"bamihustle/units/{unit_id}")
+        result = cloudinary.uploader.upload(buffer, folder=f"bamihost/units/{unit_id}")
         uploaded.append({"url": result["secure_url"], "public_id": result["public_id"]})
     imgs = list(unit.images or [])
     imgs.extend(uploaded)
@@ -551,7 +551,7 @@ async def upload_estate_image(
         api_secret=settings.CLOUDINARY_API_SECRET,
     )
     buffer = await file.read()
-    result = cloudinary.uploader.upload(buffer, folder=f"bamihustle/estates/{estate_id}")
+    result = cloudinary.uploader.upload(buffer, folder=f"bamihost/estates/{estate_id}")
     img = {"url": result["secure_url"], "public_id": result["public_id"]}
     images = list(estate.images or [])
     images.append(img)

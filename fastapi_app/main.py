@@ -33,7 +33,7 @@ logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-logger = logging.getLogger("bamihustle")
+logger = logging.getLogger("bamihost")
 
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/15minutes"])
@@ -45,11 +45,11 @@ async def lifespan(app: FastAPI):
     await connect_db(app)
     from utils.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
-    logger.info("BamiHustle FastAPI server started")
+    logger.info("BamiHost FastAPI server started")
     yield
     stop_scheduler()
     await disconnect_db()
-    logger.info("BamiHustle FastAPI server stopped")
+    logger.info("BamiHost FastAPI server stopped")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ async def live():
 async def root():
     return {
         "success": True,
-        "message": "BamiHustle Backend API (FastAPI)",
+        "message": "BamiHost Backend API (FastAPI)",
         "version": settings.API_VERSION,
         "documentation": "/api-docs",
         "endpoints": {

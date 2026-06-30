@@ -361,7 +361,7 @@ async def generate_logo(
     )
     try:
         result = cloudinary.uploader.upload(
-            img_bytes, folder=f"bamihustle/brand/{current_user.id}/logos", resource_type="image",
+            img_bytes, folder=f"bamihost/brand/{current_user.id}/logos", resource_type="image",
         )
     except Exception as e:
         logger.error("Logo upload failed: %s", e)
@@ -389,7 +389,7 @@ async def upload_brand_file(
     try:
         buffer = await file.read()
         result = cloudinary.uploader.upload(
-            buffer, folder=f"bamihustle/brand/{current_user.id}", resource_type="auto",
+            buffer, folder=f"bamihost/brand/{current_user.id}", resource_type="auto",
         )
     except Exception as e:
         logger.error("Brand upload failed: %s", e)

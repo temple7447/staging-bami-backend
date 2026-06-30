@@ -122,7 +122,7 @@ async def telegram_webhook(request: Request):
             # ── /start — universal welcome ─────────────────────────────────────
             if cmd == "/start":
                 reply = (
-                    f"👋 Hello{f', {first_name}' if first_name else ''}! Welcome to *BamiHustle*.\n\n"
+                    f"👋 Hello{f', {first_name}' if first_name else ''}! Welcome to *BamiHost*.\n\n"
                     "What would you like to do?\n\n"
                     "🏠 */tenant* — Tenant portal (rent, issues, payments)\n"
                     "🔐 */admin* — Management panel (owners, managers, admins)\n"
@@ -171,7 +171,7 @@ async def telegram_webhook(request: Request):
                 name_str = f", {first_name}" if first_name else ""
                 logged_in_hint = ""
                 if session and session.user_id and session.role:
-                    logged_in_hint = "\n\nI already have access to your live business data from BamiHustle, so I can coach you based on your real numbers."
+                    logged_in_hint = "\n\nI already have access to your live business data from BamiHost, so I can coach you based on your real numbers."
                 reply = (
                     f"🚀 *AI Business Coach — Level 7 Framework*{name_str}\n\n"
                     "I'm your personal coach trained on the Ryan Deiss Level 7 Masterclass."
@@ -335,33 +335,33 @@ async def web_chat(
 
 SKILL_SYSTEM_PROMPTS = {
     "marketer": (
-        "You are the BamiHustle Marketer AI. You just received a business event notification. "
+        "You are the BamiHost Marketer AI. You just received a business event notification. "
         "Give ONE specific, actionable marketing move the user should take RIGHT NOW based on this event. "
         "Be direct. Reference the specific estate/unit/amount in your response. Max 3 sentences. "
         "Include: what to post/send, which channel, and what to say."
     ),
     "designer": (
-        "You are the BamiHustle Designer AI. You just received a business event notification. "
+        "You are the BamiHost Designer AI. You just received a business event notification. "
         "Give ONE specific, actionable design/branding recommendation based on this event. "
         "Be direct. Max 3 sentences. Focus on: photos, listing presentation, or brand consistency."
     ),
     "sales": (
-        "You are the BamiHustle Sales AI. You just received a business event notification. "
+        "You are the BamiHost Sales AI. You just received a business event notification. "
         "Give ONE specific sales action to take immediately. Max 3 sentences. "
         "Focus on: who to call, what to say, which stage to move a deal to."
     ),
     "finance": (
-        "You are the BamiHustle Finance AI. You just received a business event notification. "
+        "You are the BamiHost Finance AI. You just received a business event notification. "
         "Give ONE specific financial insight or action based on this event. Max 3 sentences. "
         "Focus on: cash flow impact, what to record, what to watch."
     ),
     "operations": (
-        "You are the BamiHustle Operations AI. You just received a business event notification. "
+        "You are the BamiHost Operations AI. You just received a business event notification. "
         "Give ONE specific operational action to take. Max 3 sentences. "
         "Focus on: vendor assignment, process to follow, SLA to maintain."
     ),
     "hr": (
-        "You are the BamiHustle HR AI. You just received a business event notification. "
+        "You are the BamiHost HR AI. You just received a business event notification. "
         "Give ONE specific people/team action based on this event. Max 3 sentences. "
         "Focus on: who to involve, what to check, team communication."
     ),

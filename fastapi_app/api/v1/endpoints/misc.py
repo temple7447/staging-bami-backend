@@ -137,7 +137,7 @@ async def get_bank_info(db: AsyncSession = Depends(get_db)):
     return {"success": True, "data": {
         "bankName":      bank_data.get("bank_name", "UBA"),
         "accountNumber": bank_data.get("account_number", "1234567890"),
-        "accountName":   bank_data.get("account_name", "BamiHustle Properties Ltd"),
+        "accountName":   bank_data.get("account_name", "BamiHost Properties Ltd"),
     }}
 
 
@@ -177,7 +177,7 @@ async def record_bank_deposit(
             api_secret=settings.CLOUDINARY_API_SECRET,
         )
         buf = await proof_image.read()
-        result = cloudinary.uploader.upload(buf, folder="bamihustle/deposits")
+        result = cloudinary.uploader.upload(buf, folder="bamihost/deposits")
         proof_url = result.get("secure_url")
     dep = BankDeposit(
         id=gen_uuid(), amount=amount or 0, bank_name=bank_name,
@@ -280,7 +280,7 @@ async def upload_file(
         api_secret=settings.CLOUDINARY_API_SECRET,
     )
     buffer = await file.read()
-    result = cloudinary.uploader.upload(buffer, folder="bamihustle/uploads")
+    result = cloudinary.uploader.upload(buffer, folder="bamihost/uploads")
     return {"success": True, "data": {"url": result["secure_url"], "public_id": result["public_id"]}}
 
 

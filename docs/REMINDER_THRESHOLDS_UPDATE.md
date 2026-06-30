@@ -220,7 +220,7 @@ npm run dev
 
 ### 3. Monitor Logs
 ```bash
-tail -f /var/log/bamihustle.log | grep "Reminder Service"
+tail -f /var/log/bamihost.log | grep "Reminder Service"
 ```
 
 ### 4. Verify Mailtrap

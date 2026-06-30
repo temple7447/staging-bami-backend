@@ -1,7 +1,7 @@
 import time, logging, uuid
 from fastapi import Request
 
-logger = logging.getLogger("bamihustle")
+logger = logging.getLogger("bamihost")
 
 
 async def logging_middleware(request: Request, call_next):

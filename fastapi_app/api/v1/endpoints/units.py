@@ -155,7 +155,7 @@ async def upload_unit_image(
         api_secret=settings.CLOUDINARY_API_SECRET,
     )
     buffer = await file.read()
-    result = cloudinary.uploader.upload(buffer, folder=f"bamihustle/units/{unit_id}")
+    result = cloudinary.uploader.upload(buffer, folder=f"bamihost/units/{unit_id}")
     img = {"url": result["secure_url"], "public_id": result["public_id"]}
     images = list(unit.images or [])
     images.append(img)

@@ -1,4 +1,4 @@
-# BamiHustle API Documentation
+# BamiHost API Documentation
 
 ## Access Swagger UI
 
@@ -299,4 +299,4 @@ During development, all errors are logged with:
 ---
 
 ## Support
-For API support, contact: `support@bamihustle.com`
+For API support, contact: `support@bamihost.com`

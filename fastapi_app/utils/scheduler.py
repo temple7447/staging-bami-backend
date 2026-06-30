@@ -57,7 +57,7 @@ async def _check_rent_reminders():
                 # Telegram reminder (if tenant has linked their Telegram)
                 if t.telegram_id:
                     msg = (
-                        f"🏠 *Rent Reminder — BamiHustle*\n\n"
+                        f"🏠 *Rent Reminder — BamiHost*\n\n"
                         f"Hi {t.tenant_name or 'Tenant'}, your rent payment is *{label}*.\n\n"
                         f"💰 Amount: *₦{(t.rent_amount or 0):,.0f}*"
                         + (f"\n⚠️ Outstanding: *₦{outstanding:,.0f}*" if outstanding else "") +
@@ -129,7 +129,7 @@ async def _send_monthly_report():
         if admin_email:
             await send_email(
                 email=admin_email,
-                subject=f"BamiHustle Monthly Report — {month_name} {year}",
+                subject=f"BamiHost Monthly Report — {month_name} {year}",
                 html=f"""
                 <h2>Monthly Report — {month_name} {year}</h2>
                 <ul>

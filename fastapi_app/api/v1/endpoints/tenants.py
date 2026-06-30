@@ -382,7 +382,7 @@ async def upload_my_avatar(file: UploadFile = File(...), db: AsyncSession = Depe
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant record not found")
     data   = await file.read()
-    result = cloudinary.uploader.upload(data, folder="bamihustle/avatars", resource_type="image")
+    result = cloudinary.uploader.upload(data, folder="bamihost/avatars", resource_type="image")
     tenant.profile_image_url       = result["secure_url"]
     tenant.profile_image_public_id = result["public_id"]
     tenant.updated_at              = datetime.utcnow()
@@ -666,7 +666,7 @@ async def upload_tenant_avatar(
         except Exception:
             pass
     data   = await file.read()
-    result = cloudinary.uploader.upload(data, folder="bamihustle/avatars", resource_type="image")
+    result = cloudinary.uploader.upload(data, folder="bamihost/avatars", resource_type="image")
     tenant.profile_image_url       = result["secure_url"]
     tenant.profile_image_public_id = result["public_id"]
     tenant.updated_by              = user.id
@@ -721,7 +721,7 @@ async def download_tenant_statement(
 
     # Header
     header_style = ParagraphStyle("header", fontSize=18, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e40af"))
-    story.append(Paragraph("BamiHustle Property Management", header_style))
+    story.append(Paragraph("BamiHost Property Management", header_style))
     story.append(Spacer(1, 6))
     story.append(Paragraph("Tenant Payment Statement", styles["Heading2"]))
     story.append(Spacer(1, 12))
@@ -793,7 +793,7 @@ async def download_tenant_statement(
     story.append(sum_tbl)
     story.append(Spacer(1, 20))
     story.append(Paragraph(
-        "This is a system-generated statement. Contact hello@bamihustle.com for queries.",
+        "This is a system-generated statement. Contact hello@bamihost.com for queries.",
         ParagraphStyle("footer", fontSize=7, textColor=colors.grey)
     ))
 

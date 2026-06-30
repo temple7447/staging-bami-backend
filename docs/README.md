@@ -1,4 +1,4 @@
-# BamiHustle Backend API
+# BamiHost Backend API
 
 A robust Express.js backend application with JWT authentication, role-based access control, email functionality, and admin management system.
 
@@ -35,7 +35,7 @@ A robust Express.js backend application with JWT authentication, role-based acce
 1. **Clone the repository:**
    ```bash
    git clone <repository-url>
-   cd BamiHustle-backend
+   cd BamiHost-backend
    ```
 
 2. **Install dependencies:**
@@ -383,4 +383,4 @@ MIT
 
 ## Support
 
-For support, email support@bamihustle.com or create an issue in the repository.
+For support, email support@bamihost.com or create an issue in the repository.

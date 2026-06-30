@@ -4,13 +4,13 @@ from typing import List
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "BamiHustle Backend"
+    APP_NAME: str = "BamiHost Backend"
     API_VERSION: str = "v1"
     DEBUG: bool = False
     PORT: int = 4000
 
     # Database (PostgreSQL via Neon in production, SQLite locally)
-    DATABASE_URL: str = "sqlite+aiosqlite:///bamihustle.db"
+    DATABASE_URL: str = "sqlite+aiosqlite:///bamihost.db"
 
     # JWT
     JWT_SECRET: str
@@ -41,9 +41,9 @@ class Settings(BaseSettings):
     # Email — Mailtrap sending API
     MAILTRAP_TOKEN:        str = ""
     MAILTRAP_SENDER_EMAIL: str = ""
-    MAILTRAP_SENDER_NAME:  str = "BamiHustle"
+    MAILTRAP_SENDER_NAME:  str = "BamiHost"
     FROM_EMAIL: str = ""
-    FROM_NAME:  str = "BamiHustle"
+    FROM_NAME:  str = "BamiHost"
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: str = ""

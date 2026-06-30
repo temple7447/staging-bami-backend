@@ -64,7 +64,7 @@
 ## 📂 File Structure
 
 ```
-BamiHustle-backend/
+BamiHost-backend/
 ├── models/
 │   └── ReminderLog.js ..................... NEW (Tracks sent reminders)
 │
@@ -153,7 +153,7 @@ Body:
 
 ### ADMIN EMAIL
 ```
-Subject: [BamiHustle Alert] Upcoming Rent Payment - 7 Day(s) - John Doe
+Subject: [BamiHost Alert] Upcoming Rent Payment - 7 Day(s) - John Doe
 
 Body:
 ✓ Alert header

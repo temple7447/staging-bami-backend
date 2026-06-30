@@ -209,7 +209,7 @@ If you want to extend this feature in the future:
 ### Run the Complete Test Suite
 
 ```bash
-cd /Users/temple/Documents/Bami/BamiHustle-backend
+cd /Users/temple/Documents/Bami/BamiHost-backend
 
 # Run tests with automatic setup
 node tests/test-vendor-manager-setup.js
@@ -228,7 +228,7 @@ node tests/test-vendor-manager-setup.js
 ### Expected Output
 
 ```
-BamiHustle - Vendor Manager Assignment Test
+BamiHost - Vendor Manager Assignment Test
 Setup + API Verification
 
 [Setup checks...]

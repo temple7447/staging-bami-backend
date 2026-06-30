@@ -1,4 +1,4 @@
-# Fixes Applied - BamiHustle Backend
+# Fixes Applied - BamiHost Backend
 
 ## 🔧 Issues Fixed
 
@@ -47,7 +47,7 @@
 ```env
 MAILTRAP_TOKEN=your-mailtrap-api-token
 MAILTRAP_SENDER_EMAIL=hello@demomailtrap.com
-MAILTRAP_SENDER_NAME=BamiHustle
+MAILTRAP_SENDER_NAME=BamiHost
 ```
 
 **Note:** Update your `.env` file with your actual Mailtrap credentials
@@ -79,13 +79,13 @@ Server successfully starts with:
 ## 🚀 To Start Development
 
 ```bash
-cd /Users/temple/Documents/Bami/BamiHustle-backend
+cd /Users/temple/Documents/Bami/BamiHost-backend
 npm run dev
 ```
 
 **Expected Output:**
 ```
-🚀 BAMIHUSTLE BACKEND SERVER STARTED
+🚀 BAMIHOST BACKEND SERVER STARTED
 ✉️  Mailtrap: READY (or MISSING if not configured)
 ☁️  Cloudinary: READY (or status)
 📍 Port: 5000
