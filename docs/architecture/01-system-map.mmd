@@ -1,0 +1,45 @@
+flowchart TB
+    subgraph Clients
+        WEB["🌐 Web App<br/>React + TypeScript + RTK Query<br/>(Vite :8080)"]
+        TG["💬 Telegram<br/>Tenant bot · Admin bot · AI Coach"]
+    end
+
+    subgraph Edge
+        CF["☁️ Cloudflare Tunnel<br/>public URL → localhost:4000<br/>(delivers Telegram webhooks)"]
+    end
+
+    subgraph Backend["⚙️ FastAPI Backend (Python 3.14, :4000) — supervisor"]
+        API["REST API  /api/*"]
+        COACH["AI Coach + Webhook  /api/coach/*"]
+        AUTO["Autopilot / AI Agents  /api/autopilot/*"]
+        SCHED["⏰ APScheduler<br/>daily scans, reminders, meters"]
+        EVENTS["🔔 Event Hooks  fire_event()"]
+        AGENTS["🤖 Agent Team  services/agents/"]
+    end
+
+    DB[("🗄️ PostgreSQL — Neon<br/>SQLAlchemy async")]
+
+    subgraph External["External Services"]
+        ANTH["Anthropic Claude<br/>Sonnet · Haiku"]
+        GEM["Gemini 2.5 Flash Image<br/>(Nano Banana)"]
+        CLD["Cloudinary<br/>media storage"]
+        PAY["Paystack<br/>payments"]
+        TGAPI["Telegram Bot API"]
+        MAIL["Mailtrap<br/>email"]
+    end
+
+    WEB -->|HTTPS JSON| API
+    TG --> TGAPI --> CF --> COACH
+    API --> DB
+    COACH --> DB
+    AUTO --> AGENTS --> DB
+    SCHED --> AGENTS
+    EVENTS --> AGENTS
+    API --> EVENTS
+    AGENTS --> ANTH
+    AGENTS --> GEM --> CLD
+    COACH --> ANTH
+    API --> PAY
+    API --> CLD
+    AUTO --> TGAPI
+    SCHED --> MAIL

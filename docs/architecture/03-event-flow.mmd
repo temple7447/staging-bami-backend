@@ -1,0 +1,18 @@
+sequenceDiagram
+    participant U as User / API
+    participant EP as Endpoint (create enquiry)
+    participant FE as fire_event()
+    participant H as event handler
+    participant AG as Agent logic
+    participant AI as Claude / Gemini
+    participant DB as PostgreSQL
+
+    U->>EP: POST /api/enquiries
+    EP->>DB: save enquiry
+    EP->>FE: fire_event("new_enquiry", owner, ctx)
+    FE->>H: route to _on_new_enquiry
+    H->>AI: score lead + draft follow-up (Haiku)
+    H->>DB: save lead_score back to enquiry
+    H-->>FE: [AutopilotAction(s)]
+    FE->>DB: insert actions + high-priority Notifications
+    Note over FE,DB: Owner sees actions in the AI Agents hub

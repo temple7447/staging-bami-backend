@@ -1,0 +1,40 @@
+erDiagram
+    USER ||--o{ ESTATE : owns
+    ESTATE ||--o{ UNIT : has
+    ESTATE ||--o{ TENANT : houses
+    UNIT ||--o| TENANT : occupied_by
+    ESTATE ||--o{ ISSUE : reported_in
+    ESTATE ||--o{ ENQUIRY : received_for
+    TENANT ||--o{ PAYMENT : makes
+    USER ||--o{ BRAND_ASSET : brand_kit
+    USER ||--o{ AUTOPILOT_ACTION : agent_output
+    USER ||--o| AUTOPILOT_SETTINGS : configures
+    USER ||--o{ COACH_MESSAGE : ai_chat_history
+
+    USER {
+        string id PK
+        string role
+        string telegram_id
+    }
+    ESTATE {
+        string id PK
+        string owner FK
+    }
+    UNIT {
+        string id PK
+        string estate FK
+        string status
+        string listing_graphic_url
+    }
+    TENANT {
+        string id PK
+        string estate FK
+        float rent_outstanding
+    }
+    AUTOPILOT_ACTION {
+        string id PK
+        string owner_id FK
+        string skill
+        string image_url
+        string status
+    }

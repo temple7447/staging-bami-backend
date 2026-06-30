@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant Owner
+    participant API
+    participant Designer
+    participant Marketer
+    participant Hub as AI Agents Hub
+    Owner->>API: list new unit (vacancy_opened)
+    API->>Designer: design listing graphic
+    Designer->>Designer: Gemini to Cloudinary, cache on unit
+    API->>Marketer: draft posts (reuse graphic)
+    Marketer->>Hub: Telegram + IG + FB actions (with image)
+    Hub-->>Owner: review / auto-post safe items

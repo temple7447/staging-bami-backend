@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant SCH as APScheduler 07:00
+    participant ORCH as run_all_agents
+    participant DES as Designer
+    participant MKT as Marketer
+    participant GEM as Gemini Nano Banana
+    participant CLD as Cloudinary
+    participant DB as PostgreSQL
+
+    SCH->>ORCH: scan owner
+    ORCH->>DES: scan for each vacant unit
+    DES->>GEM: design listing graphic
+    GEM-->>DES: image bytes
+    DES->>CLD: upload, get URL
+    DES->>DB: cache unit.listing_graphic_url
+    ORCH->>MKT: scan, reuse graphic
+    MKT->>DB: insert telegram/ig/fb actions with image_url
+    ORCH->>DB: plus Sales / Finance / Operations / HR actions
+    Note over ORCH,DB: auto-safe actions execute, the rest await approval

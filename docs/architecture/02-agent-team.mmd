@@ -1,0 +1,35 @@
+flowchart LR
+    subgraph Triggers
+        SCAN["⏰ Scheduled scan<br/>(daily 07:00) + on-demand<br/>'Run Agents Now'"]
+        EVT["🔔 Live events<br/>new listing, enquiry,<br/>issue, overdue rent"]
+    end
+
+    ORCH["🧠 Orchestrator<br/>run_all_agents(db, owner)"]
+
+    subgraph Team["services/agents/"]
+        D["🎨 Designer<br/>designs listing graphics"]
+        M["📣 Marketer<br/>writes social posts"]
+        S["💼 Sales<br/>lead scoring + follow-ups"]
+        F["💰 Finance<br/>reminders + payment links"]
+        O["🔧 Operations<br/>issue triage + vendors"]
+        H["👥 HR<br/>hiring triggers"]
+    end
+
+    Q[["📋 Autopilot Action Queue<br/>(AutopilotAction rows)"]]
+    SET{{"⚙️ Auto-execute settings<br/>'full auto where safe'"}}
+    OUT["✅ Executed<br/>Telegram / posts / reminders"]
+    HUMAN["👤 Owner approves in hub"]
+
+    SCAN --> ORCH
+    EVT --> ORCH
+    ORCH --> D --> Q
+    ORCH --> M --> Q
+    ORCH --> S --> Q
+    ORCH --> F --> Q
+    ORCH --> O --> Q
+    ORCH --> H --> Q
+    D -. graphic reused by .-> M
+    Q --> SET
+    SET -->|safe action| OUT
+    SET -->|sensitive action| HUMAN
+    HUMAN --> OUT
