@@ -270,13 +270,6 @@ async def save_brand_identity(
 
 # ─── AI Logo generation (Google Gemini "Nano Banana") ─────────────────────────
 
-GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    f"{GEMINI_IMAGE_MODEL}:generateContent"
-)
-
-
 class LogoGenerateRequest(BaseModel):
     business_description: str
     brand_name: Optional[str] = None
@@ -306,68 +299,17 @@ async def generate_logo(
 ):
     """Generate a logo image with Google Gemini 2.5 Flash Image (Nano Banana),
     then store it on Cloudinary and return the URL."""
-    if not settings.GEMINI_API_KEY:
-        raise HTTPException(503, "Image generation is not configured (missing GEMINI_API_KEY)")
+    from utils.image_gen import generate_and_store, is_image_gen_configured
 
-    import base64
-    import httpx
+    if not is_image_gen_configured():
+        raise HTTPException(503, "Image generation is not configured (GEMINI_API_KEY + Cloudinary)")
 
-    payload = {
-        "contents": [{"parts": [{"text": _logo_prompt(body)}]}],
-        # Ask Gemini to return an image
-        "generationConfig": {"responseModalities": ["IMAGE"]},
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                GEMINI_URL,
-                params={"key": settings.GEMINI_API_KEY},
-                json=payload,
-            )
-        if resp.status_code != 200:
-            logger.error("Gemini logo error %s: %s", resp.status_code, resp.text[:400])
-            raise HTTPException(502, "Image model rejected the request. Try a simpler description.")
-        data = resp.json()
-
-        # Pull the first inline image part out of the response
-        img_b64 = None
-        for cand in data.get("candidates", []):
-            for part in cand.get("content", {}).get("parts", []):
-                inline = part.get("inlineData") or part.get("inline_data")
-                if inline and inline.get("data"):
-                    img_b64 = inline["data"]
-                    break
-            if img_b64:
-                break
-        if not img_b64:
-            logger.error("Gemini returned no image: %s", json.dumps(data)[:400])
-            raise HTTPException(502, "No image was returned. Try again.")
-
-        img_bytes = base64.b64decode(img_b64)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Logo generation failed: %s", e)
-        raise HTTPException(502, f"Logo generation failed: {e}")
-
-    # Store on Cloudinary so the URL is permanent
-    if not settings.CLOUDINARY_CLOUD_NAME:
-        raise HTTPException(503, "File storage is not configured")
-    cloudinary.config(
-        cloud_name=settings.CLOUDINARY_CLOUD_NAME,
-        api_key=settings.CLOUDINARY_API_KEY,
-        api_secret=settings.CLOUDINARY_API_SECRET,
+    stored = await generate_and_store(
+        _logo_prompt(body), folder=f"bamihost/brand/{current_user.id}/logos"
     )
-    try:
-        result = cloudinary.uploader.upload(
-            img_bytes, folder=f"bamihost/brand/{current_user.id}/logos", resource_type="image",
-        )
-    except Exception as e:
-        logger.error("Logo upload failed: %s", e)
-        raise HTTPException(502, "Generated the logo but could not store it. Try again.")
-
-    return {"url": result["secure_url"], "public_id": result["public_id"], "file_type": result.get("format")}
+    if not stored:
+        raise HTTPException(502, "Logo generation failed. Try a simpler description or try again.")
+    return stored
 
 
 # ─── File upload (Cloudinary) ─────────────────────────────────────────────────

@@ -51,7 +51,7 @@ def _action(owner_id: str, skill: str, action_type: str, title: str,
             description: str, content: str | None, platform: str | None,
             trigger_event: str, trigger_context: dict,
             priority: str = "medium", recipients: list | None = None,
-            auto_execute: bool = False) -> AutopilotAction:
+            auto_execute: bool = False, image_url: str | None = None) -> AutopilotAction:
     return AutopilotAction(
         id=gen_uuid(),
         owner_id=owner_id,
@@ -61,6 +61,7 @@ def _action(owner_id: str, skill: str, action_type: str, title: str,
         description=description,
         content=content,
         platform=platform,
+        image_url=image_url,
         trigger_event=trigger_event,
         trigger_context=trigger_context,
         priority=priority,
@@ -115,6 +116,8 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
     )
     vacant_rows = (await db.execute(vacant_q)).all()
 
+    from services.designer import design_listing_graphic
+
     for unit, estate in vacant_rows:
         ctx = {
             "unit": unit.label,
@@ -122,7 +125,12 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
             "price": f"₦{unit.monthly_price:,.0f}/mo" if unit.monthly_price else "price on request",
             "bedrooms": unit.bedrooms or "",
             "category": unit.category or "unit",
+            "listing_type": unit.listing_type or "Rent",
         }
+
+        # 🎨 Designer agent: design (or reuse) a branded marketing graphic for this
+        # listing BEFORE we draft the posts, so every social post carries the image.
+        graphic = await design_listing_graphic(db, uid, ctx, unit=unit)
 
         # WhatsApp broadcast
         wa_content = await _ai(
@@ -135,7 +143,7 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
             uid, "marketer", "telegram_blast",
             f"Telegram blast — {unit.label}, {estate.name}",
             "Send a Telegram broadcast to your contact list advertising this vacant unit.",
-            wa_content, "telegram", "vacancy_opened", ctx, priority="high"
+            wa_content, "telegram", "vacancy_opened", ctx, priority="high", image_url=graphic
         ))
 
         # Instagram caption
@@ -148,8 +156,8 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
         actions.append(_action(
             uid, "marketer", "instagram_post",
             f"Instagram post — {unit.label}, {estate.name}",
-            "Post this caption on Instagram with property photos to attract leads.",
-            ig_content, "instagram", "vacancy_opened", ctx
+            "Post this caption on Instagram with the AI-designed graphic to attract leads.",
+            ig_content, "instagram", "vacancy_opened", ctx, image_url=graphic
         ))
 
         # Facebook post
@@ -163,7 +171,7 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
             uid, "marketer", "facebook_post",
             f"Facebook post — {unit.label}, {estate.name}",
             "Share this on your Facebook page or in property groups to reach more prospects.",
-            fb_content, "facebook", "vacancy_opened", ctx
+            fb_content, "facebook", "vacancy_opened", ctx, image_url=graphic
         ))
 
     # --- 2. Overdue tenants → Finance reminders --------------------
@@ -504,6 +512,7 @@ def _serialize(a: AutopilotAction) -> dict:
         "description": a.description,
         "content": a.content,
         "platform": a.platform,
+        "image_url": a.image_url,
         "trigger_event": a.trigger_event,
         "trigger_context": a.trigger_context,
         "recipients": a.recipients,

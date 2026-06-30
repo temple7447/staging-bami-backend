@@ -36,7 +36,7 @@ async def _ai_content(system: str, prompt: str, max_tokens: int = 300) -> str:
 def _make_action(owner_id: str, skill: str, action_type: str, title: str,
                  description: str, content: str | None, platform: str | None,
                  event: str, context: dict, priority: str = "medium",
-                 recipients: list | None = None) -> AutopilotAction:
+                 recipients: list | None = None, image_url: str | None = None) -> AutopilotAction:
     return AutopilotAction(
         id=gen_uuid(),
         owner_id=owner_id,
@@ -46,6 +46,7 @@ def _make_action(owner_id: str, skill: str, action_type: str, title: str,
         description=description,
         content=content,
         platform=platform,
+        image_url=image_url,
         trigger_event=event,
         trigger_context=context,
         priority=priority,
@@ -99,12 +100,12 @@ async def _handle_event(event: str, owner_id: str, context: dict, db: AsyncSessi
 
     handlers = {
         "new_tenant":           (_on_new_tenant, False),
-        "vacancy_opened":       (_on_vacancy_opened, False),
+        "vacancy_opened":       (_on_vacancy_opened, True),   # needs db to design graphic
         "new_enquiry":          (_on_new_enquiry, True),      # needs db to save lead score
         "issue_reported":       (_on_issue_reported, True),   # needs db for vendor lookup
         "payment_received":     (_on_payment_received, False),
         "tenant_overdue":       (_on_tenant_overdue, False),
-        "new_property_listed":  (_on_new_property_listed, False),
+        "new_property_listed":  (_on_new_property_listed, True),  # needs db to design graphic
         "lease_expiring":       (_on_lease_expiring, False),
     }
 
@@ -146,10 +147,22 @@ async def _on_new_tenant(owner_id: str, ctx: dict) -> list[AutopilotAction]:
     ]
 
 
-async def _on_vacancy_opened(owner_id: str, ctx: dict) -> list[AutopilotAction]:
+async def _on_vacancy_opened(owner_id: str, ctx: dict, db: AsyncSession | None = None) -> list[AutopilotAction]:
     unit   = ctx.get("unit_label", "unit")
     estate = ctx.get("estate_name", "estate")
     price  = ctx.get("price", "")
+
+    # 🎨 Designer agent: design a branded marketing graphic for the vacant unit
+    # before drafting the posts, so the social content ships with an image.
+    graphic = None
+    if db is not None:
+        from services.designer import design_listing_graphic
+        graphic = await design_listing_graphic(db, owner_id, {
+            "unit": unit, "estate": estate, "price": price,
+            "category": ctx.get("category", "unit"),
+            "listing_type": ctx.get("listing_type", "Rent"),
+            "bedrooms": ctx.get("bedrooms", ""),
+        })
 
     wa_blast = await _ai_content(
         "You are a Nigerian property marketer. Write a 3-line WhatsApp broadcast message for a vacant property. "
@@ -164,11 +177,11 @@ async def _on_vacancy_opened(owner_id: str, ctx: dict) -> list[AutopilotAction]:
         _make_action(owner_id, "marketer", "whatsapp_blast",
                      f"Vacancy alert — {unit}, {estate}",
                      "Blast your contacts about this vacant unit immediately.",
-                     wa_blast, "telegram", "vacancy_opened", ctx, "high"),
+                     wa_blast, "telegram", "vacancy_opened", ctx, "high", image_url=graphic),
         _make_action(owner_id, "marketer", "instagram_post",
                      f"Instagram post — {unit}, {estate}",
-                     "Post this caption on Instagram with property photos.",
-                     ig_caption, "instagram", "vacancy_opened", ctx, "medium"),
+                     "Post this caption on Instagram with the AI-designed graphic.",
+                     ig_caption, "instagram", "vacancy_opened", ctx, "medium", image_url=graphic),
     ]
 
 
@@ -338,31 +351,44 @@ async def _on_tenant_overdue(owner_id: str, ctx: dict) -> list[AutopilotAction]:
     ]
 
 
-async def _on_new_property_listed(owner_id: str, ctx: dict) -> list[AutopilotAction]:
+async def _on_new_property_listed(owner_id: str, ctx: dict, db: AsyncSession | None = None) -> list[AutopilotAction]:
     unit   = ctx.get("unit_label", "unit")
     estate = ctx.get("estate_name", "estate")
     price  = ctx.get("price", "")
+
+    # 🎨 Designer agent designs the listing graphic FIRST — exactly the workflow:
+    # a new property is listed → the designer produces the marketing image →
+    # then the marketing posts go out carrying that image.
+    graphic = None
+    if db is not None:
+        from services.designer import design_listing_graphic
+        graphic = await design_listing_graphic(db, owner_id, {
+            "unit": unit, "estate": estate, "price": price,
+            "category": ctx.get("category", "property"),
+            "listing_type": ctx.get("listing_type", "Rent"),
+            "bedrooms": ctx.get("bedrooms", ""),
+        })
 
     launch_post = await _ai_content(
         "Write a Facebook launch post for a new Nigerian property listing. "
         "Include features, price, and how to enquire. 120 words max. Enthusiastic but professional.",
         f"Unit: {unit}, Estate: {estate}, Price: {price}. New listing launch post."
     )
-    checklist = await _ai_content(
-        "List 5 things a Nigerian property manager must do before marketing a new listing. "
-        "Number them. Be specific. Max 80 words.",
-        f"Unit: {unit}, Estate: {estate}. Pre-launch checklist."
-    )
-    return [
+    actions = [
         _make_action(owner_id, "marketer", "facebook_post",
                      f"New listing launch — {unit}, {estate}",
-                     "Share this Facebook post to announce the new listing.",
-                     launch_post, "facebook", "new_property_listed", ctx, "high"),
-        _make_action(owner_id, "designer", "checklist",
-                     f"Pre-launch checklist — {unit}",
-                     "Complete this before marketing the listing.",
-                     checklist, "internal", "new_property_listed", ctx, "medium"),
+                     "Share this Facebook post (with the AI-designed graphic) to announce the new listing.",
+                     launch_post, "facebook", "new_property_listed", ctx, "high", image_url=graphic),
     ]
+    # Surface the designed graphic as its own Designer action so the owner can see/reuse it
+    if graphic:
+        actions.append(_make_action(
+            owner_id, "designer", "listing_graphic",
+            f"Marketing graphic designed — {unit}, {estate}",
+            "Your Designer AI created a branded marketing image for this listing. Reuse it across all channels.",
+            None, "internal", "new_property_listed", ctx, "medium", image_url=graphic,
+        ))
+    return actions
 
 
 async def _on_lease_expiring(owner_id: str, ctx: dict) -> list[AutopilotAction]:

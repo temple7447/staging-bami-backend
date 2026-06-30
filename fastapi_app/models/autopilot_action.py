@@ -25,6 +25,7 @@ class AutopilotAction(Base):
     description: Mapped[str]         = mapped_column(Text)   # what the AI recommends doing
     content:     Mapped[str | None]  = mapped_column(Text)   # the actual post/message/email body to use
     platform:    Mapped[str | None]  = mapped_column(String(30))  # whatsapp, instagram, facebook, email, internal
+    image_url:   Mapped[str | None]  = mapped_column(Text)   # AI-designed marketing graphic (from the Designer agent)
 
     # Execution
     auto_execute:    Mapped[bool]        = mapped_column(Boolean, default=False)

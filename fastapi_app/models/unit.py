@@ -26,6 +26,7 @@ class Unit(Base):
     street_address: Mapped[str | None] = mapped_column(Text, nullable=True)
     images: Mapped[list] = mapped_column(JSON, default=list)
     videos: Mapped[list] = mapped_column(JSON, default=list)
+    listing_graphic_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # AI-designed marketing graphic (Designer agent)
     status: Mapped[str] = mapped_column(String(50), default="vacant")
     occupied_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     occupied_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
