@@ -262,6 +262,84 @@ async def growth_scorecard(
     }
 
 
+# ─── L3: Live Company Scorecard (the OS "Common Language") ──────────────────────
+
+def _status(value: float, good: float, warn: float, higher_is_better: bool = True) -> str:
+    """Return green/amber/red for a metric vs thresholds."""
+    if higher_is_better:
+        return "green" if value >= good else "amber" if value >= warn else "red"
+    return "green" if value <= good else "amber" if value <= warn else "red"
+
+
+@router.get("/scorecard")
+async def company_scorecard(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The live company scorecard: 3 evergreen (lagging) + North Star (leading)
+    + per-agent (team) metrics, auto-computed from real business data."""
+    estate_ids = await owner_estate_ids(db, current_user)
+    ids = estate_ids or ["__none__"]
+    now = datetime.utcnow()
+    som = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    d30 = now - timedelta(days=30)
+
+    payments = await _confirmed_payments(db, estate_ids)
+    month_rev = sum(p.amount or 0 for p in payments if p.created_at and p.created_at >= som)
+
+    units = (await db.execute(select(Unit).where(Unit.estate.in_(ids)))).scalars().all()
+    total_units = len(units)
+    occupied = len([u for u in units if u.status == "occupied"])
+    occupancy = round(occupied / total_units * 100) if total_units else 0
+
+    tenants = (await db.execute(
+        select(Tenant).where(Tenant.estate.in_(ids), Tenant.is_active == True)  # noqa: E712
+    )).scalars().all()
+    rent_roll = sum((t.rent_amount or 0) + (t.service_charge_amount or 0) for t in tenants)
+    outstanding = sum((t.rent_outstanding or 0) + (t.service_charge_outstanding or 0) for t in tenants)
+    collection = round(month_rev / rent_roll * 100) if rent_roll else 0
+    promoters = len([t for t in tenants if t.nps_score is not None and t.nps_score >= 9])
+
+    enquiries = (await db.execute(
+        select(Enquiry).where(and_((Enquiry.estate.in_(ids)) | (Enquiry.owner_id == str(current_user.id))))
+    )).scalars().all()
+    new_enq = len([e for e in enquiries if e.created_at and e.created_at >= d30])
+
+    # Per-agent (team) output — actions in the last 30 days
+    from models.autopilot_action import AutopilotAction
+    acts = (await db.execute(
+        select(AutopilotAction.skill, func.count()).where(
+            AutopilotAction.owner_id == str(current_user.id),
+            AutopilotAction.created_at >= d30,
+        ).group_by(AutopilotAction.skill)
+    )).all()
+    by_skill = {s: n for s, n in acts}
+
+    evergreen = [
+        {"label": "Revenue (this month)", "value": f"₦{month_rev:,.0f}",
+         "status": _status(month_rev, LEVEL2_MONTHLY, LEVEL2_MONTHLY * 0.5)},
+        {"label": "Monthly rent roll", "value": f"₦{rent_roll:,.0f}", "status": "green"},
+        {"label": "Outstanding", "value": f"₦{outstanding:,.0f}",
+         "status": _status(outstanding, rent_roll * 0.1, rent_roll * 0.3, higher_is_better=False)},
+    ]
+    north_star = [
+        {"label": "Occupancy", "value": f"{occupancy}%", "status": _status(occupancy, 90, 70)},
+        {"label": "Collection rate", "value": f"{collection}%", "status": _status(collection, 90, 70)},
+        {"label": "New enquiries (30d)", "value": new_enq, "status": _status(new_enq, 5, 1)},
+        {"label": "Promoters", "value": f"{promoters}/{LEVEL1_TARGET}", "status": _status(promoters, LEVEL1_TARGET, 5)},
+    ]
+    teams = [
+        {"team": "🎨 Designer", "metric": by_skill.get("designer", 0)},
+        {"team": "📣 Marketer", "metric": by_skill.get("marketer", 0)},
+        {"team": "💼 Sales", "metric": by_skill.get("sales", 0)},
+        {"team": "💰 Finance", "metric": by_skill.get("finance", 0)},
+        {"team": "🔧 Operations", "metric": by_skill.get("operations", 0)},
+        {"team": "👥 HR", "metric": by_skill.get("hr", 0)},
+    ]
+    return {"evergreen": evergreen, "north_star": north_star, "teams": teams,
+            "as_of": now.strftime("%d %b %Y")}
+
+
 # ─── L4: Pay-yourself-first / finance plan ──────────────────────────────────────
 
 class FinancePlanBody(BaseModel):
