@@ -270,6 +270,19 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
             await update_session(db, session, state="idle", tenant_id=None)
             return "Session expired. Send /tenant to login again."
 
+        # ── NPS capture: if we asked for a score and they reply with a number 0–10 ──
+        if (getattr(tenant, "nps_asked_at", None) and tenant.nps_answered_at is None
+                and cmd.isdigit() and 0 <= int(cmd) <= 10):
+            from datetime import datetime as _dt
+            tenant.nps_score = int(cmd)
+            tenant.nps_answered_at = _dt.utcnow()
+            await db.commit()
+            if tenant.nps_score >= 9:
+                return "🙏 Thank you so much! We're thrilled you'd recommend us. 💚"
+            if tenant.nps_score >= 7:
+                return "🙏 Thanks for the feedback! We'd love to know what would make it a 9 or 10."
+            return "🙏 Thank you for the honest feedback — we'll work to do better."
+
         if cmd in ("/dashboard", "dashboard"):
             wallet = await get_wallet(db, session.user_id) if session.user_id else None
             bills = await get_pending_bills(db, session.user_id) if session.user_id else []

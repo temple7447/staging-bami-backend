@@ -6,6 +6,7 @@ from api.v1.endpoints import subscriptions, withdrawals, misc, distribution, wal
 from api.v1.endpoints import coach
 from api.v1.endpoints import brand, marketing, sales, operations, finance, hr
 from api.v1.endpoints import autopilot
+from api.v1.endpoints import scale
 
 api_router = APIRouter(prefix="/api")
 
@@ -37,3 +38,4 @@ api_router.include_router(operations.router)
 api_router.include_router(finance.router)
 api_router.include_router(hr.router)
 api_router.include_router(autopilot.router)
+api_router.include_router(scale.router)

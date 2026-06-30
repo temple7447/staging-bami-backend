@@ -1,4 +1,4 @@
-from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
@@ -43,6 +43,11 @@ class Tenant(Base):
 
     rent_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
     service_charge_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # NPS — Level 1 "Sell & Serve 10": 0–10 recommend score (9–10 = promoter)
+    nps_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nps_asked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nps_answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
