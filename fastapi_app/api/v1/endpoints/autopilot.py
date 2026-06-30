@@ -97,200 +97,36 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
     Scan the business and return a list of autopilot actions with AI-generated content.
     Called by the scheduler daily and on-demand from the dashboard.
     """
-    actions: list[AutopilotAction] = []
-    uid = str(user.id)
+    # Run the full agent team. Each agent scans its own domain and returns actions.
+    # Designer runs first and pre-designs listing graphics the Marketer reuses.
+    from services.agents import run_all_agents
+    actions = await run_all_agents(db, user)
 
-    # All child records (units, tenants, issues, enquiries) link to an estate,
-    # not directly to the owner, so scope every query through the user's estates.
-    estate_ids = await _owner_estate_ids(db, user)
+    # Daily business briefing, derived from what the team found this scan.
+    by_type: dict[str, int] = {}
+    for a in actions:
+        by_type[a.action_type] = by_type.get(a.action_type, 0) + 1
+    vacant    = by_type.get("telegram_blast", 0)
+    overdue   = by_type.get("payment_reminder", 0)
+    enquiries = by_type.get("follow_up", 0)
+    has_issues = by_type.get("maintenance_plan", 0) > 0
 
-    # No estates → nothing to scan, but still return a briefing at the end.
-    if not estate_ids:
-        estate_ids = ["__none__"]
-
-    # --- 1. Vacant units → Marketer posts --------------------------
-    vacant_q = (
-        select(Unit, Estate)
-        .join(Estate, Unit.estate == Estate.id)
-        .where(Unit.estate.in_(estate_ids), Unit.status == "vacant")
-    )
-    vacant_rows = (await db.execute(vacant_q)).all()
-
-    from services.designer import design_listing_graphic
-
-    for unit, estate in vacant_rows:
-        ctx = {
-            "unit": unit.label,
-            "estate": estate.name,
-            "price": f"₦{unit.monthly_price:,.0f}/mo" if unit.monthly_price else "price on request",
-            "bedrooms": unit.bedrooms or "",
-            "category": unit.category or "unit",
-            "listing_type": unit.listing_type or "Rent",
-        }
-
-        # 🎨 Designer agent: design (or reuse) a branded marketing graphic for this
-        # listing BEFORE we draft the posts, so every social post carries the image.
-        graphic = await design_listing_graphic(db, uid, ctx, unit=unit)
-
-        # WhatsApp broadcast
-        wa_content = await _ai(
-            "You are a Nigerian property marketer. Write a short WhatsApp message (max 3 lines) "
-            "to broadcast a property listing. Use plain text, no markdown. Be conversational and add urgency.",
-            f"Property: {ctx['bedrooms']}bed {ctx['category']} at {ctx['estate']}, {ctx['price']}. "
-            "Write the broadcast message."
-        )
-        actions.append(_action(
-            uid, "marketer", "telegram_blast",
-            f"Telegram blast — {unit.label}, {estate.name}",
-            "Send a Telegram broadcast to your contact list advertising this vacant unit.",
-            wa_content, "telegram", "vacancy_opened", ctx, priority="high", image_url=graphic
-        ))
-
-        # Instagram caption
-        ig_content = await _ai(
-            "You are a Nigerian property marketer. Write an Instagram caption for a property listing. "
-            "Include relevant emojis, 3-5 hashtags, and a call to action. Max 150 words.",
-            f"Property: {ctx['bedrooms']}bed {ctx['category']} at {ctx['estate']}, {ctx['price']}. "
-            "Write the Instagram caption."
-        )
-        actions.append(_action(
-            uid, "marketer", "instagram_post",
-            f"Instagram post — {unit.label}, {estate.name}",
-            "Post this caption on Instagram with the AI-designed graphic to attract leads.",
-            ig_content, "instagram", "vacancy_opened", ctx, image_url=graphic
-        ))
-
-        # Facebook post
-        fb_content = await _ai(
-            "You are a Nigerian property marketer. Write a Facebook post for a property listing. "
-            "Be detailed (100-150 words), include features, price, and how to contact. No markdown.",
-            f"Property: {ctx['bedrooms']}bed {ctx['category']} at {ctx['estate']}, {ctx['price']}. "
-            "Write the Facebook post."
-        )
-        actions.append(_action(
-            uid, "marketer", "facebook_post",
-            f"Facebook post — {unit.label}, {estate.name}",
-            "Share this on your Facebook page or in property groups to reach more prospects.",
-            fb_content, "facebook", "vacancy_opened", ctx, image_url=graphic
-        ))
-
-    # --- 2. Overdue tenants → Finance reminders --------------------
-    overdue_q = (
-        select(Tenant, Estate)
-        .join(Estate, Tenant.estate == Estate.id)
-        .where(
-            Tenant.estate.in_(estate_ids),
-            Tenant.is_active == True,  # noqa: E712
-            (Tenant.rent_outstanding + Tenant.service_charge_outstanding) > 0,
-        )
-    )
-    overdue_rows = (await db.execute(overdue_q)).all()
-
-    for tenant, estate in overdue_rows:
-        outstanding = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
-        unit_label = tenant.unit_label or "their unit"
-        ctx = {
-            "name": tenant.tenant_name,
-            "unit": unit_label,
-            "estate": estate.name,
-            "outstanding": f"₦{outstanding:,.0f}",
-        }
-        recipients = []
-        if tenant.tenant_phone:
-            recipients.append({"name": tenant.tenant_name, "phone": tenant.tenant_phone, "email": tenant.tenant_email or ""})
-
-        reminder_msg = await _ai(
-            "You are a professional Nigerian property manager. Write a polite but firm WhatsApp/SMS "
-            "payment reminder. Max 3 sentences. Address the tenant by name. Be professional, not aggressive.",
-            f"Tenant: {tenant.tenant_name}, Unit: {unit_label} at {estate.name}, "
-            f"Outstanding: ₦{outstanding:,.0f}. Write the reminder."
-        )
-        actions.append(_action(
-            uid, "finance", "payment_reminder",
-            f"Payment reminder — {tenant.tenant_name} ({unit_label})",
-            f"{tenant.tenant_name} owes ₦{outstanding:,.0f}. Send a polite reminder now.",
-            reminder_msg, "telegram", "tenant_overdue", ctx,
-            priority="high", recipients=recipients, auto_execute=False
-        ))
-
-    # --- 3. Pending enquiries → Sales follow-ups -------------------
-    # Enquiries link via estate; also include any tagged with owner_id directly.
-    enquiry_q = select(Enquiry).where(
-        and_(
-            Enquiry.status == "pending",
-            (Enquiry.estate.in_(estate_ids)) | (Enquiry.owner_id == uid),
-        )
-    )
-    enquiries = (await db.execute(enquiry_q)).scalars().all()
-
-    for enq in enquiries:
-        ctx = {
-            "name": enq.name,
-            "unit_interest": getattr(enq, "unit_interest", "") or "",
-            "phone": enq.phone or "",
-        }
-        recipients = []
-        if enq.phone:
-            recipients.append({"name": enq.name, "phone": enq.phone, "email": getattr(enq, "email", "") or ""})
-
-        follow_up = await _ai(
-            "You are a Nigerian property sales consultant. Write a friendly WhatsApp follow-up "
-            "message to a property enquiry. Max 4 sentences. Offer to schedule a viewing. "
-            "Be warm and professional.",
-            f"Prospect name: {enq.name}, interested in: {ctx['unit_interest'] or 'a property'}. "
-            "Write the follow-up message."
-        )
-        actions.append(_action(
-            uid, "sales", "follow_up",
-            f"Follow up — {enq.name}",
-            f"Send a follow-up to {enq.name} who has a pending enquiry. Move them closer to signing.",
-            follow_up, "telegram", "new_enquiry", ctx,
-            priority="high", recipients=recipients
-        ))
-
-    # --- 4. Open issues → Operations vendor assignment -------------
-    issue_q = select(Issue).where(
-        Issue.estate.in_(estate_ids),
-        Issue.status.in_(["open", "pending", "in_progress"]),
-    )
-    issues = (await db.execute(issue_q)).scalars().all()
-
-    if issues:
-        high = [i for i in issues if getattr(i, "priority", "") == "high"]
-        ctx = {"open_count": len(issues), "high_priority": len(high)}
-
-        ops_advice = await _ai(
-            "You are a property operations manager. Give a brief action plan (3 bullet points max) "
-            "for handling open maintenance issues. Be specific and practical.",
-            f"{len(issues)} open issues, {len(high)} are high priority. "
-            "What should the manager do today to resolve these?"
-        )
-        actions.append(_action(
-            uid, "operations", "maintenance_plan",
-            f"Maintenance action plan — {len(issues)} open issues",
-            "Your Operations AI has reviewed open issues and created an action plan.",
-            ops_advice, "internal", "issue_reported", ctx,
-            priority="high" if high else "medium"
-        ))
-
-    # --- 5. Daily business briefing (always generated) -------------
     briefing = await _ai(
         "You are the BamiHost Business AI. Generate a concise morning business briefing "
         "for a Nigerian property manager. Use bullet points. Max 120 words. "
         "Mention what to focus on today: occupancy, cash flow, follow-ups, maintenance.",
-        f"Business snapshot: {len(vacant_rows)} vacant units, {len(overdue_rows)} overdue tenants, "
-        f"{len(enquiries)} pending enquiries, {len(issues)} open issues. "
+        f"Business snapshot: {vacant} vacant units, {overdue} overdue tenants, "
+        f"{enquiries} pending enquiries, {'open issues need attention' if has_issues else 'no open issues'}. "
         "Write today's briefing.",
         model=SONNET, max_tokens=300,
     )
     actions.append(_action(
-        uid, "marketer", "daily_briefing",
+        str(user.id), "marketer", "daily_briefing",
         f"Daily Business Briefing — {datetime.utcnow().strftime('%d %b %Y')}",
         "Your AI-generated daily briefing. Start your day here.",
         briefing, "internal", "daily_briefing",
-        {"vacant": len(vacant_rows), "overdue": len(overdue_rows),
-         "enquiries": len(enquiries), "issues": len(issues)},
-        priority="medium"
+        {"vacant": vacant, "overdue": overdue, "enquiries": enquiries, "issues": has_issues},
+        priority="medium",
     ))
 
     return actions
@@ -334,6 +170,43 @@ async def generate_autopilot_actions(
         "generated": len(actions),
         "actions": [_serialize(a) for a in actions],
     }
+
+
+@router.get("/agents")
+async def get_agents(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Roster of the autonomous agent team + per-agent activity for this owner."""
+    from services.agents import ALL_AGENTS
+    from sqlalchemy import func as _func
+
+    uid = str(current_user.id)
+    # Count actions per skill (agent) for this owner
+    rows = (await db.execute(
+        select(AutopilotAction.skill, AutopilotAction.status, _func.count())
+        .where(AutopilotAction.owner_id == uid)
+        .group_by(AutopilotAction.skill, AutopilotAction.status)
+    )).all()
+    counts: dict[str, dict[str, int]] = {}
+    for skill, status, n in rows:
+        counts.setdefault(skill, {})[status] = n
+
+    agents = []
+    for a in ALL_AGENTS:
+        m = a.META
+        c = counts.get(m.key, {})
+        agents.append({
+            "key": m.key,
+            "name": m.name,
+            "emoji": m.emoji,
+            "description": m.description,
+            "auto_safe": m.auto_safe,
+            "pending": c.get("pending", 0),
+            "done": c.get("done", 0),
+            "total": sum(c.values()),
+        })
+    return {"agents": agents}
 
 
 @router.get("/queue")
@@ -632,10 +505,12 @@ async def get_autopilot_settings(
     )).scalars().first()
 
     if not row:
-        # Return defaults without saving
+        # Default to "full auto where safe": the agent team's safe action types
+        # are pre-enabled for auto-execution; sensitive ones still wait for approval.
+        from services.agents import AUTO_SAFE_TYPES
         return {
             "owner_id": str(current_user.id),
-            "auto_execute_types": [],
+            "auto_execute_types": AUTO_SAFE_TYPES,
             "enabled": True,
             "daily_scan_enabled": True,
             "notify_high_priority": True,
