@@ -1073,6 +1073,31 @@ async def get_coach_reply(
             system += _format_context(biz_ctx)
         except Exception as e:
             logger.warning(f"Could not fetch business context for {user_id}: {e}")
+        # The owner's OWN stated Level 7 plan (Scalable Impact Planner) — cite it.
+        try:
+            from models.growth_plan import GrowthPlan
+            from sqlalchemy import select as _select
+            gp = (await db.execute(
+                _select(GrowthPlan).where(GrowthPlan.owner_id == str(user_id))
+            )).scalars().first()
+            if gp:
+                parts = []
+                if gp.target_revenue:
+                    parts.append(f"3-yr revenue target ₦{gp.target_revenue:,.0f}")
+                if gp.target_profit:
+                    parts.append(f"profit target ₦{gp.target_profit:,.0f}")
+                if gp.target_valuation:
+                    parts.append(f"valuation target ₦{gp.target_valuation:,.0f}")
+                if gp.why_summary:
+                    parts.append(f"their WHY: {gp.why_summary}")
+                if gp.current_step:
+                    parts.append(f"currently on planner step {gp.current_step}/7")
+                if parts:
+                    system += ("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTHE OWNER'S STATED PLAN "
+                               "(from their Scalable Impact Planner — reference it directly)\n"
+                               "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + " · ".join(parts))
+        except Exception as e:
+            logger.warning(f"Could not fetch growth plan for {user_id}: {e}")
 
     trimmed = conversation_history[-MAX_HISTORY_MESSAGES:]
     messages = trimmed + [{"role": "user", "content": new_message}]

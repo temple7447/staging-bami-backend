@@ -117,6 +117,19 @@ async def scale_overview(
         {"level": 6, "name": "Acquisition", "done": False, "progress": "—"},
         {"level": 7, "name": "Hit Your Number", "done": False, "progress": "—"},
     ]
+    # The owner's stated plan (their Number) from the Scalable Impact Planner
+    from models.growth_plan import GrowthPlan
+    gp = (await db.execute(
+        select(GrowthPlan).where(GrowthPlan.owner_id == str(current_user.id))
+    )).scalars().first()
+    stated = {
+        "has_plan": bool(gp),
+        "target_revenue": gp.target_revenue if gp else None,
+        "target_profit": gp.target_profit if gp else None,
+        "target_valuation": gp.target_valuation if gp else None,
+        "why_summary": gp.why_summary if gp else None,
+    }
+
     return {
         "current_level": current_level,
         "levels": levels,
@@ -124,6 +137,7 @@ async def scale_overview(
         "promoter_target": LEVEL1_TARGET,
         "months_above_target": months_hit,
         "monthly_target": LEVEL2_MONTHLY,
+        "stated_plan": stated,
     }
 
 

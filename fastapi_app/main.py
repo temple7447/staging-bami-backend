@@ -26,6 +26,7 @@ import models.brand_asset, models.campaign, models.deal  # noqa: F401
 import models.vendor, models.candidate  # noqa: F401
 import models.autopilot_action, models.autopilot_settings  # noqa: F401
 import models.owner_finance_plan  # noqa: F401
+import models.growth_plan  # noqa: F401
 from middleware.logging import logging_middleware
 from middleware.camelize import camelize_response_middleware
 
