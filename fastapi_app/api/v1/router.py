@@ -8,6 +8,7 @@ from api.v1.endpoints import brand, marketing, sales, operations, finance, hr
 from api.v1.endpoints import autopilot
 from api.v1.endpoints import scale
 from api.v1.endpoints import growth
+from api.v1.endpoints import personal_finance
 
 api_router = APIRouter(prefix="/api")
 
@@ -41,3 +42,4 @@ api_router.include_router(hr.router)
 api_router.include_router(autopilot.router)
 api_router.include_router(scale.router)
 api_router.include_router(growth.router)
+api_router.include_router(personal_finance.router)
