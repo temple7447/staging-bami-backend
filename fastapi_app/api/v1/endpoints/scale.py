@@ -405,6 +405,85 @@ async def value_engines(
     return {"engines": [growth, fulfillment]}
 
 
+# ─── L3/L5: High Output Team Canvas (accountability) + HR hiring signal ─────────
+
+# Each AI agent's Critical Accountability Bullet (the power stage it owns)
+_AGENT_CAB = {
+    "designer": "Design listing marketing graphics",
+    "marketer": "Market vacant units (posts & blasts)",
+    "sales": "Follow up & convert enquiries",
+    "finance": "Collect rent & chase overdue",
+    "operations": "Resolve maintenance issues (assign vendors)",
+    "hr": "Flag when it's time to hire",
+}
+
+
+@router.get("/team-canvas")
+async def team_canvas(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """High Output Team Canvas — who owns each critical function. In Bami Host the
+    AI agents are team members owning the power stages; humans + the HR hiring
+    signal complete the picture."""
+    from services.agents import AGENT_META
+    from models.autopilot_action import AutopilotAction
+    from models.candidate import Candidate
+
+    uid = str(current_user.id)
+    now = datetime.utcnow()
+    d30 = now - timedelta(days=30)
+    estate_ids = await owner_estate_ids(db, current_user)
+
+    # AI agent team — each agent + its accountability + 30d output
+    acts = (await db.execute(
+        select(AutopilotAction.skill, func.count()).where(
+            AutopilotAction.owner_id == uid, AutopilotAction.created_at >= d30,
+        ).group_by(AutopilotAction.skill)
+    )).all()
+    by_skill = {s: n for s, n in acts}
+    agents = [{
+        "key": m.key, "name": m.name, "emoji": m.emoji,
+        "accountability": _AGENT_CAB.get(m.key, m.description),
+        "output_30d": by_skill.get(m.key, 0),
+    } for m in AGENT_META.values()]
+
+    # Human team — the owner + direct reports / managers
+    humans = [{"name": current_user.name, "role": current_user.role, "is_owner": True,
+               "estates": len(estate_ids)}]
+    reports = (await db.execute(
+        select(User).where(User.manager == uid, User.is_active == True)  # noqa: E712
+    )).scalars().all()
+    for r in reports:
+        humans.append({"name": r.name, "role": r.role, "is_owner": False,
+                       "estates": len(r.assigned_estates or [])})
+
+    # HR hiring signal (mirrors the HR agent)
+    tenant_count = (await db.execute(
+        select(func.count()).select_from(Tenant).where(
+            Tenant.estate.in_(estate_ids or ["__none__"]), Tenant.is_active == True,  # noqa: E712
+        )
+    )).scalar() or 0
+    HIRE_THRESHOLD = 15
+    hiring = {
+        "active_tenants": tenant_count,
+        "threshold": HIRE_THRESHOLD,
+        "should_hire": tenant_count >= HIRE_THRESHOLD,
+        "message": (f"You manage {tenant_count} tenants — past {HIRE_THRESHOLD}, consider hiring support."
+                    if tenant_count >= HIRE_THRESHOLD
+                    else f"{tenant_count}/{HIRE_THRESHOLD} tenants — your AI agents cover the load for now."),
+    }
+
+    # Candidate pipeline (HR)
+    cands = (await db.execute(
+        select(Candidate.stage, func.count()).where(Candidate.owner_id == uid).group_by(Candidate.stage)
+    )).all()
+    pipeline = {stage: n for stage, n in cands}
+
+    return {"agents": agents, "humans": humans, "hiring": hiring,
+            "candidate_pipeline": pipeline, "candidate_total": sum(pipeline.values())}
+
+
 # ─── L4: Pay-yourself-first / finance plan ──────────────────────────────────────
 
 class FinancePlanBody(BaseModel):
