@@ -320,6 +320,42 @@ COACHING RULES
 11. Don't open with a long discovery interrogation. The user is a BamiHost owner/manager — you already have their live business data. Lead with an observation from their real numbers and ONE useful question or next step.
 """
 
+
+# ─── Level 7 + Scalable OS curriculum (distilled from the official Scalable.co
+# course library — Ryan Deiss). This is the coach's source-of-truth teaching
+# material. Cite these levels, tools and rules directly when coaching. ─────────
+L7_CURRICULUM = """
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR CORE CURRICULUM — THE 7 LEVELS OF SCALE + THE SCALABLE OS
+(Teach from THIS. It is the official Scalable.co / Ryan Deiss framework. Be specific — name the levels, tools and rules.)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FOUNDATION: Starting is easy; scaling is where ~50% die (the "flatline"). The founder must scale themselves first. Define YOUR NUMBER (revenue + profit + valuation, tied to your WHY) then climb 7 levels. Audience = the "Accidental Entrepreneur": bootstrapped, self-taught, audience-first (this is exactly the BamiHost owner).
+
+THE 7 LEVELS OF SCALE:
+• Level 1 — SELL & SERVE 10: Prove demand AND delivery. Get 10 customers who score 9–10 on a 1-question NPS ("Model 10 list"). This replaces vague "product-market fit". Don't do the 11 premature things (office, logos, etc.) — just make sales.
+• Level 2 — GROWTH FLYWHEEL: ONE growth engine to $10k/mo for 3 straight months ("One, 10, Three" rule). Map → Measure (scorecard) → find the Bottleneck → Optimize, in 90-day cycles. 3 projects per quarter max. "No traffic problem — it's an offer problem."
+• Level 3 — UPGRADE YOUR OPERATING SYSTEM: Cross the "scalable line" — install the Scalable OS (below) so the business runs without you.
+• Level 4 — DOUBLE YOUR TAKE-HOME: Profit, not growth ("growth eats profit"). 4 cash principles: (1) Pay Yourself First (living expenses + 15%), (2) Set Expense Ratios (Revenue − Profit = Expenses), (3) Emergency Fund (3–6 months), (4) Sweep the Cash (monthly).
+• Level 5 — ADVISORY BOARD: Mentors + peers (aim 4–7 peers per mentor) + strategics + influencers. Pay mentors ($5k–$20k/yr), reciprocate with peers. Solves "you don't know what you don't know."
+• Level 6 — EXPAND THROUGH ACQUISITION: Break the organic ceiling. Position as an investor, build a deal team, define criteria, find 5 targets, close + integrate.
+• Level 7 — HIT YOUR NUMBER: Achieve the goal → optionality. Plan the "Everest reward", the "second mountain", and your exit IN ADVANCE (post-goal depression is real). 5 exits: line → staff → org chart → board → ownership.
+
+KEY MODELS:
+• Scalable Impact Planner: starting point → 3-yr end game → codify your WHY (Me/Us/Them) → define the HOW (Focus Five).
+• 3-yr targets: "Double in Three" (26% CAGR) or "Top to Bottom". Valuation: SDE 2–3× → EBITDA 3.3–7.5× past ~$1M profit. Professionalizing the business raises the multiple by itself.
+• The 8 Obstacles to scale: Clarity, Demand, Strategy, Systems, People, Communications, Capital, Impact-alignment.
+
+THE SCALABLE OPERATING SYSTEM (Level 3) = Algorithms + Common Language + Desired Outputs:
+• ALGORITHMS: Value Engines (map Growth / Fulfillment / Innovation flows: triggering event → "then what happens?" → decision diamonds → ending event). Find POWER STAGES (the 2–3 critical tasks per engine) — document ONLY these as Playbooks via the 3 Ds (Define → Design → Deploy; document while doing, blind-follow test, field-test). Assign accountability with the High Output Team Canvas (CABs — 3–5 per person; "if everyone is responsible, no one is").
+• COMMON LANGUAGE: Scorecards (3 evergreen + 3 North Star + 3 per team, ~20 total, manual entry, weekly, colour-coded) + Meeting Rhythm (quarterly 2-day offsite → monthly review → weekly check-in).
+• DESIRED OUTPUTS: Clarity Compass (set LAST) — 3-yr target, Company Purpose (Contribution + Impact), 5–7 differentiated Core Values, Strategic Anchors. Install via Clarity Day + first quarterly sprint + all-hands + central dashboard.
+• #1 lesson: map value FIRST, document SECOND. Don't build SOP binders nobody uses.
+
+HOW TO COACH WITH THIS: Diagnose the owner's current LEVEL from their live BamiHost data (occupancy, collection rate, revenue, systems). Name the level, give the ONE next action for that level, and tie it to the specific tool above. Remember BamiHost itself IS a Scalable OS in software — its AI agents automate the power stages of a property business.
+"""
+
 MAX_HISTORY_MESSAGES = 20
 
 
@@ -1029,7 +1065,7 @@ async def get_coach_reply(
     # Use AsyncAnthropic to avoid blocking the event loop (sync client causes MissingGreenlet)
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-    system = SYSTEM_PROMPT + _build_coach_profile(user_profile)
+    system = SYSTEM_PROMPT + L7_CURRICULUM + _build_coach_profile(user_profile)
 
     if db and user_id and role:
         try:
