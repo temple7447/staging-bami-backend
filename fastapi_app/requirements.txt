@@ -70,3 +70,4 @@ uvloop==0.22.1
 watchfiles==1.2.0
 websockets==16.0
 wrapt==2.2.1
+alembic==1.18.5
