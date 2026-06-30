@@ -171,3 +171,6 @@ build/
 Dockerfile.prod
 docker-compose.override.yml__pycache__/
 *.pyc
+
+# Google OAuth client secret — never commit
+client_secret_*.apps.googleusercontent.com.json
