@@ -174,3 +174,8 @@ docker-compose.override.yml__pycache__/
 
 # Google OAuth client secret — never commit
 client_secret_*.apps.googleusercontent.com.json
+
+# Supervisor runtime artifacts
+logs/supervisord.pid
+logs/supervisord.log
+logs/supervisor.sock
