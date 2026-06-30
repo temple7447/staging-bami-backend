@@ -165,14 +165,14 @@ async def operations_overview(
 
     # Service requests — open ones involving this owner's estates
     from models.estate import Estate
-    estate_result = await db.execute(select(Estate.id).where(Estate.owner_id == current_user.id))
+    estate_result = await db.execute(select(Estate.id).where(Estate.owner == current_user.id))
     estate_ids = [r[0] for r in estate_result.all()]
 
     open_requests = 0
     in_progress_requests = 0
     if estate_ids:
         sr_result = await db.execute(
-            select(ServiceRequest).where(ServiceRequest.estate_id.in_(estate_ids))
+            select(ServiceRequest).where(ServiceRequest.estate.in_(estate_ids))
         )
         srs = sr_result.scalars().all()
         open_requests = sum(1 for s in srs if s.status == "pending")
@@ -183,7 +183,7 @@ async def operations_overview(
     if estate_ids:
         issue_result = await db.execute(
             select(Issue).where(
-                Issue.estate_id.in_(estate_ids),
+                Issue.estate.in_(estate_ids),
                 Issue.status.notin_(["resolved", "closed"]),
             )
         )

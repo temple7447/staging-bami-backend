@@ -215,6 +215,18 @@ async def telegram_webhook(request: Request):
             # Pass DB + user identity so AI can read live business data
             live_user_id = session.user_id if session else None
             live_role = session.role if session else None
+
+            # If not logged in via /admin or /tenant, auto-resolve the business
+            # account from the Telegram ID so the coach always has live data.
+            if not live_user_id:
+                linked = await db.execute(
+                    select(User).where(User.telegram_id == telegram_id, User.is_active == True)  # noqa: E712
+                )
+                linked_user = linked.scalar_one_or_none()
+                if linked_user:
+                    live_user_id = linked_user.id
+                    live_role = linked_user.role
+
             reply = await get_coach_reply(
                 user_profile, history, text,
                 db=db, user_id=live_user_id, role=live_role,

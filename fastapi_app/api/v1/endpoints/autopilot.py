@@ -69,6 +69,26 @@ def _action(owner_id: str, skill: str, action_type: str, title: str,
     )
 
 
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _owner_estate_ids(db: AsyncSession, user: User) -> list[str]:
+    """Estate IDs this user can act on. super_admin → all active; else owned.
+
+    Child records (units, tenants, issues, enquiries) link to an estate, not
+    directly to the owner, so we always scope queries through the estates.
+    """
+    uid = str(user.id)
+    if str(getattr(user, "role", "")) == "super_admin":
+        rows = (await db.execute(
+            select(Estate.id).where(Estate.is_active == True)  # noqa: E712
+        )).scalars().all()
+    else:
+        rows = (await db.execute(
+            select(Estate.id).where(Estate.owner == uid, Estate.is_active == True)  # noqa: E712
+        )).scalars().all()
+    return list(rows)
+
+
 # ─── Core: Generate Actions from Business State ───────────────────────────────
 
 async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction]:
@@ -79,11 +99,19 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
     actions: list[AutopilotAction] = []
     uid = str(user.id)
 
+    # All child records (units, tenants, issues, enquiries) link to an estate,
+    # not directly to the owner, so scope every query through the user's estates.
+    estate_ids = await _owner_estate_ids(db, user)
+
+    # No estates → nothing to scan, but still return a briefing at the end.
+    if not estate_ids:
+        estate_ids = ["__none__"]
+
     # --- 1. Vacant units → Marketer posts --------------------------
     vacant_q = (
         select(Unit, Estate)
-        .join(Estate, Unit.estate_id == Estate.id)
-        .where(Unit.owner_id == uid, Unit.is_occupied == False)
+        .join(Estate, Unit.estate == Estate.id)
+        .where(Unit.estate.in_(estate_ids), Unit.status == "vacant")
     )
     vacant_rows = (await db.execute(vacant_q)).all()
 
@@ -140,47 +168,50 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
 
     # --- 2. Overdue tenants → Finance reminders --------------------
     overdue_q = (
-        select(Tenant, Unit, Estate)
-        .join(Unit, Tenant.unit_id == Unit.id)
-        .join(Estate, Unit.estate_id == Estate.id)
+        select(Tenant, Estate)
+        .join(Estate, Tenant.estate == Estate.id)
         .where(
-            Tenant.owner_id == uid,
-            Tenant.is_active == True,
+            Tenant.estate.in_(estate_ids),
+            Tenant.is_active == True,  # noqa: E712
             (Tenant.rent_outstanding + Tenant.service_charge_outstanding) > 0,
         )
     )
     overdue_rows = (await db.execute(overdue_q)).all()
 
-    for tenant, unit, estate in overdue_rows:
+    for tenant, estate in overdue_rows:
         outstanding = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
+        unit_label = tenant.unit_label or "their unit"
         ctx = {
-            "name": tenant.name,
-            "unit": unit.label,
+            "name": tenant.tenant_name,
+            "unit": unit_label,
             "estate": estate.name,
             "outstanding": f"₦{outstanding:,.0f}",
         }
         recipients = []
-        if tenant.phone:
-            recipients.append({"name": tenant.name, "phone": tenant.phone, "email": tenant.email or ""})
+        if tenant.tenant_phone:
+            recipients.append({"name": tenant.tenant_name, "phone": tenant.tenant_phone, "email": tenant.tenant_email or ""})
 
         reminder_msg = await _ai(
             "You are a professional Nigerian property manager. Write a polite but firm WhatsApp/SMS "
             "payment reminder. Max 3 sentences. Address the tenant by name. Be professional, not aggressive.",
-            f"Tenant: {tenant.name}, Unit: {unit.label} at {estate.name}, "
+            f"Tenant: {tenant.tenant_name}, Unit: {unit_label} at {estate.name}, "
             f"Outstanding: ₦{outstanding:,.0f}. Write the reminder."
         )
         actions.append(_action(
             uid, "finance", "payment_reminder",
-            f"Payment reminder — {tenant.name} ({unit.label})",
-            f"{tenant.name} owes ₦{outstanding:,.0f}. Send a polite reminder now.",
+            f"Payment reminder — {tenant.tenant_name} ({unit_label})",
+            f"{tenant.tenant_name} owes ₦{outstanding:,.0f}. Send a polite reminder now.",
             reminder_msg, "telegram", "tenant_overdue", ctx,
             priority="high", recipients=recipients, auto_execute=False
         ))
 
     # --- 3. Pending enquiries → Sales follow-ups -------------------
+    # Enquiries link via estate; also include any tagged with owner_id directly.
     enquiry_q = select(Enquiry).where(
-        Enquiry.owner_id == uid,
-        Enquiry.status == "pending",
+        and_(
+            Enquiry.status == "pending",
+            (Enquiry.estate.in_(estate_ids)) | (Enquiry.owner_id == uid),
+        )
     )
     enquiries = (await db.execute(enquiry_q)).scalars().all()
 
@@ -211,8 +242,8 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
 
     # --- 4. Open issues → Operations vendor assignment -------------
     issue_q = select(Issue).where(
-        Issue.owner_id == uid,
-        Issue.status.in_(["open", "pending"]),
+        Issue.estate.in_(estate_ids),
+        Issue.status.in_(["open", "pending", "in_progress"]),
     )
     issues = (await db.execute(issue_q)).scalars().all()
 
@@ -543,13 +574,16 @@ async def get_email_prospects(
 ):
     """Return list of all enquiry prospects with emails — ready for campaign targeting."""
     from models.enquiry import Enquiry
-    from sqlalchemy import and_
 
+    estate_ids = await _owner_estate_ids(db, current_user) or ["__none__"]
     rows = (await db.execute(
         select(Enquiry).where(
-            Enquiry.owner_id == str(current_user.id),
-            Enquiry.email.isnot(None),
-            Enquiry.status != "closed",
+            and_(
+                (Enquiry.estate.in_(estate_ids)) | (Enquiry.owner_id == str(current_user.id)),
+                Enquiry.email.isnot(None),
+                Enquiry.email != "",
+                Enquiry.status != "closed",
+            )
         ).order_by(Enquiry.created_at.desc())
     )).scalars().all()
 
@@ -699,7 +733,8 @@ async def telegram_broadcast(
     from utils.telegram_service import send_to_tenant
     from models.tenant import Tenant as TenantModel
 
-    conds = [TenantModel.owner_id == str(current_user.id), TenantModel.is_active == True,
+    estate_ids = await _owner_estate_ids(db, current_user) or ["__none__"]
+    conds = [TenantModel.estate.in_(estate_ids), TenantModel.is_active == True,  # noqa: E712
              TenantModel.telegram_id.isnot(None)]
     if body.tenant_ids:
         conds.append(TenantModel.id.in_(body.tenant_ids))
@@ -740,10 +775,11 @@ async def send_payment_links(
     PAYSTACK_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
     uid = str(current_user.id)
 
+    estate_ids = await _owner_estate_ids(db, current_user) or ["__none__"]
     overdue = (await db.execute(
         select(TenantModel).where(
-            TenantModel.owner_id == uid,
-            TenantModel.is_active == True,
+            TenantModel.estate.in_(estate_ids),
+            TenantModel.is_active == True,  # noqa: E712
             TenantModel.rent_outstanding > 0,
             TenantModel.telegram_id.isnot(None),
         )

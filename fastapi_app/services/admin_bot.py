@@ -760,6 +760,11 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
             return "❌ This login is for management accounts only.\nSend /tenant to login as a tenant."
         await update_session(db, session, state="admin:logged_in", user_id=user.id,
                              role=user.role, temp_email=None)
+        # Remember this Telegram ↔ account link so the AI coach auto-recognises
+        # them in future /coach chats without needing to log in again.
+        if user.telegram_id != telegram_id:
+            user.telegram_id = telegram_id
+            await db.commit()
         estates = await get_my_estates(db, user)
         return "✅ *Login successful!*\n\n" + admin_menu(user, estates)
 

@@ -179,7 +179,7 @@ async def marketing_overview(
     # Enquiries linked to the owner (as proxy for lead pipeline)
     from models.estate import Estate
     estate_result = await db.execute(
-        select(Estate.id).where(Estate.owner_id == current_user.id)
+        select(Estate.id).where(Estate.owner == current_user.id)
     )
     estate_ids = [r[0] for r in estate_result.all()]
 
@@ -187,7 +187,7 @@ async def marketing_overview(
     enq_converted = 0
     enq_pending = 0
     if estate_ids:
-        enq_result = await db.execute(select(Enquiry).where(Enquiry.estate_id.in_(estate_ids)))
+        enq_result = await db.execute(select(Enquiry).where(Enquiry.estate.in_(estate_ids)))
         enqs = enq_result.scalars().all()
         enq_total = len(enqs)
         enq_converted = sum(1 for e in enqs if e.status == "converted")

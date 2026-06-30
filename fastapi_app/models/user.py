@@ -48,5 +48,9 @@ class User(Base):
     is_verified_pro: Mapped[bool] = mapped_column(Boolean, default=False)
     manager: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
+    # Telegram link — lets the AI coach auto-recognise this user on Telegram
+    # without re-logging in, so it always has their live business data.
+    telegram_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

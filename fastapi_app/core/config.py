@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     CLOUDINARY_API_KEY: str = ""
     CLOUDINARY_API_SECRET: str = ""
 
+    # Google Gemini — "Nano Banana" (gemini-2.5-flash-image) for logo/image generation
+    GEMINI_API_KEY: str = ""
+
     # Paystack
     PAYSTACK_SECRET_KEY: str = ""
     PAYSTACK_PUBLIC_KEY: str = ""
