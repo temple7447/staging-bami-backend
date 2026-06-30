@@ -340,6 +340,71 @@ async def company_scorecard(
             "as_of": now.strftime("%d %b %Y")}
 
 
+# ─── L3: Value Engine map (the OS "Algorithms" — your machine, visualised) ──────
+
+@router.get("/value-engines")
+async def value_engines(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The property business as two value engines (Growth + Fulfillment) with
+    live data at each stage and which AI agent automates each power stage."""
+    estate_ids = await owner_estate_ids(db, current_user)
+    ids = estate_ids or ["__none__"]
+    now = datetime.utcnow()
+    som = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    units = (await db.execute(select(Unit).where(Unit.estate.in_(ids)))).scalars().all()
+    vacant = len([u for u in units if u.status == "vacant"])
+    occupied = len([u for u in units if u.status == "occupied"])
+
+    enquiries = (await db.execute(
+        select(Enquiry).where(and_((Enquiry.estate.in_(ids)) | (Enquiry.owner_id == str(current_user.id))))
+    )).scalars().all()
+    pending_enq = len([e for e in enquiries if e.status == "pending"])
+    converted = len([e for e in enquiries if e.status in ("converted", "closed")])
+
+    tenants = (await db.execute(
+        select(Tenant).where(Tenant.estate.in_(ids), Tenant.is_active == True)  # noqa: E712
+    )).scalars().all()
+    overdue = len([t for t in tenants if (t.rent_outstanding or 0) + (t.service_charge_outstanding or 0) > 0])
+    promoters = len([t for t in tenants if t.nps_score is not None and t.nps_score >= 9])
+
+    from models.issue import Issue
+    open_issues = (await db.execute(
+        select(func.count()).select_from(Issue).where(
+            Issue.estate.in_(ids), Issue.status.in_(["open", "pending", "in_progress"]),
+        )
+    )).scalar() or 0
+
+    payments = await _confirmed_payments(db, estate_ids)
+    month_rev = sum(p.amount or 0 for p in payments if p.created_at and p.created_at >= som)
+
+    growth = {
+        "name": "Growth Engine",
+        "subtitle": "Acquire & convert tenants",
+        "stages": [
+            {"name": "Vacant units", "metric": vacant, "agent": "designer", "agent2": "marketer", "power": True},
+            {"name": "Enquiries (leads)", "metric": len(enquiries), "agent": "sales", "power": True},
+            {"name": "In follow-up", "metric": pending_enq, "agent": "sales", "power": False},
+            {"name": "Converted", "metric": converted, "agent": None, "power": False},
+            {"name": "Occupied units", "metric": occupied, "agent": None, "power": False, "terminus": True},
+        ],
+    }
+    fulfillment = {
+        "name": "Fulfillment Engine",
+        "subtitle": "Deliver the promise & keep tenants",
+        "stages": [
+            {"name": "Active tenants", "metric": len(tenants), "agent": None, "power": False},
+            {"name": "Rent overdue", "metric": overdue, "agent": "finance", "power": True},
+            {"name": "Collected (mo)", "metric": f"₦{month_rev:,.0f}", "agent": "finance", "power": False},
+            {"name": "Open issues", "metric": open_issues, "agent": "operations", "power": True},
+            {"name": "Promoters", "metric": promoters, "agent": None, "power": False, "terminus": True},
+        ],
+    }
+    return {"engines": [growth, fulfillment]}
+
+
 # ─── L4: Pay-yourself-first / finance plan ──────────────────────────────────────
 
 class FinancePlanBody(BaseModel):
