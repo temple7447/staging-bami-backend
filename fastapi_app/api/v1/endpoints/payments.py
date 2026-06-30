@@ -261,6 +261,9 @@ async def payment_callback(request: Request, db: AsyncSession = Depends(get_db))
                     wallet_account = WalletAccount(id=gen_uuid(), estate=payment.estate)
                 wallet_account.distribute_amount(payment.amount, payment.id, payment.payment_type)
                 await save(db, wallet_account)
+                # 🎯 Level 1 automation: ask for NPS after their (first) payment
+                from utils.nps import maybe_request_first_payment_nps
+                await maybe_request_first_payment_nps(db, tenant.id)
 
     elif event in ("transfer.success", "transfer.failed"):
         ref = data.get("reference")

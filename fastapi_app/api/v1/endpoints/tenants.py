@@ -371,6 +371,9 @@ async def pay_billing_items(
             tenant.service_charge_outstanding = 0
         tenant.updated_at = datetime.utcnow()
         await save(db, tenant)
+        # 🎯 Level 1 automation: ask for NPS after their (first) payment
+        from utils.nps import maybe_request_first_payment_nps
+        await maybe_request_first_payment_nps(db, tenant.id)
 
     return {"success": True, "message": "Payment processed successfully",
             "data": {"total_paid": total_amount, "items": items_to_process, "wallet_balance": wallet.balance}}
