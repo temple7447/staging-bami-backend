@@ -423,11 +423,11 @@ async def value_engines(
         "name": "Fulfillment Engine",
         "subtitle": "Deliver the promise & keep tenants",
         "stages": [
-            {"name": "Active tenants", "metric": len(tenants), "agent": None, "power": False},
-            {"name": "Rent overdue", "metric": overdue, "agent": "finance", "power": True},
+            {"name": "Active tenants", "metric": len(tenants), "agent": "compliance", "power": False},
+            {"name": "Rent overdue", "metric": overdue, "agent": "finance", "agent2": "collections", "power": True},
             {"name": "Collected (mo)", "metric": f"₦{month_rev:,.0f}", "agent": "finance", "power": False},
             {"name": "Open issues", "metric": open_issues, "agent": "operations", "power": True},
-            {"name": "Promoters", "metric": promoters, "agent": None, "power": False, "terminus": True},
+            {"name": "Promoters", "metric": promoters, "agent": "retention", "power": False, "terminus": True},
         ],
     }
     return {"engines": [growth, fulfillment]}
@@ -443,6 +443,10 @@ _AGENT_CAB = {
     "finance": "Collect rent & chase overdue",
     "operations": "Resolve maintenance issues (assign vendors)",
     "hr": "Flag when it's time to hire",
+    "retention": "Renew leases & save at-risk tenants",
+    "collections": "Escalate overdue rent (reminder → final notice)",
+    "analyst": "Report portfolio health weekly",
+    "compliance": "Keep tenancy paperwork legal & current",
 }
 
 
