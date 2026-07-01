@@ -29,5 +29,13 @@ class OwnerFinancePlan(Base):
     # Expense ratios: {"category": pct, ...} should sum to 100 of the non-profit remainder
     expense_ratios: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # ── Cash Sweep Waterfall (Level 4) — the 5 accounts + allocation ──
+    monthly_opex: Mapped[float] = mapped_column(Float, default=0.0)          # 1-month reserve target
+    operating_reserve_current: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_pct: Mapped[float] = mapped_column(Float, default=0.0)               # % of revenue set aside
+    tax_current: Mapped[float] = mapped_column(Float, default=0.0)
+    sweep_current: Mapped[float] = mapped_column(Float, default=0.0)
+    sinking_funds: Mapped[list] = mapped_column(JSON, default=list)          # [{name, target, current}]
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

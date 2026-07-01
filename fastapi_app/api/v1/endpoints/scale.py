@@ -577,6 +577,63 @@ class FinancePlanBody(BaseModel):
     emergency_fund_target: Optional[float] = None
     emergency_fund_current: Optional[float] = None
     expense_ratios: Optional[dict] = None
+    # Cash Sweep Waterfall
+    monthly_opex: Optional[float] = None
+    operating_reserve_current: Optional[float] = None
+    tax_pct: Optional[float] = None
+    tax_current: Optional[float] = None
+    sweep_current: Optional[float] = None
+    sinking_funds: Optional[list] = None
+
+
+@router.get("/cash-waterfall")
+async def cash_waterfall(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The Cash Sweep Waterfall — which stage the owner is at and where the next ₦
+    should go (Level 4 finance system: operating → tax → emergency → sweep → sinking)."""
+    plan = (await db.execute(
+        select(OwnerFinancePlan).where(OwnerFinancePlan.owner_id == str(current_user.id))
+    )).scalars().first()
+
+    opex = (plan.monthly_opex if plan else 0) or 0
+    op_reserve = (plan.operating_reserve_current if plan else 0) or 0
+    tax = (plan.tax_current if plan else 0) or 0
+    ef_target = (plan.emergency_fund_target if plan else 0) or (opex * 6)
+    ef_current = (plan.emergency_fund_current if plan else 0) or 0
+    sweep = (plan.sweep_current if plan else 0) or 0
+    sinking = (plan.sinking_funds if plan else []) or []
+
+    # Waterfall stages in priority order
+    stages = [
+        {"key": "operating", "label": "1 month operating reserve",
+         "current": op_reserve, "target": opex, "done": opex > 0 and op_reserve >= opex},
+        {"key": "tax", "label": "Tax account (set aside every ₦)",
+         "current": tax, "target": None, "done": (plan.tax_pct if plan else 0) > 0},
+        {"key": "emergency3", "label": "Emergency fund → 3 months",
+         "current": ef_current, "target": opex * 3, "done": opex > 0 and ef_current >= opex * 3},
+        {"key": "emergency6", "label": "Emergency fund → 6 months (50/50 with sweep)",
+         "current": ef_current, "target": opex * 6, "done": opex > 0 and ef_current >= opex * 6},
+        {"key": "sweep", "label": "Sweep account → acquisition / sinking funds / distributions",
+         "current": sweep, "target": None, "done": False},
+    ]
+    # Where the next ₦ goes = first not-done stage
+    next_stage = next((s for s in stages if not s["done"]), stages[-1])
+
+    return {
+        "has_plan": bool(plan),
+        "monthly_opex": opex,
+        "stages": stages,
+        "next_destination": next_stage["label"],
+        "sinking_funds": sinking,
+        "accounts": {
+            "operating": op_reserve, "tax": tax, "emergency": ef_current, "sweep": sweep,
+        },
+    }
+
+
+# ─── L4: Pay-yourself-first / finance plan ──────────────────────────────────────
 
 
 @router.get("/finance-plan")
@@ -601,6 +658,8 @@ async def get_finance_plan(
             "emergency_fund_current": 0, "expense_ratios": {},
             "avg_monthly_revenue": avg_monthly_rev,
             "recommended_salary": 0, "emergency_fund_pct": 0,
+            "monthly_opex": 0, "operating_reserve_current": 0, "tax_pct": 0,
+            "tax_current": 0, "sweep_current": 0, "sinking_funds": [],
         }
 
     recommended_salary = round(plan.living_expenses * 1.15) if plan.living_expenses else 0
@@ -618,6 +677,13 @@ async def get_finance_plan(
         "recommended_salary": recommended_salary,
         "salary_gap": round(recommended_salary - plan.target_monthly_salary),
         "emergency_fund_pct": min(100, ef_pct),
+        # Cash Sweep Waterfall raw fields (for editing)
+        "monthly_opex": plan.monthly_opex or 0,
+        "operating_reserve_current": plan.operating_reserve_current or 0,
+        "tax_pct": plan.tax_pct or 0,
+        "tax_current": plan.tax_current or 0,
+        "sweep_current": plan.sweep_current or 0,
+        "sinking_funds": plan.sinking_funds or [],
     }
 
 

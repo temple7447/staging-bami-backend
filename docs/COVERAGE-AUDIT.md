@@ -20,7 +20,7 @@ transcribed + summarised) against **what we've actually built**. Legend:
 | **L2** Growth Flywheel (Map→Measure→Bottleneck→Optimise) | Growth scorecard + Value Engines + Marketer/Designer agents | ✅ |
 | **L3** Upgrade OS (algorithms/language/outputs) | Value Engines + Company Scorecard + Team Canvas + Clarity Compass | ✅ |
 | **L4** Double Take-Home (pay yourself first) | Scale finance tab (salary+15%, profit %, emergency fund) | ✅ |
-| **L4** Cash Sweep Waterfall (tax/sinking/sweep accounts) | not modelled | 🔴 gap |
+| **L4** Cash Sweep Waterfall (tax/sinking/sweep accounts) | Scale finance tab — waterfall stages + "next ₦" | ✅ |
 | **L5** Advisory Board | tracked in Planner (BuildYourBoard) + Coach | 🟡 (plan only) |
 | **L6** Acquisition | tracked in Planner (ExpandThroughAcquisition) | 🟡 (plan only) |
 | **L7** Hit Your Number / exits | Planner EndGame + Coach | ✅ |
@@ -51,16 +51,18 @@ transcribed + summarised) against **what we've actually built**. Legend:
 ---
 
 ## Verdict
-The system covers the curriculum **broadly and deeply** — strategy (Level 7),
-the operating system, and the execution/automation layer are all live and
-connected. **Three genuine gaps** remain, in priority order:
+The system now covers the curriculum **comprehensively**. Both substantive gaps
+are closed:
 
-1. 🔴 **Business Playbooks** — the OS's core "Algorithms" documentation tool
-   (checklists for power stages, with an owner + 90-day review). *Building now.*
-2. 🔴 **Cash Sweep Waterfall** — the full L4 cash system (tax/emergency/sweep/sinking
-   accounts + allocation priority) beyond pay-yourself-first.
-3. 🟡 **Model 10 analysis** — pattern-finding across the 10 promoters (messaging,
-   location, shared problems), not just counting them.
+1. ✅ **Business Playbooks** — power-stage checklists with owner + 90-day review.
+   Completes the OS "Algorithms" trio (Value Engines → Power Stages → Team Canvas → Playbooks).
+2. ✅ **Cash Sweep Waterfall** — full L4 cash system (operating → tax → emergency →
+   sweep → sinking) with "where your next ₦ goes" guidance.
 
-Everything else is complete. Closing gap #1 finishes the Scalable OS
-"Algorithms" trio: **Value Engines → Power Stages → Team Canvas → Playbooks.**
+Only remaining item is minor/optional:
+- 🟡 **Model 10 analysis** — pattern-finding across the 10 promoters (messaging,
+  location, shared problems). We count promoters + capture NPS; the *analysis* view
+  is a small nice-to-have, not a missing capability.
+
+Every major course tool now has a live home in the app, the Coach teaches from the
+real curriculum and cites the owner's plan, and the 6 agents automate the power stages.
