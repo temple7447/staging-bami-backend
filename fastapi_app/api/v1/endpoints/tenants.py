@@ -405,6 +405,7 @@ async def get_tenant(
 ):
     tenant = await _get_tenant_or_404(db, tenant_id)
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     origin = tenant.entry_date or tenant.created_at
     rent_base = tenant.base_rent or tenant.rent_amount
     svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
@@ -446,6 +447,8 @@ async def get_tenant(
         "rent": current_rent, "service_charge": current_service,
         "caution_fee": final_caution, "legal_fee": final_legal,
         "lease_duration_months": lease_months, "next_due": renewal_start,
+        "estate_name": estate.name if estate else None,
+        "unit_label": tenant.unit_label or (unit.label if unit else None),
         "entry_date": tenant.entry_date, "status": tenant.status, "tenant_type": tenant.tenant_type,
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
