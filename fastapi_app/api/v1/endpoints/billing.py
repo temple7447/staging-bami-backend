@@ -222,6 +222,7 @@ async def get_billing_summary(
 
         now = datetime.utcnow()
         summaries, overdue_count, total_outstanding = [], 0, 0.0
+        _cfg_cache: dict = {}
 
         for t in tenants:
             origin = t.entry_date or t.created_at
@@ -229,9 +230,12 @@ async def get_billing_summary(
             due_in = _days_from_now(due)
             overdue = due_in is not None and due_in < 0
 
-            eff_rent = get_current_rent(t.rent_amount, origin, False)
+            if t.estate not in _cfg_cache:
+                _cfg_cache[t.estate] = estate_rent_config(await db.get(Estate, t.estate) if t.estate else None)
+            _r, _c, _s = _cfg_cache[t.estate]
+            eff_rent = get_current_rent(t.rent_amount, origin, False, _r, _c, _s)
             svc_base = t.service_charge_amount or 0
-            eff_svc  = get_current_rent(svc_base, origin, False) if svc_base else 0
+            eff_svc  = get_current_rent(svc_base, origin, False, _r, _c, _s) if svc_base else 0
             recurring_monthly = eff_rent + eff_svc
 
             bills = await find_all(db, BillingItem, BillingItem.tenant == t.id,

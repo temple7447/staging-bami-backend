@@ -18,7 +18,7 @@ from core.security import get_current_user, hash_password
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
-from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date
+from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
 from utils.email_service import send_welcome_email
 from models.base import gen_uuid
@@ -209,8 +209,11 @@ async def list_tenants(
             "Q4": {"Oct": [], "Nov": [], "Dec": []},
         }
         total_monthly = 0
+        _cfg_cache: dict = {}
         for t in all_tenants:
-            computed = process_tenant(t)
+            if t.estate not in _cfg_cache:
+                _cfg_cache[t.estate] = await estate_config_for(db, t.estate)
+            computed = process_tenant(t, estate_config=_cfg_cache[t.estate])
             due = computed.get("next_due_date")
             if not due:
                 continue
@@ -228,7 +231,11 @@ async def list_tenants(
     total = await count(db, Tenant, *conditions)
     skip  = (page - 1) * limit
     tenants = await find_all(db, Tenant, *conditions, order_by=Tenant.next_due_date.asc(), skip=skip, limit=limit)
-    items = [{**t.__dict__, **process_tenant(t)} for t in tenants]
+    _cfg_cache = {}
+    for t in tenants:
+        if t.estate not in _cfg_cache:
+            _cfg_cache[t.estate] = await estate_config_for(db, t.estate)
+    items = [{**t.__dict__, **process_tenant(t, estate_config=_cfg_cache.get(t.estate))} for t in tenants]
     return {"success": True, "data": items,
             "pagination": {"currentPage": page, "totalPages": -(-total // limit), "totalItems": total}}
 
@@ -240,7 +247,7 @@ async def get_my_tenant(db: AsyncSession = Depends(get_db), user: User = Depends
     tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant record not found for this user")
-    computed = process_tenant(tenant)
+    computed = process_tenant(tenant, estate_config=await estate_config_for(db, tenant.estate))
     return {"success": True, "data": {**{c.key: getattr(tenant, c.key) for c in tenant.__table__.columns}, **computed}}
 
 
@@ -259,8 +266,9 @@ async def get_my_billing_items(db: AsyncSession = Depends(get_db), user: User = 
     if tenant:
         unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
         origin = tenant.entry_date or tenant.created_at
-        dynamic_rent    = get_current_rent(tenant.rent_amount, origin, False)
-        dynamic_service = get_current_rent(tenant.service_charge_amount or 0, origin, False)
+        _r, _c, _s = await estate_config_for(db, tenant.estate)
+        dynamic_rent    = get_current_rent(tenant.rent_amount, origin, False, _r, _c, _s)
+        dynamic_service = get_current_rent(tenant.service_charge_amount or 0, origin, False, _r, _c, _s)
         if dynamic_rent > 0:
             recurring.insert(0, {"code": "rent", "label": "Rent", "amount": dynamic_rent,
                                   "due_date": tenant.next_due_date, "type": "recurring", "frequency": "monthly"})
@@ -319,16 +327,17 @@ async def pay_billing_items(
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
     origin = tenant.entry_date if tenant else datetime.utcnow()
+    _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
     items_to_process, total_amount = [], 0.0
     for item_id in body.item_ids:
         if item_id == "rent" and tenant and tenant.rent_amount > 0:
-            result = calculate_effective_rent(tenant.rent_amount, tenant.entry_date or datetime.utcnow(), body.duration_months, False, origin)
+            result = calculate_effective_rent(tenant.rent_amount, tenant.entry_date or datetime.utcnow(), body.duration_months, False, origin, _r, _c, _s)
             total_amount += result["total_amount"]
             items_to_process.append({"code": "rent", "amount": result["total_amount"], "duration": body.duration_months})
         elif item_id == "service_charge" and tenant:
             base = tenant.service_charge_amount or 0
             if base > 0:
-                result = calculate_effective_rent(base, origin, body.duration_months, False, origin)
+                result = calculate_effective_rent(base, origin, body.duration_months, False, origin, _r, _c, _s)
                 total_amount += result["total_amount"]
                 items_to_process.append({"code": "service_charge", "amount": result["total_amount"]})
         elif item_id == "outstanding_rent" and tenant and (tenant.rent_outstanding or 0) > 0:

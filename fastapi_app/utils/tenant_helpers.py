@@ -4,7 +4,15 @@ and processTenant helpers used across tenantController.js and dashboardControlle
 """
 from datetime import datetime, timezone, timedelta
 from math import floor
-from utils.rent_calculator import get_current_rent
+from utils.rent_calculator import get_current_rent, estate_rent_config
+
+
+async def estate_config_for(db, estate_id):
+    """Return (rate, cycle_years, increase_start) for an estate id — the per-estate
+    rent-increase policy. db.get is identity-map cached, so repeated calls are cheap."""
+    from models.estate import Estate
+    est = await db.get(Estate, estate_id) if estate_id else None
+    return estate_rent_config(est)
 
 
 def project_next_due_date(tenant) -> datetime | None:
@@ -52,7 +60,7 @@ def project_next_due_date(tenant) -> datetime | None:
     return projected
 
 
-def process_tenant(tenant, paid_fees: dict | None = None) -> dict:
+def process_tenant(tenant, paid_fees: dict | None = None, estate_config=None) -> dict:
     """
     Annotate a tenant dict/object with computed fields:
     current rent, days until due, status colour, etc.
@@ -64,8 +72,9 @@ def process_tenant(tenant, paid_fees: dict | None = None) -> dict:
     tid = str(getattr(tenant, "id", getattr(tenant, "_id", "")))
     origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", datetime.utcnow())
 
-    current_rent    = get_current_rent(getattr(tenant, "rent_amount", 0), origin, False)
-    current_service = get_current_rent(getattr(tenant, "service_charge_amount", 0), origin, False)
+    _rate, _cycle, _start = estate_config or (None, None, None)
+    current_rent    = get_current_rent(getattr(tenant, "rent_amount", 0), origin, False, _rate, _cycle, _start)
+    current_service = get_current_rent(getattr(tenant, "service_charge_amount", 0), origin, False, _rate, _cycle, _start)
     total_monthly   = current_rent + current_service
     total_outstanding = (getattr(tenant, "rent_outstanding", 0) or 0) + \
                         (getattr(tenant, "service_charge_outstanding", 0) or 0)

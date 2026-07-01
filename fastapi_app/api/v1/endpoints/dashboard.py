@@ -13,7 +13,7 @@ from models.billing_item import BillingItem
 from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, find_all, count, sum_col
-from utils.tenant_helpers import project_next_due_date
+from utils.tenant_helpers import project_next_due_date, estate_config_for
 from utils.rent_calculator import calculate_effective_rent, get_current_rent
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -119,10 +119,11 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
         renewal_start = projected_due
         billing_start = renewal_start.replace(year=renewal_start.year - 1)
-        y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin)
-        y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin)
-        y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin)
-        y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin)
+        _r, _c, _s = await estate_config_for(db, tenant.estate)
+        y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
+        y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _r, _c, _s)
+        y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _r, _c, _s)
+        y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _r, _c, _s)
         lease_months = max(0, (renewal_start.year - origin.year) * 12 + (renewal_start.month - origin.month))
         overview["yearly_payment"] = {
             "lease_duration_months": lease_months,
