@@ -484,6 +484,90 @@ async def team_canvas(
             "candidate_pipeline": pipeline, "candidate_total": sum(pipeline.values())}
 
 
+# ─── L3: Business Playbooks (the OS "Algorithms" documentation) ─────────────────
+
+class PlaybookBody(BaseModel):
+    title: str
+    engine: str = "growth"
+    stage: Optional[str] = None
+    playbook_owner: Optional[str] = None
+    steps: list = []
+    notes: Optional[str] = None
+
+
+def _serialize_playbook(p) -> dict:
+    updated = p.updated_at or p.created_at
+    review_overdue = (datetime.utcnow() - updated).days > 90 if updated else False
+    return {
+        "id": p.id, "title": p.title, "engine": p.engine, "stage": p.stage,
+        "playbook_owner": p.playbook_owner, "steps": p.steps or [], "notes": p.notes,
+        "updated_at": updated.isoformat() if updated else None,
+        "review_overdue": review_overdue,
+    }
+
+
+@router.get("/playbooks")
+async def list_playbooks(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from models.playbook import Playbook
+    rows = (await db.execute(
+        select(Playbook).where(Playbook.owner_id == str(current_user.id)).order_by(Playbook.engine)
+    )).scalars().all()
+    return {"playbooks": [_serialize_playbook(p) for p in rows]}
+
+
+@router.post("/playbooks", status_code=201)
+async def create_playbook(
+    body: PlaybookBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from models.playbook import Playbook
+    from models.base import gen_uuid
+    p = Playbook(id=gen_uuid(), owner_id=str(current_user.id), **body.model_dump())
+    db.add(p)
+    await db.commit()
+    return {"id": p.id}
+
+
+@router.put("/playbooks/{pid}")
+async def update_playbook(
+    pid: str,
+    body: PlaybookBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from models.playbook import Playbook
+    p = (await db.execute(
+        select(Playbook).where(Playbook.id == pid, Playbook.owner_id == str(current_user.id))
+    )).scalars().first()
+    if not p:
+        raise HTTPException(404, "Playbook not found")
+    for k, v in body.model_dump().items():
+        setattr(p, k, v)
+    p.updated_at = datetime.utcnow()   # editing counts as a review
+    await db.commit()
+    return {"success": True}
+
+
+@router.delete("/playbooks/{pid}")
+async def delete_playbook(
+    pid: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from models.playbook import Playbook
+    p = (await db.execute(
+        select(Playbook).where(Playbook.id == pid, Playbook.owner_id == str(current_user.id))
+    )).scalars().first()
+    if p:
+        await db.delete(p)
+        await db.commit()
+    return {"success": True}
+
+
 # ─── L4: Pay-yourself-first / finance plan ──────────────────────────────────────
 
 class FinancePlanBody(BaseModel):
