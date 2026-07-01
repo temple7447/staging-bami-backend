@@ -11,11 +11,12 @@ from models.tenant import Tenant
 from models.billing_item import BillingItem
 from models.payment import Payment
 from models.unit import Unit
+from models.estate import Estate
 from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save, count
 from utils.tenant_helpers import project_next_due_date
-from utils.rent_calculator import get_current_rent, calculate_effective_rent
+from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
 from models.base import gen_uuid
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
@@ -73,6 +74,8 @@ async def _get_paid_one_time_fees(db: AsyncSession, tenant_id: str) -> set:
 
 async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
     unit = await db.get(Unit, tenant.unit) if tenant.unit else None
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
     now  = datetime.utcnow()
 
     projected_due = project_next_due_date(tenant)
@@ -82,7 +85,7 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
 
     recurring = []
     if tenant.rent_amount > 0:
-        eff_rent = get_current_rent(tenant.rent_amount, origin, False)
+        eff_rent = get_current_rent(tenant.rent_amount, origin, False, _rate, _cycle, _start)
         recurring.append({"code": "rent", "label": "Rent",
                           "stored_amount": tenant.rent_amount, "effective_amount": eff_rent,
                           "is_increased": eff_rent > tenant.rent_amount,
@@ -91,7 +94,7 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
 
     svc_base = tenant.service_charge_amount or (unit.service_charge_monthly if unit else 0) or 0
     if svc_base > 0:
-        eff_svc = get_current_rent(svc_base, origin, False)
+        eff_svc = get_current_rent(svc_base, origin, False, _rate, _cycle, _start)
         recurring.append({"code": "service_charge", "label": "Service Charge",
                           "stored_amount": svc_base, "effective_amount": eff_svc,
                           "is_increased": eff_svc > svc_base,
@@ -101,12 +104,12 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
     one_time  = []
     paid_fees = await _get_paid_one_time_fees(db, tenant.id)
     if unit and (unit.caution_fee or 0) > 0:
-        eff = get_current_rent(unit.caution_fee, origin, False)
+        eff = get_current_rent(unit.caution_fee, origin, False, _rate, _cycle, _start)
         is_paid = "caution_fee" in paid_fees
         one_time.append({"code": "caution_fee", "label": "Caution Fee", "amount": eff,
                          "is_paid": is_paid, "status": "paid" if is_paid else "unpaid"})
     if unit and (unit.legal_fee or 0) > 0:
-        eff = get_current_rent(unit.legal_fee, origin, False)
+        eff = get_current_rent(unit.legal_fee, origin, False, _rate, _cycle, _start)
         is_paid = "legal_fee" in paid_fees
         one_time.append({"code": "legal_fee", "label": "Legal Fee", "amount": eff,
                          "is_paid": is_paid, "status": "paid" if is_paid else "unpaid"})
@@ -143,10 +146,10 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
         )
         if not has_completed:
             requires_initial = True
-            rent_r = calculate_effective_rent(tenant.rent_amount or 0, origin, 12, False, origin)
-            svc_r  = calculate_effective_rent(svc_base, origin, 12, False, origin) if svc_base else {"total_amount": 0}
-            c_amount = get_current_rent(unit.caution_fee if unit else 0, origin, False)
-            l_amount = get_current_rent(unit.legal_fee if unit else 0, origin, False)
+            rent_r = calculate_effective_rent(tenant.rent_amount or 0, origin, 12, False, origin, _rate, _cycle, _start)
+            svc_r  = calculate_effective_rent(svc_base, origin, 12, False, origin, _rate, _cycle, _start) if svc_base else {"total_amount": 0}
+            c_amount = get_current_rent(unit.caution_fee if unit else 0, origin, False, _rate, _cycle, _start)
+            l_amount = get_current_rent(unit.legal_fee if unit else 0, origin, False, _rate, _cycle, _start)
             initial_payment = {
                 "rent_12_months": rent_r["total_amount"],
                 "service_charge_12_months": svc_r["total_amount"],

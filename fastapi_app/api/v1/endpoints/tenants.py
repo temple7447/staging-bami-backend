@@ -19,7 +19,7 @@ from core.database import get_db
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date
-from utils.rent_calculator import get_current_rent, calculate_effective_rent
+from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
 from utils.email_service import send_welcome_email
 from models.base import gen_uuid
 
@@ -407,13 +407,14 @@ async def get_tenant(
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     origin = tenant.entry_date or tenant.created_at
+    _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
     rent_base = tenant.base_rent or tenant.rent_amount
     svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
     is_new    = tenant.tenant_type == "new"
-    current_rent    = get_current_rent(rent_base, origin, False)
-    current_service = get_current_rent(svc_base, origin, False)
-    current_caution = get_current_rent(unit.caution_fee if unit else 0, origin, False) if is_new else 0
-    current_legal   = get_current_rent(unit.legal_fee if unit else 0, origin, False) if is_new else 0
+    current_rent    = get_current_rent(rent_base, origin, False, _rate, _cycle, _start)
+    current_service = get_current_rent(svc_base, origin, False, _rate, _cycle, _start)
+    current_caution = get_current_rent(unit.caution_fee if unit else 0, origin, False, _rate, _cycle, _start) if is_new else 0
+    current_legal   = get_current_rent(unit.legal_fee if unit else 0, origin, False, _rate, _cycle, _start) if is_new else 0
 
     payments_by_type = {}
     total_paid = 0.0
@@ -436,10 +437,10 @@ async def get_tenant(
         tenant.next_due_date = corrected
     renewal_start = project_next_due_date(tenant) or tenant.next_due_date or datetime.utcnow()
     billing_start = renewal_start.replace(year=renewal_start.year - 1)
-    y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin)
-    y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin)
-    y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin)
-    y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin)
+    y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _rate, _cycle, _start)
+    y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _rate, _cycle, _start)
+    y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
+    y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
     ref_date = tenant.entry_date or tenant.created_at
     lease_months = max(0, (renewal_start.year - ref_date.year) * 12 + (renewal_start.month - ref_date.month)) if ref_date else 0
 

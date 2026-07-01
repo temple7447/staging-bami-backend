@@ -59,6 +59,9 @@ def _e(e: Estate) -> dict:
         "address": e.address, "total_units": e.total_units,
         "owner": e.owner, "managers": e.managers or [], "images": e.images or [],
         "is_active": e.is_active, "created_at": e.created_at, "updated_at": e.updated_at,
+        "rent_increase_percent": getattr(e, "rent_increase_percent", 26.0),
+        "rent_increase_cycle_years": getattr(e, "rent_increase_cycle_years", 2),
+        "rent_increase_start": getattr(e, "rent_increase_start", None),
     }
 
 

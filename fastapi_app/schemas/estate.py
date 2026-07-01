@@ -1,6 +1,7 @@
 from pydantic import BaseModel, field_validator, ConfigDict
 from pydantic.alias_generators import to_camel
 from typing import Optional
+from datetime import datetime
 
 
 class EstateCreate(BaseModel):
@@ -25,3 +26,7 @@ class EstateUpdate(BaseModel):
     name:        Optional[str] = None
     description: Optional[str] = None
     total_units: Optional[int] = None
+    # Per-estate rent-increase policy
+    rent_increase_percent:     Optional[float] = None
+    rent_increase_cycle_years: Optional[int] = None
+    rent_increase_start:       Optional[datetime] = None
