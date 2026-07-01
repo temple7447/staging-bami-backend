@@ -19,6 +19,7 @@ from typing import Optional
 from models.user import User
 from models.tenant import Tenant
 from models.unit import Unit
+from models.estate import Estate
 from models.enquiry import Enquiry
 from models.payment import Payment
 from models.owner_finance_plan import OwnerFinancePlan
@@ -159,6 +160,32 @@ async def get_nps(
     detractors = [t for t in scored if t.nps_score <= 6]
     nps = round((len(promoters) - len(detractors)) / len(scored) * 100) if scored else 0
 
+    # ── Model 10 analysis: find patterns across your best tenants (promoters) ──
+    est_rows = (await db.execute(select(Estate).where(Estate.id.in_(ids)))).scalars().all()
+    est_name = {e.id: e.name for e in est_rows}
+    from collections import Counter
+    by_estate = Counter(est_name.get(t.estate, "Unknown") for t in promoters)
+    by_category = Counter((t.unit_label or "").split()[0] if t.unit_label else "Unit" for t in promoters)
+    avg_rent = round(sum((t.rent_amount or 0) for t in promoters) / len(promoters)) if promoters else 0
+    top_estate = by_estate.most_common(1)[0] if by_estate else None
+    insights = []
+    if top_estate and top_estate[1] > 1:
+        insights.append(f"Most of your best tenants ({top_estate[1]}) are at {top_estate[0]} — double down there.")
+    if avg_rent:
+        insights.append(f"Your promoters pay ~₦{avg_rent:,.0f}/mo on average — target similar tenants.")
+    if len(promoters) < LEVEL1_TARGET:
+        insights.append(f"You have {len(promoters)}/{LEVEL1_TARGET} promoters — keep collecting NPS to complete Level 1.")
+
+    model_10 = {
+        "count": len(promoters),
+        "members": [{"name": t.tenant_name, "estate": est_name.get(t.estate, "—"),
+                     "unit": t.unit_label, "score": t.nps_score} for t in promoters],
+        "by_estate": dict(by_estate),
+        "by_category": dict(by_category),
+        "avg_rent": avg_rent,
+        "insights": insights,
+    }
+
     return {
         "promoters": len(promoters),
         "passives": len(passives),
@@ -173,6 +200,7 @@ async def get_nps(
              "score": t.nps_score, "connected": bool(t.telegram_id)}
             for t in tenants
         ],
+        "model_10": model_10,
     }
 
 
