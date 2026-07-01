@@ -17,9 +17,16 @@ def _camelize(obj):
     return obj
 
 
+# These feature areas use snake_case end-to-end (frontend reads snake_case),
+# so they opt out of the global camelCase conversion.
+_SNAKE_PATHS = ("/api/scale", "/api/growth", "/api/personal-finance")
+
+
 async def camelize_response_middleware(request: Request, call_next):
     response = await call_next(request)
     if "application/json" not in response.headers.get("content-type", ""):
+        return response
+    if request.url.path.startswith(_SNAKE_PATHS):
         return response
     body = b""
     async for chunk in response.body_iterator:
