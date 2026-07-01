@@ -6,7 +6,30 @@ import ssl
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = settings.DATABASE_URL
+def _normalize_db_url(raw: str) -> str:
+    """Accept raw Postgres/Neon connection strings and make them async-driver ready.
+
+    - `postgres://` / `postgresql://`  ->  `postgresql+asyncpg://`
+    - strips `sslmode` / `channel_binding` query params (asyncpg rejects them;
+      SSL is supplied via connect_args below instead).
+    """
+    url = raw.strip()
+    if url.startswith("postgres://"):
+        url = "postgresql+asyncpg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+
+    if "+asyncpg" in url and "?" in url:
+        base, query = url.split("?", 1)
+        kept = [
+            kv for kv in query.split("&")
+            if kv and kv.split("=", 1)[0].lower() not in ("sslmode", "channel_binding")
+        ]
+        url = base + ("?" + "&".join(kept) if kept else "")
+    return url
+
+
+DATABASE_URL = _normalize_db_url(settings.DATABASE_URL)
 
 # Build engine kwargs based on the driver
 _is_postgres = DATABASE_URL.startswith("postgresql")
