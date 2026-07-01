@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import cloudinary, cloudinary.uploader
 
 from models.estate import Estate
@@ -331,6 +331,9 @@ async def update_estate(
         raise HTTPException(status_code=404, detail="Estate not found")
     _check_estate_access(estate, user)
     for k, v in body.model_dump(exclude_none=True).items():
+        # DB timestamps are tz-naive; coerce any tz-aware value (e.g. an ISO "...Z")
+        if isinstance(v, datetime) and v.tzinfo is not None:
+            v = v.astimezone(timezone.utc).replace(tzinfo=None)
         setattr(estate, k, v)
     if body.name:
         estate.set_slug()
