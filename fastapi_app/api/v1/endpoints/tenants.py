@@ -16,6 +16,7 @@ from models.billing_item import BillingItem
 from schemas.tenant import TenantCreate, TenantUpdate, HistoryCreate, TransactionCreate, PayBillingItemsRequest
 from core.security import get_current_user, hash_password
 from core.database import get_db
+from core.authz import require_tenant_access, require_estate_access, accessible_estate_ids
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
@@ -29,10 +30,14 @@ router = APIRouter(prefix="/tenants", tags=["Tenants"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
 
 
-async def _get_tenant_or_404(db: AsyncSession, tenant_id: str) -> Tenant:
+async def _get_tenant_or_404(db: AsyncSession, tenant_id: str, user: User = None, write: bool = False) -> Tenant:
     t = await find_one(db, Tenant, Tenant.id == tenant_id, Tenant.is_active == True)
     if not t:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    if user is not None:
+        # Cross-business isolation: only staff of the tenant's estate (or,
+        # for reads, the tenant themself) may touch this record.
+        await require_tenant_access(db, user, t, write=write)
     return t
 
 
@@ -74,6 +79,7 @@ async def create_tenant(
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
+    await require_estate_access(db, user, estate_id)
     unit = await find_one(db, Unit, Unit.id == body.unit_id, Unit.estate == estate_id, Unit.is_active == True)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found in this estate")
@@ -187,7 +193,14 @@ async def list_tenants(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Cross-business isolation: never list tenants outside the caller's estates.
+    allowed = await accessible_estate_ids(db, user)
     conditions = [Tenant.is_active == True]
+    if allowed is not None:
+        if not allowed:
+            return {"success": True, "data": [],
+                    "pagination": {"currentPage": page, "totalPages": 0, "totalItems": 0}}
+        conditions.append(Tenant.estate.in_(allowed))
     if estate_id:
         conditions.append(Tenant.estate == estate_id)
     if search:
@@ -417,7 +430,7 @@ async def get_tenant(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user)
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     origin = tenant.entry_date or tenant.created_at
@@ -503,7 +516,7 @@ async def update_tenant(
     tenant_id: str, body: TenantUpdate,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
     if body.unit_label is not None: tenant.unit_label = body.unit_label
     new_name = (body.tenant_name or "").strip() or " ".join(filter(None, [body.first_name, body.other_names, body.surname])).strip()
     if new_name: tenant.tenant_name = new_name
@@ -561,7 +574,7 @@ async def delete_tenant(
 ):
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
     if tenant.user:
         u = await db.get(User, tenant.user)
         if u:
@@ -588,7 +601,7 @@ async def delete_tenant(
 
 @router.get("/{tenant_id}/history")
 async def list_history(tenant_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user)
     return {"success": True, "data": list(reversed(tenant.history or []))}
 
 
@@ -597,7 +610,7 @@ async def add_history(
     tenant_id: str, body: HistoryCreate,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant  = await _get_tenant_or_404(db, tenant_id)
+    tenant  = await _get_tenant_or_404(db, tenant_id, user, write=True)
     history = tenant.history or []
     entry   = {"event": body.event, "note": body.note, "meta": body.meta,
                 "created_by": user.id, "created_at": utcnow().isoformat()}
@@ -613,7 +626,7 @@ async def list_billing_items(
     tenant_id: str,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user)
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
     items  = []
     if tenant.rent_amount > 0:
@@ -636,7 +649,7 @@ async def list_transactions(
     tenant_id: str, page: int = 1, limit: int = 20,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user)
     total  = await count(db, Transaction, Transaction.user == (tenant.user or tenant.id))
     skip   = (page - 1) * limit
     items  = await find_all(db, Transaction, Transaction.user == (tenant.user or tenant.id),
@@ -650,7 +663,7 @@ async def add_transaction(
     tenant_id: str, body: TransactionCreate,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
     tx = Transaction(
         id=gen_uuid(), user=tenant.user or tenant.id, estate=tenant.estate,
         amount=body.amount, type=body.type, method=body.method or "manual",
@@ -677,11 +690,8 @@ async def upload_tenant_avatar(
     tenant_id: str, file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    tenant = await _get_tenant_or_404(db, tenant_id)
-    is_admin = user.role in ADMIN_ROLES
-    is_owner = tenant.user and tenant.user == user.id
-    if not is_admin and not is_owner:
-        raise HTTPException(status_code=403, detail="Not allowed to update this profile image")
+    # read-mode access: estate staff or the tenant themself may update the photo
+    tenant = await _get_tenant_or_404(db, tenant_id, user)
     if tenant.profile_image_public_id:
         try:
             cloudinary.uploader.destroy(tenant.profile_image_public_id)
@@ -716,10 +726,10 @@ async def download_tenant_statement(
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
 
-    tenant = await _get_tenant_or_404(db, tenant_id)
+    tenant = await _get_tenant_or_404(db, tenant_id, current_user)
 
     # Payment history
-    conds = [Payment.tenant_id == tenant_id]
+    conds = [Payment.tenant == tenant_id]
     if month and year:
         from sqlalchemy import extract
         conds += [

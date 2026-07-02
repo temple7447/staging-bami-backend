@@ -14,6 +14,7 @@ from models.transaction import Transaction
 from models.wallet_account import WalletAccount
 from core.security import get_current_user
 from core.database import get_db
+from core.authz import accessible_estate_ids, require_tenant_access
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
@@ -32,13 +33,34 @@ class PaymentCreate(BaseModel):
     reference: Optional[str] = None
 
 
+async def _require_payment_access(db, user, payment, write: bool = False):
+    """Cross-business isolation: estate staff always pass; the paying tenant
+    passes for reads. 404 so payment ids can't be probed across businesses."""
+    tenant = await find_one(db, Tenant, Tenant.id == payment.tenant) if payment.tenant else None
+    if not write and tenant and tenant.user and tenant.user == user.id:
+        return
+    estate_id = payment.estate or (tenant.estate if tenant else None)
+    allowed = await accessible_estate_ids(db, user)
+    if allowed is None:
+        return
+    if not estate_id or estate_id not in allowed:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+
 @router.post("", status_code=201)
 async def create_payment(
     body: PaymentCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    payment = Payment(id=gen_uuid(), **body.model_dump(), payment_status="pending", created_by=user.id)
+    tenant = await find_one(db, Tenant, Tenant.id == body.tenant, Tenant.is_active == True)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    # Estate staff or the tenant themself may record a payment for this tenant.
+    await require_tenant_access(db, user, tenant)
+    data = body.model_dump()
+    data["estate"] = tenant.estate  # never trust a caller-supplied estate id
+    payment = Payment(id=gen_uuid(), **data, payment_status="pending", created_by=user.id)
     await save(db, payment)
     return {"success": True, "data": _p(payment)}
 
@@ -57,9 +79,16 @@ async def list_payments(
     # Tenants only see their own payments
     if user.role == "tenant":
         tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
-        if tenant:
-            conditions.append(Payment.tenant == tenant.id)
+        if not tenant:
+            return {"success": True, "total": 0, "count": 0, "page": page, "total_pages": 0, "data": []}
+        conditions.append(Payment.tenant == tenant.id)
     else:
+        # Cross-business isolation: staff only see their own estates' payments
+        allowed = await accessible_estate_ids(db, user)
+        if allowed is not None:
+            if not allowed:
+                return {"success": True, "total": 0, "count": 0, "page": page, "total_pages": 0, "data": []}
+            conditions.append(Payment.estate.in_(allowed))
         if tenant_id:
             conditions.append(Payment.tenant == tenant_id)
         if estate_id:
@@ -135,6 +164,7 @@ async def get_payment(pid: str, db: AsyncSession = Depends(get_db), user: User =
     payment = await find_one(db, Payment, Payment.id == pid)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    await _require_payment_access(db, user, payment)
     return {"success": True, "data": _p(payment)}
 
 
@@ -150,6 +180,7 @@ async def update_status(
     payment = await find_one(db, Payment, Payment.id == pid)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    await _require_payment_access(db, user, payment, write=True)
     payment.payment_status = body.get("status", payment.payment_status)
     payment.updated_at = utcnow()
     await save(db, payment)
@@ -162,6 +193,7 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
     payment = await find_one(db, Payment, Payment.id == pid)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    await _require_payment_access(db, user, payment)
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
     receipt_data = {
         "payment_id": payment.id, "reference": payment.reference,
@@ -181,6 +213,7 @@ async def send_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User 
     payment = await find_one(db, Payment, Payment.id == pid)
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
+    await _require_payment_access(db, user, payment, write=True)
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
     await send_payment_confirmation(
         to_email=tenant.tenant_email if tenant else "",
@@ -199,6 +232,7 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
     tenant = await find_one(db, Tenant, Tenant.id == tid)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    await require_tenant_access(db, user, tenant, write=True)
 
     due = str(tenant.next_due_date.date()) if tenant.next_due_date else "soon"
     channels = []
