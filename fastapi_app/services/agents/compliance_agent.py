@@ -15,6 +15,7 @@ from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
 from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="compliance",
@@ -32,7 +33,7 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
     if not estate_ids:
         return []
 
-    now = datetime.utcnow()
+    now = utcnow()
     tenants = (await db.execute(
         select(Tenant, Estate).join(Estate, Tenant.estate == Estate.id).where(
             Tenant.estate.in_(estate_ids),

@@ -13,6 +13,7 @@ from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
 from utils.event_hooks import fire_event
 import asyncio
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/issues", tags=["Issues"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -99,9 +100,9 @@ async def update_issue(
             setattr(issue, k, v)
     if "stage" in body:
         tl = list(issue.timeline or [])
-        tl.append({"stage": body["stage"], "by": user.id, "at": datetime.utcnow().isoformat()})
+        tl.append({"stage": body["stage"], "by": user.id, "at": utcnow().isoformat()})
         issue.timeline = tl
-    issue.updated_at = datetime.utcnow()
+    issue.updated_at = utcnow()
     await save(db, issue)
     return {"success": True, "data": _i(issue)}
 
@@ -114,7 +115,7 @@ async def delete_issue(issue_id: str, db: AsyncSession = Depends(get_db), user: 
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
     issue.is_active = False
-    issue.updated_at = datetime.utcnow()
+    issue.updated_at = utcnow()
     await save(db, issue)
     return {"success": True, "message": "Issue deleted"}
 

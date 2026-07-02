@@ -15,6 +15,7 @@ from core.database import get_db
 from core.db_helpers import find_one, find_all, count, sum_col
 from utils.tenant_helpers import project_next_due_date, estate_config_for
 from utils.rent_calculator import calculate_effective_rent, get_current_rent
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -45,7 +46,7 @@ async def get_overview(
             "role": role,
             "user": {"id": user.id, "name": user.name, "email": user.email,
                      "role": user.role, "profile_image_url": user.profile_image_url},
-            "timestamp": datetime.utcnow(),
+            "timestamp": utcnow(),
             "data": data,
         }
     }
@@ -89,7 +90,7 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
     bills = await find_all(db, BillingItem, BillingItem.user == user_id,
                            BillingItem.is_active == True, BillingItem.is_paid == False)
     overview["billing"]["total_pending"] = sum(b.amount for b in bills)
-    now = datetime.utcnow()
+    now = utcnow()
     for b in bills:
         entry = {"id": b.id, "label": b.label, "amount": b.amount}
         if b.due_date and b.due_date < now:
@@ -161,14 +162,14 @@ async def _business_owner_overview(db: AsyncSession, user_id: str) -> dict:
     total_tenants  = await count(db, Tenant, Tenant.estate.in_(estate_ids), Tenant.is_active == True, Tenant.status == "occupied")
 
     from datetime import timedelta
-    thirty_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_ago = utcnow() - timedelta(days=30)
     monthly_revenue = await sum_col(db, Payment, Payment.amount,
                                     Payment.estate.in_(estate_ids), Payment.payment_status == "completed",
                                     Payment.created_at >= thirty_ago)
 
     rent_out = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.estate.in_(estate_ids), Tenant.is_active == True)
     svc_out  = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.estate.in_(estate_ids), Tenant.is_active == True)
-    now = datetime.utcnow()
+    now = utcnow()
     overdue_tenants = await count(db, Tenant, Tenant.estate.in_(estate_ids), Tenant.is_active == True,
                                   Tenant.status == "occupied", Tenant.next_due_date < now)
 
@@ -217,7 +218,7 @@ async def _manager_overview(db: AsyncSession, user_id: str) -> dict:
             "skills": {},
         }
 
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
 
     # Units
@@ -332,7 +333,7 @@ async def _super_admin_overview(db: AsyncSession) -> dict:
     total_revenue  = await sum_col(db, Payment, Payment.amount, Payment.payment_status == "completed")
     rent_out       = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.is_active == True)
     svc_out        = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.is_active == True)
-    now = datetime.utcnow()
+    now = utcnow()
     overdue_tenants = await count(db, Tenant, Tenant.is_active == True, Tenant.next_due_date < now)
 
     return {
@@ -365,7 +366,7 @@ async def get_health_score(
     from sqlalchemy import func, extract
 
     uid = str(current_user.id)
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_days_ago = now - timedelta(days=30)
 
     # ── Gather metrics ────────────────────────────────────────────────────────

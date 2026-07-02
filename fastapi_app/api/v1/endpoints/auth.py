@@ -15,6 +15,7 @@ from core.database import get_db
 from core.db_helpers import find_one, save
 from utils.email_service import send_welcome_email, send_password_reset
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -67,7 +68,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account has been deactivated")
 
-    user.last_login = datetime.utcnow()
+    user.last_login = utcnow()
     await save(db, user)
 
     token = create_access_token(user.id, user.role)
@@ -89,7 +90,7 @@ async def update_details(
     for key, val in body.items():
         if key in allowed:
             setattr(current_user, key, val)
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = utcnow()
     await save(db, current_user)
     return {"success": True, "user": _user_dict(current_user)}
 
@@ -103,7 +104,7 @@ async def update_password(
     if not verify_password(body.current_password, current_user.password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     current_user.password = hash_password(body.new_password)
-    current_user.updated_at = datetime.utcnow()
+    current_user.updated_at = utcnow()
     await save(db, current_user)
     return {"success": True, "message": "Password updated successfully"}
 
@@ -117,7 +118,7 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
     otp = str(random.randint(100000, 999999))
     user.password_reset_token = otp
     from datetime import timedelta
-    user.password_reset_expire = datetime.utcnow() + timedelta(hours=1)
+    user.password_reset_expire = utcnow() + timedelta(hours=1)
     await save(db, user)
 
     await send_password_reset(user.email, user.name or "User", otp)
@@ -130,13 +131,13 @@ async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(
     user = await find_one(db, User, User.password_reset_token == body.token)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
-    if user.password_reset_expire and user.password_reset_expire < datetime.utcnow():
+    if user.password_reset_expire and user.password_reset_expire < utcnow():
         raise HTTPException(status_code=400, detail="Reset token has expired")
 
     user.password = hash_password(body.new_password)
     user.password_reset_token = None
     user.password_reset_expire = None
-    user.updated_at = datetime.utcnow()
+    user.updated_at = utcnow()
     await save(db, user)
     return {"success": True, "message": "Password has been reset successfully"}
 

@@ -2,6 +2,7 @@ from sqlalchemy import String, JSON, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class PersonalFinance(Base):
@@ -19,5 +20,5 @@ class PersonalFinance(Base):
     budget: Mapped[dict] = mapped_column(JSON, default=dict)       # {monthlyIncome, categories:[...]}
     portfolio: Mapped[dict] = mapped_column(JSON, default=dict)    # {assets:[...], ...}
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

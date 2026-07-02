@@ -16,6 +16,7 @@ from models.personal_finance import PersonalFinance
 from models.base import gen_uuid
 from core.security import get_current_user
 from core.database import get_db
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/personal-finance", tags=["Personal Finance"])
@@ -56,6 +57,6 @@ async def save_personal_finance(
         db.add(row)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(row, k, v)
-    row.updated_at = datetime.utcnow()
+    row.updated_at = utcnow()
     await db.commit()
     return {"success": True}

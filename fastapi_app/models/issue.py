@@ -2,6 +2,7 @@ from sqlalchemy import String, Boolean, DateTime, JSON, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class Issue(Base):
@@ -22,5 +23,5 @@ class Issue(Base):
     media: Mapped[list] = mapped_column(JSON, default=list)
     timeline: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -2,6 +2,7 @@ from sqlalchemy import String, JSON, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class Playbook(Base):
@@ -21,5 +22,5 @@ class Playbook(Base):
     steps: Mapped[list] = mapped_column(JSON, default=list)   # ordered list of step strings
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # last reviewed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)  # last reviewed

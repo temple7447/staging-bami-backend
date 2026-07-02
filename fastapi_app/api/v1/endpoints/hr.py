@@ -10,6 +10,7 @@ from models.candidate import Candidate
 from core.security import get_current_user
 from core.database import get_db
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/hr", tags=["HR"])
 
@@ -143,7 +144,7 @@ async def update_candidate(
         raise HTTPException(404, "Candidate not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(c, k, v)
-    c.updated_at = datetime.utcnow()
+    c.updated_at = utcnow()
     await db.commit()
     return {"message": "Candidate updated"}
 
@@ -184,7 +185,7 @@ async def hr_pipeline(
     hired = [c for c in candidates if c.stage == "hired"]
     upcoming_interviews = [
         c for c in candidates
-        if c.stage == "interview" and c.interview_date and c.interview_date >= datetime.utcnow()
+        if c.stage == "interview" and c.interview_date and c.interview_date >= utcnow()
     ]
 
     return {
@@ -220,6 +221,6 @@ async def hr_overview(
         "hired_this_quarter": sum(
             1 for c in candidates
             if c.stage == "hired" and c.start_date and
-            c.start_date >= datetime.utcnow().replace(month=((datetime.utcnow().month - 1) // 3) * 3 + 1, day=1)
+            c.start_date >= utcnow().replace(month=((utcnow().month - 1) // 3) * 3 + 1, day=1)
         ),
     }

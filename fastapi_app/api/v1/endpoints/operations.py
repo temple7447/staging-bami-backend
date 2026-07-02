@@ -12,6 +12,7 @@ from models.issue import Issue
 from core.security import get_current_user
 from core.database import get_db
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/operations", tags=["Operations"])
 
@@ -127,7 +128,7 @@ async def update_vendor(
         raise HTTPException(404, "Vendor not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(vendor, k, v)
-    vendor.updated_at = datetime.utcnow()
+    vendor.updated_at = utcnow()
     await db.commit()
     return {"message": "Vendor updated"}
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
 from typing import Any
+from utils.time_utils import utcnow
 
 
 class TenantTelegramSession(Base):
@@ -24,5 +25,5 @@ class TenantTelegramSession(Base):
     temp_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

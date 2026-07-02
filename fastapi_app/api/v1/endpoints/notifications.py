@@ -9,6 +9,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
@@ -39,7 +40,7 @@ async def get_notification_count(
 
 @router.put("/read-all")
 async def mark_all_read(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    now = datetime.utcnow()
+    now = utcnow()
     await db.execute(
         sa_update(Notification)
         .where(Notification.user == user.id, Notification.is_read == False)
@@ -55,7 +56,7 @@ async def mark_read(nid: str, db: AsyncSession = Depends(get_db), user: User = D
     if not n:
         raise HTTPException(status_code=404, detail="Notification not found")
     n.is_read = True
-    n.read_at = datetime.utcnow()
+    n.read_at = utcnow()
     await save(db, n)
     return {"success": True, "data": _n(n)}
 

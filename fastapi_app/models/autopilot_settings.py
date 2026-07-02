@@ -2,6 +2,7 @@ from sqlalchemy import String, Boolean, JSON, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class AutopilotSettings(Base):
@@ -24,5 +25,5 @@ class AutopilotSettings(Base):
     notify_high_priority: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_all: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

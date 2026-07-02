@@ -22,6 +22,7 @@ from utils.tenant_helpers import parse_flexible_date, generate_temp_password, pr
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
 from utils.email_service import send_welcome_email
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
@@ -48,7 +49,7 @@ async def _reconcile_next_due_date(db: AsyncSession, tenant: Tenant) -> datetime
     for p in payments:
         meta = ((p.paystack_response or {}).get("data", {}).get("metadata", {}))
         duration = meta.get("duration_months", 12)
-        base = p.created_at or datetime.utcnow()
+        base = p.created_at or utcnow()
         candidate = base.replace(day=tenant.entry_date.day if tenant.entry_date else base.day)
         for _ in range(duration):
             m = candidate.month + 1 if candidate.month < 12 else 1
@@ -97,7 +98,7 @@ async def create_tenant(
 
     parsed_entry = parse_flexible_date(body.entry_date)
     parsed_next  = parse_flexible_date(body.next_due_date)
-    today = datetime.utcnow()
+    today = utcnow()
 
     if parsed_next:
         effective_next = parsed_next
@@ -326,11 +327,11 @@ async def pay_billing_items(
     wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
-    origin = tenant.entry_date if tenant else datetime.utcnow()
+    origin = tenant.entry_date if tenant else utcnow()
     _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
     # Price the period actually being paid for (the upcoming term), not the
     # tenant's first year — otherwise escalations never reach this path.
-    period_start = (project_next_due_date(tenant) or tenant.next_due_date or datetime.utcnow()) if tenant else datetime.utcnow()
+    period_start = (project_next_due_date(tenant) or tenant.next_due_date or utcnow()) if tenant else utcnow()
     items_to_process, total_amount = [], 0.0
     for item_id in body.item_ids:
         if item_id == "rent" and tenant and (tenant.base_rent or tenant.rent_amount or 0) > 0:
@@ -359,7 +360,7 @@ async def pay_billing_items(
 
     wallet.balance    -= total_amount
     wallet.total_spent += total_amount
-    wallet.updated_at  = datetime.utcnow()
+    wallet.updated_at  = utcnow()
     await save(db, wallet)
 
     payment = Payment(
@@ -371,7 +372,7 @@ async def pay_billing_items(
 
     if tenant:
         if any(i["code"] == "rent" for i in items_to_process):
-            base = tenant.next_due_date or tenant.entry_date or datetime.utcnow()
+            base = tenant.next_due_date or tenant.entry_date or utcnow()
             new_due = base
             for _ in range(body.duration_months):
                 m = (new_due.month % 12) + 1
@@ -382,7 +383,7 @@ async def pay_billing_items(
             tenant.rent_outstanding = 0
         if any(i["code"] == "outstanding_service_charge" for i in items_to_process):
             tenant.service_charge_outstanding = 0
-        tenant.updated_at = datetime.utcnow()
+        tenant.updated_at = utcnow()
         await save(db, tenant)
         # 🎯 Level 1 automation: ask for NPS after their (first) payment
         from utils.nps import maybe_request_first_payment_nps
@@ -401,7 +402,7 @@ async def upload_my_avatar(file: UploadFile = File(...), db: AsyncSession = Depe
     result = cloudinary.uploader.upload(data, folder="bamihost/avatars", resource_type="image")
     tenant.profile_image_url       = result["secure_url"]
     tenant.profile_image_public_id = result["public_id"]
-    tenant.updated_at              = datetime.utcnow()
+    tenant.updated_at              = utcnow()
     await save(db, tenant)
     return {"success": True, "data": {"url": tenant.profile_image_url}}
 
@@ -448,7 +449,7 @@ async def get_tenant(
     corrected = await _reconcile_next_due_date(db, tenant)
     if corrected:
         tenant.next_due_date = corrected
-    renewal_start = project_next_due_date(tenant) or tenant.next_due_date or datetime.utcnow()
+    renewal_start = project_next_due_date(tenant) or tenant.next_due_date or utcnow()
     billing_start = renewal_start.replace(year=renewal_start.year - 1)
     y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _rate, _cycle, _start)
     y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _rate, _cycle, _start)
@@ -544,10 +545,10 @@ async def update_tenant(
     if history_meta:
         history = tenant.history or []
         history.append({"event": "note", "note": "Tenant information updated",
-                        "meta": history_meta, "created_by": user.id, "created_at": datetime.utcnow().isoformat()})
+                        "meta": history_meta, "created_by": user.id, "created_at": utcnow().isoformat()})
         tenant.history = history
     tenant.updated_by = user.id
-    tenant.updated_at = datetime.utcnow()
+    tenant.updated_at = utcnow()
     await save(db, tenant)
     return {"success": True, "message": "Tenant updated successfully",
             "data": {"id": tenant.id, "tenant_name": tenant.tenant_name}}
@@ -578,7 +579,7 @@ async def delete_tenant(
     tenant.is_active = False
     tenant.status = "vacant"
     tenant.updated_by = user.id
-    tenant.updated_at = datetime.utcnow()
+    tenant.updated_at = utcnow()
     await save(db, tenant)
     return {"success": True, "message": "Tenant deleted successfully"}
 
@@ -599,10 +600,10 @@ async def add_history(
     tenant  = await _get_tenant_or_404(db, tenant_id)
     history = tenant.history or []
     entry   = {"event": body.event, "note": body.note, "meta": body.meta,
-                "created_by": user.id, "created_at": datetime.utcnow().isoformat()}
+                "created_by": user.id, "created_at": utcnow().isoformat()}
     history.append(entry)
     tenant.history    = history
-    tenant.updated_at = datetime.utcnow()
+    tenant.updated_at = utcnow()
     await save(db, tenant)
     return {"success": True, "message": "History added", "data": entry}
 
@@ -659,14 +660,14 @@ async def add_transaction(
     await save(db, tx)
     if body.type in ("rent", "service_charge") and body.status == "paid":
         months = body.duration_months or (12 if tenant.tenant_type == "new" else 6)
-        base   = tenant.next_due_date or tenant.entry_date or datetime.utcnow()
+        base   = tenant.next_due_date or tenant.entry_date or utcnow()
         new_due = base
         for _ in range(months):
             m = (new_due.month % 12) + 1
             y = new_due.year + (1 if new_due.month == 12 else 0)
             new_due = new_due.replace(year=y, month=m)
         tenant.next_due_date = new_due
-        tenant.updated_at    = datetime.utcnow()
+        tenant.updated_at    = utcnow()
         await save(db, tenant)
     return {"success": True, "message": "Transaction recorded", "data": {"id": tx.id}}
 
@@ -691,7 +692,7 @@ async def upload_tenant_avatar(
     tenant.profile_image_url       = result["secure_url"]
     tenant.profile_image_public_id = result["public_id"]
     tenant.updated_by              = user.id
-    tenant.updated_at              = datetime.utcnow()
+    tenant.updated_at              = utcnow()
     await save(db, tenant)
     return {"success": True, "data": {"url": tenant.profile_image_url}}
 
@@ -755,7 +756,7 @@ async def download_tenant_statement(
         ["Phone:", tenant.tenant_phone or ""],
         ["Unit:", tenant.unit or ""],
         ["Period:", period_label],
-        ["Statement Date:", datetime.utcnow().strftime("%d %b %Y")],
+        ["Statement Date:", utcnow().strftime("%d %b %Y")],
     ]
     meta_tbl = Table(meta, colWidths=[5*cm, 10*cm])
     meta_tbl.setStyle(TableStyle([

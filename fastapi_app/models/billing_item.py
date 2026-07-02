@@ -1,7 +1,8 @@
 from sqlalchemy import String, Boolean, DateTime, Float, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, gen_uuid
+from models.base import Base, Money, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class BillingItem(Base):
@@ -13,7 +14,7 @@ class BillingItem(Base):
     estate: Mapped[str | None] = mapped_column(String(36), nullable=True)
     label: Mapped[str] = mapped_column(String(255), default="")
     item_type: Mapped[str] = mapped_column(String(100), default="other")
-    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    amount: Mapped[float] = mapped_column(Money, default=0.0)
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_recurring: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -23,5 +24,5 @@ class BillingItem(Base):
     frequency: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

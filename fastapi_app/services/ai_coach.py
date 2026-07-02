@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 
 from core.config import settings
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -377,7 +378,7 @@ async def fetch_business_context(db: AsyncSession, user_id: str, role: str) -> d
     from models.meter_reading import MeterReading
     from models.transaction import Transaction
 
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
     ctx: dict = {"role": role, "fetched_at": now.strftime("%Y-%m-%d %H:%M UTC")}
 

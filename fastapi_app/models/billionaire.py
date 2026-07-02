@@ -11,6 +11,7 @@ from sqlalchemy import String, Boolean, DateTime, Float, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class SignalMission(Base):
@@ -26,8 +27,8 @@ class SignalMission(Base):
     mission_date: Mapped[str] = mapped_column(String(10), index=True)          # "YYYY-MM-DD"
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class TimeBlock(Base):
@@ -43,7 +44,7 @@ class TimeBlock(Base):
     block_type: Mapped[str] = mapped_column(String(20), default="neutral")     # signal|noise|reminder|neutral
     note: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class KingsAuditItem(Base):
@@ -60,7 +61,7 @@ class KingsAuditItem(Base):
     bucket: Mapped[str] = mapped_column(String(10))                            # 'low' | 'high'
     text: Mapped[str] = mapped_column(String(300))
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class TimeValueProfile(Base):
@@ -79,4 +80,4 @@ class TimeValueProfile(Base):
     automate: Mapped[list | None] = mapped_column(JSON, default=list)
     delete_list: Mapped[list | None] = mapped_column(JSON, default=list)
 
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

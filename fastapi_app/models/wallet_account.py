@@ -1,7 +1,8 @@
 from sqlalchemy import String, Boolean, DateTime, JSON, Float
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, gen_uuid
+from models.base import Base, Money, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class WalletAccount(Base):
@@ -11,25 +12,25 @@ class WalletAccount(Base):
     estate: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     currency: Mapped[str] = mapped_column(String(10), default="NGN")
 
-    growth_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    growth_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    growth_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    growth_engine_marketing_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    growth_engine_operations_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    growth_engine_savings_balance: Mapped[float] = mapped_column(Money, default=0.0)
 
-    fulfillment_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    fulfillment_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    fulfillment_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    fulfillment_engine_marketing_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    fulfillment_engine_operations_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    fulfillment_engine_savings_balance: Mapped[float] = mapped_column(Money, default=0.0)
 
-    innovation_engine_marketing_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    innovation_engine_operations_balance: Mapped[float] = mapped_column(Float, default=0.0)
-    innovation_engine_savings_balance: Mapped[float] = mapped_column(Float, default=0.0)
+    innovation_engine_marketing_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    innovation_engine_operations_balance: Mapped[float] = mapped_column(Money, default=0.0)
+    innovation_engine_savings_balance: Mapped[float] = mapped_column(Money, default=0.0)
 
-    total_received: Mapped[float] = mapped_column(Float, default=0.0)
-    total_disbursed: Mapped[float] = mapped_column(Float, default=0.0)
+    total_received: Mapped[float] = mapped_column(Money, default=0.0)
+    total_disbursed: Mapped[float] = mapped_column(Money, default=0.0)
     distribution_log: Mapped[list] = mapped_column(JSON, default=list)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     @property
     def total_balance(self) -> float:
@@ -69,7 +70,7 @@ class WalletAccount(Base):
         self.innovation_engine_savings_balance     += i * 0.20
 
         self.total_received += amount
-        self.updated_at = datetime.utcnow()
+        self.updated_at = utcnow()
 
         breakdown = {
             "growthEngine":      {"marketing": g*0.50, "operations": g*0.30, "savings": g*0.20, "total": g},
@@ -78,6 +79,6 @@ class WalletAccount(Base):
             "total": amount,
         }
         log = self.distribution_log or []
-        log.append({"payment_id": str(payment_id), "payment_type": payment_type, "amount": amount, "breakdown": breakdown, "at": datetime.utcnow().isoformat()})
+        log.append({"payment_id": str(payment_id), "payment_type": payment_type, "amount": amount, "breakdown": breakdown, "at": utcnow().isoformat()})
         self.distribution_log = log
         return breakdown

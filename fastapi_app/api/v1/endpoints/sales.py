@@ -10,6 +10,7 @@ from models.deal import Deal
 from core.security import get_current_user
 from core.database import get_db
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/sales", tags=["Sales"])
 
@@ -142,8 +143,8 @@ async def update_deal(
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(deal, k, v)
     if body.stage in ("won", "lost") and not deal.closed_at:
-        deal.closed_at = datetime.utcnow()
-    deal.updated_at = datetime.utcnow()
+        deal.closed_at = utcnow()
+    deal.updated_at = utcnow()
     await db.commit()
     return {"message": "Deal updated"}
 

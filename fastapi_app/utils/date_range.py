@@ -1,6 +1,7 @@
 """Shared date-range helper — mirrors the period-filter logic in estateController.js."""
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+from utils.time_utils import utcnow
 
 
 def resolve_date_range(
@@ -10,7 +11,7 @@ def resolve_date_range(
     start_date: Optional[str] = None,
     end_date:   Optional[str] = None,
 ) -> Tuple[datetime, datetime]:
-    now = datetime.utcnow()
+    now = utcnow()
 
     if year or month:
         target_year  = year or now.year

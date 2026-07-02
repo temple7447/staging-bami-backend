@@ -26,6 +26,7 @@ from models.owner_finance_plan import OwnerFinancePlan
 from core.security import get_current_user
 from core.database import get_db
 from services.agents.base import owner_estate_ids
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/scale", tags=["Scale / Level 7"])
@@ -48,7 +49,7 @@ async def _confirmed_payments(db: AsyncSession, estate_ids: list[str]) -> list[P
 
 
 def _monthly_revenue(payments: list[Payment], months: int = 6) -> list[dict]:
-    now = datetime.utcnow()
+    now = utcnow()
     buckets: dict[str, float] = {}
     for m in range(months):
         d = (now.replace(day=1) - timedelta(days=30 * m))
@@ -228,7 +229,7 @@ async def request_nps(
     for t in tenants:
         res = await send_to_tenant(db, t.id, msg)
         if res.get("success"):
-            t.nps_asked_at = datetime.utcnow()
+            t.nps_asked_at = utcnow()
             # mark the tenant's bot session to capture the next numeric reply
             sent += 1
     await db.commit()
@@ -245,7 +246,7 @@ async def growth_scorecard(
 ):
     estate_ids = await owner_estate_ids(db, current_user)
     ids = estate_ids or ["__none__"]
-    now = datetime.utcnow()
+    now = utcnow()
     d30 = now - timedelta(days=30)
 
     enquiries = (await db.execute(
@@ -308,7 +309,7 @@ async def company_scorecard(
     + per-agent (team) metrics, auto-computed from real business data."""
     estate_ids = await owner_estate_ids(db, current_user)
     ids = estate_ids or ["__none__"]
-    now = datetime.utcnow()
+    now = utcnow()
     som = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     d30 = now - timedelta(days=30)
 
@@ -379,7 +380,7 @@ async def value_engines(
     live data at each stage and which AI agent automates each power stage."""
     estate_ids = await owner_estate_ids(db, current_user)
     ids = estate_ids or ["__none__"]
-    now = datetime.utcnow()
+    now = utcnow()
     som = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     units = (await db.execute(select(Unit).where(Unit.estate.in_(ids)))).scalars().all()
@@ -463,7 +464,7 @@ async def team_canvas(
     from models.candidate import Candidate
 
     uid = str(current_user.id)
-    now = datetime.utcnow()
+    now = utcnow()
     d30 = now - timedelta(days=30)
     estate_ids = await owner_estate_ids(db, current_user)
 
@@ -529,7 +530,7 @@ class PlaybookBody(BaseModel):
 
 def _serialize_playbook(p) -> dict:
     updated = p.updated_at or p.created_at
-    review_overdue = (datetime.utcnow() - updated).days > 90 if updated else False
+    review_overdue = (utcnow() - updated).days > 90 if updated else False
     return {
         "id": p.id, "title": p.title, "engine": p.engine, "stage": p.stage,
         "playbook_owner": p.playbook_owner, "steps": p.steps or [], "notes": p.notes,
@@ -579,7 +580,7 @@ async def update_playbook(
         raise HTTPException(404, "Playbook not found")
     for k, v in body.model_dump().items():
         setattr(p, k, v)
-    p.updated_at = datetime.utcnow()   # editing counts as a review
+    p.updated_at = utcnow()   # editing counts as a review
     await db.commit()
     return {"success": True}
 
@@ -734,6 +735,6 @@ async def update_finance_plan(
         db.add(plan)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(plan, k, v)
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = utcnow()
     await db.commit()
     return {"success": True}

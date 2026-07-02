@@ -15,6 +15,7 @@ from models.estate import Estate
 from models.tenant import Tenant
 from core.security import get_current_user
 from core.database import get_db
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/finance", tags=["Finance"])
 
@@ -24,7 +25,7 @@ async def finance_overview(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    now = datetime.utcnow()
+    now = utcnow()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     start_of_year = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -114,7 +115,7 @@ async def cashflow(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    now = datetime.utcnow()
+    now = utcnow()
 
     pay_result = await db.execute(
         select(Payment).where(
@@ -195,7 +196,7 @@ async def get_forecast(
     from core.config import settings
 
     uid = str(current_user.id)
-    now = datetime.utcnow()
+    now = utcnow()
 
     # Gather current data
     tenants_q = await db.execute(

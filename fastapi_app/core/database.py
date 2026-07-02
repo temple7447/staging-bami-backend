@@ -35,9 +35,10 @@ DATABASE_URL = _normalize_db_url(settings.DATABASE_URL)
 _is_postgres = DATABASE_URL.startswith("postgresql")
 
 if _is_postgres:
-    _ssl_ctx = ssl.create_default_context()
-    _ssl_ctx.check_hostname = False
-    _ssl_ctx.verify_mode = ssl.CERT_NONE
+    # Verified TLS: check the server cert and hostname. certifi supplies the
+    # CA bundle because the interpreter may lack a wired-up system store.
+    import certifi
+    _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     engine = create_async_engine(
         DATABASE_URL,
         echo=False,

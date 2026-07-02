@@ -18,6 +18,7 @@ from core.db_helpers import find_one, find_all, save, count
 from utils.tenant_helpers import project_next_due_date
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
 
@@ -47,7 +48,7 @@ class BillingItemUpdate(BaseModel):
 def _days_from_now(dt: datetime | None) -> int | None:
     if not dt:
         return None
-    return int((dt - datetime.utcnow()).days)
+    return int((dt - utcnow()).days)
 
 
 async def _get_paid_one_time_fees(db: AsyncSession, tenant_id: str) -> set:
@@ -76,7 +77,7 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
     unit = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
-    now  = datetime.utcnow()
+    now  = utcnow()
 
     projected_due = project_next_due_date(tenant)
     due_in   = _days_from_now(projected_due)
@@ -220,7 +221,7 @@ async def get_billing_summary(
         tenants = await find_all(db, Tenant, *conditions,
                                  order_by=Tenant.tenant_name.asc(), skip=skip, limit=limit)
 
-        now = datetime.utcnow()
+        now = utcnow()
         summaries, overdue_count, total_outstanding = [], 0, 0.0
         _cfg_cache: dict = {}
 
@@ -333,7 +334,7 @@ async def update_billing_item(
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(item, k, v)
     item.updated_by = user.id
-    item.updated_at = datetime.utcnow()
+    item.updated_at = utcnow()
     await save(db, item)
     return {"success": True, "message": "Billing item updated"}
 
@@ -352,6 +353,6 @@ async def delete_billing_item(
         raise HTTPException(status_code=400, detail="Cannot delete a paid billing item")
     item.is_active = False
     item.updated_by = user.id
-    item.updated_at = datetime.utcnow()
+    item.updated_at = utcnow()
     await save(db, item)
     return {"success": True, "message": "Billing item deleted"}

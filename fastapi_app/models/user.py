@@ -2,6 +2,7 @@ from sqlalchemy import String, Boolean, DateTime, JSON, Float, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class User(Base):
@@ -52,5 +53,5 @@ class User(Base):
     # without re-logging in, so it always has their live business data.
     telegram_id: Mapped[str | None] = mapped_column(String(50), index=True, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

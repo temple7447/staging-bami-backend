@@ -11,6 +11,7 @@ from sqlalchemy import select
 from models.autopilot_action import AutopilotAction
 from models.user import User
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def _make_action(owner_id: str, skill: str, action_type: str, title: str,
         priority=priority,
         recipients=recipients or [],
         auto_execute=False,
-        created_at=datetime.utcnow(),
+        created_at=utcnow(),
     )
 
 

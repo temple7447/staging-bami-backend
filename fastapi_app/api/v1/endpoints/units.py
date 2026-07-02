@@ -15,6 +15,7 @@ from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from core.config import settings
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/units", tags=["Units"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -106,7 +107,7 @@ async def update_unit(
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(unit, k, v)
     unit.updated_by = user.id
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "data": _u(unit)}
 
@@ -127,7 +128,7 @@ async def delete_unit(
         raise HTTPException(status_code=400, detail="Cannot delete unit with active tenant")
     unit.is_active = False
     unit.updated_by = user.id
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     estate = await find_one(db, Estate, Estate.id == unit.estate)
     if estate:
@@ -160,6 +161,6 @@ async def upload_unit_image(
     images = list(unit.images or [])
     images.append(img)
     unit.images = images
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "data": img}

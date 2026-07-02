@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ async def maybe_request_first_payment_nps(db: AsyncSession, tenant_id: str) -> N
             return
         res = await send_to_tenant(db, tenant.id, NPS_MESSAGE)
         if res.get("success"):
-            tenant.nps_asked_at = datetime.utcnow()
+            tenant.nps_asked_at = utcnow()
             await db.commit()
             logger.info("[AUTO_NPS] survey sent to tenant %s", tenant_id)
     except Exception as e:

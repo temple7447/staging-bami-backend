@@ -2,6 +2,7 @@ from sqlalchemy import String, Integer, Float, DateTime, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class CoachUser(Base):
@@ -33,8 +34,8 @@ class CoachUser(Base):
     has_growth_flywheel: Mapped[bool | None] = mapped_column(String(5), nullable=True)
     has_operating_system: Mapped[bool | None] = mapped_column(String(5), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class CoachMessage(Base):
@@ -46,4 +47,4 @@ class CoachMessage(Base):
     web_user_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     role: Mapped[str] = mapped_column(String(10))   # "user" | "assistant"
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

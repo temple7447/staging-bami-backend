@@ -1,7 +1,8 @@
 from sqlalchemy import String, Boolean, DateTime, JSON, Float, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, gen_uuid
+from models.base import Base, Money, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class Unit(Base):
@@ -10,10 +11,10 @@ class Unit(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     estate: Mapped[str] = mapped_column(String(36), index=True)
     label: Mapped[str] = mapped_column(String(255))
-    monthly_price: Mapped[float] = mapped_column(Float, default=0.0)
-    service_charge_monthly: Mapped[float] = mapped_column(Float, default=0.0)
-    caution_fee: Mapped[float] = mapped_column(Float, default=0.0)
-    legal_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    monthly_price: Mapped[float] = mapped_column(Money, default=0.0)
+    service_charge_monthly: Mapped[float] = mapped_column(Money, default=0.0)
+    caution_fee: Mapped[float] = mapped_column(Money, default=0.0)
+    legal_fee: Mapped[float] = mapped_column(Money, default=0.0)
     meter_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str] = mapped_column(String(50), default="Apartment")
@@ -35,5 +36,5 @@ class Unit(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

@@ -14,6 +14,7 @@ from models.service_request import ServiceRequest
 from models.wallet import Wallet
 from models.tenant_telegram import TenantTelegramSession
 from core.security import verify_password
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ async def get_or_create_session(db: AsyncSession, telegram_id: str) -> TenantTel
 async def update_session(db: AsyncSession, session: TenantTelegramSession, **fields) -> None:
     for k, v in fields.items():
         setattr(session, k, v)
-    session.updated_at = datetime.utcnow()
+    session.updated_at = utcnow()
     await db.commit()
 
 
@@ -191,7 +192,7 @@ def billing_text(bills: list[BillingItem]) -> str:
     total = sum(b.amount for b in bills)
     lines = [f"🧾 *Pending Bills* — Total: ₦{total:,.0f}\n"]
     for b in bills:
-        overdue = b.due_date and b.due_date < datetime.utcnow()
+        overdue = b.due_date and b.due_date < utcnow()
         flag = "🔴" if overdue else "🟡"
         due = b.due_date.strftime("%d %b") if b.due_date else "No due date"
         lines.append(f"{flag} {b.label} — ₦{b.amount:,.0f} (due {due})")

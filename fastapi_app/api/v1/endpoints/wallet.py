@@ -21,6 +21,7 @@ from core.database import get_db
 from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/wallet", tags=["Wallet"])
 ADMIN_ROLES = {"admin", "super_admin", "super_manager", "business_owner"}
@@ -90,7 +91,7 @@ async def add_funds(
     wallet = await _get_or_create_wallet(db, target_user.id)
     wallet.balance += body.amount
     wallet.total_earnings += body.amount
-    wallet.updated_at = datetime.utcnow()
+    wallet.updated_at = utcnow()
     await save(db, wallet)
     await _record_transaction(db, target_user.id, wallet.id, body.amount, "credit",
                               description=getattr(body, "description", None) or "Wallet top-up",
@@ -119,7 +120,7 @@ async def wallet_transaction(
     if tx_type == "deposit":
         wallet.balance += amount
         wallet.total_earnings += amount
-        wallet.updated_at = datetime.utcnow()
+        wallet.updated_at = utcnow()
         await save(db, wallet)
         await _record_transaction(db, user.id, wallet.id, amount, "deposit",
                                   method="bank_transfer", description=desc or "Deposit",
@@ -131,7 +132,7 @@ async def wallet_transaction(
             raise HTTPException(status_code=400, detail="Insufficient balance")
         wallet.balance -= amount
         wallet.total_spent += amount
-        wallet.updated_at = datetime.utcnow()
+        wallet.updated_at = utcnow()
         await save(db, wallet)
         await _record_transaction(db, user.id, wallet.id, amount, "withdrawal",
                                   method="bank_transfer", description=desc or "Withdrawal",
@@ -156,7 +157,7 @@ async def wallet_transaction(
         # Debit sender
         wallet.balance -= amount
         wallet.total_spent += amount
-        wallet.updated_at = datetime.utcnow()
+        wallet.updated_at = utcnow()
         await save(db, wallet)
         await _record_transaction(db, user.id, wallet.id, amount, "transfer",
                                   method="internal", description=desc or f"Transfer to {recipient.email}",
@@ -165,7 +166,7 @@ async def wallet_transaction(
         r_wallet = await _get_or_create_wallet(db, recipient.id)
         r_wallet.balance += amount
         r_wallet.total_earnings += amount
-        r_wallet.updated_at = datetime.utcnow()
+        r_wallet.updated_at = utcnow()
         await save(db, r_wallet)
         await _record_transaction(db, recipient.id, r_wallet.id, amount, "deposit",
                                   method="internal", description=desc or f"Transfer from {user.email}",
@@ -189,7 +190,7 @@ async def deduct_funds(
         raise HTTPException(status_code=400, detail="Insufficient balance")
     wallet.balance -= body.amount
     wallet.total_spent += body.amount
-    wallet.updated_at = datetime.utcnow()
+    wallet.updated_at = utcnow()
     await save(db, wallet)
     await _record_transaction(db, user.id, wallet.id, body.amount, "debit",
                               description=getattr(body, "description", "Deduction"), created_by=user.id)
@@ -207,7 +208,7 @@ async def transfer_funds(
         raise HTTPException(status_code=400, detail="Insufficient balance")
     wallet.balance -= body.amount
     wallet.total_spent += body.amount
-    wallet.updated_at = datetime.utcnow()
+    wallet.updated_at = utcnow()
     await save(db, wallet)
     await _record_transaction(db, user.id, wallet.id, body.amount, "transfer",
                               description=getattr(body, "description", "Transfer"), created_by=user.id)
@@ -310,7 +311,7 @@ async def admin_credit(
     wallet = await _get_or_create_wallet(db, target.id)
     wallet.balance += body.amount
     wallet.total_earnings += body.amount
-    wallet.updated_at = datetime.utcnow()
+    wallet.updated_at = utcnow()
     await save(db, wallet)
     tx = await _record_transaction(db, target.id, wallet.id, body.amount, "admin_credit",
                                    description=body.reason or "Admin credit", created_by=user.id)

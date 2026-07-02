@@ -13,11 +13,13 @@ import os
 import asyncio
 import logging
 from datetime import datetime
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
 _scheduler = None
 _loop = None  # main event loop, captured at startup
+_lock_fd = None  # singleton lock file handle, held for process lifetime
 
 
 async def _check_rent_reminders():
@@ -28,7 +30,7 @@ async def _check_rent_reminders():
         from utils.email_service import send_rent_reminder
         from utils.telegram_service import send_to_tenant
 
-        now = datetime.utcnow()
+        now = utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
 
@@ -84,7 +86,7 @@ async def _check_rent_increases():
         from core.db_helpers import find_all, save
         from utils.rent_calculator import get_current_rent, estate_rent_config
 
-        now = datetime.utcnow()
+        now = utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
             estate_cfg: dict = {}
@@ -118,7 +120,7 @@ async def _send_monthly_report():
         from core.db_helpers import find_all, count
         from utils.email_service import send_email
 
-        now = datetime.utcnow()
+        now = utcnow()
         month_name = calendar.month_name[now.month]
         year = now.year
         month_start = datetime(year, now.month, 1)
@@ -156,7 +158,7 @@ async def _backup_database():
         from core.database import AsyncSessionLocal, engine
         from sqlalchemy import inspect, text
 
-        ts = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+        ts = utcnow().strftime("%Y-%m-%dT%H-%M-%S")
         backup_dir = Path(__file__).parent.parent.parent / "backups" / f"backup_{ts}"
         backup_dir.mkdir(parents=True, exist_ok=True)
 
@@ -203,7 +205,7 @@ async def _sync_meters():
                 try:
                     raw = await tuya.get_device_status(meter.device_id)
                     parsed = tuya.parse_status(raw)
-                    now = datetime.utcnow()
+                    now = utcnow()
 
                     meter.last_kwh = parsed["kwh"]
                     meter.last_voltage = parsed["voltage"]
@@ -275,7 +277,7 @@ async def _generate_monthly_electricity_bills():
 
         async with AsyncSessionLocal() as db:
             meters = await find_all(db, MeterDevice, MeterDevice.is_active == True)
-            now = datetime.utcnow()
+            now = utcnow()
             billed = 0
             for meter in meters:
                 if not meter.tenant:
@@ -379,7 +381,7 @@ async def _daily_autopilot_scan():
                                     if phone:
                                         await _tg_send(db, phone, action.content)
                             action.status = "done"
-                            action.executed_at = datetime.utcnow()
+                            action.executed_at = utcnow()
                             action.execution_result = {"auto_executed": True, "source": "daily_scan"}
                             auto_executed += 1
                         except Exception as ex:
@@ -404,7 +406,7 @@ async def _check_lease_renewals():
         from utils.event_hooks import fire_event
 
         THRESHOLDS = [60, 30, 14]
-        now = datetime.utcnow()
+        now = utcnow()
 
         async with AsyncSessionLocal() as db:
             for days in THRESHOLDS:
@@ -448,10 +450,32 @@ def _wrap(coro_fn):
     return job
 
 
+def _acquire_singleton_lock() -> bool:
+    """Hold an exclusive OS file lock for the process lifetime so that only
+    one process per host runs the jobs — with multiple uvicorn workers,
+    every worker calls start_scheduler() and tenants would get duplicate
+    reminder emails, double rent updates, and duplicate bills."""
+    global _lock_fd
+    import fcntl, tempfile
+    lock_path = os.path.join(tempfile.gettempdir(), "bamihost_scheduler.lock")
+    try:
+        _lock_fd = open(lock_path, "w")
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        return True
+    except OSError:
+        return False
+
+
 def start_scheduler():
     global _scheduler, _loop
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
+
+        if not _acquire_singleton_lock():
+            logger.info("[SCHEDULER] Another process holds the scheduler lock — not starting jobs in this worker")
+            return
 
         # Capture the running event loop so worker threads can dispatch onto it.
         try:

@@ -19,6 +19,7 @@ from core.config import settings
 from models.base import gen_uuid
 import utils.tuya as tuya
 import time
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/meters", tags=["Meters"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -128,7 +129,7 @@ async def register_meter(
         rate_per_kwh=body.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE,
         prepaid_mode=body.prepaid_mode,
         low_balance_threshold=body.low_balance_threshold,
-        baseline_date=datetime.utcnow(),
+        baseline_date=utcnow(),
     )
     await save(db, meter)
 
@@ -201,7 +202,7 @@ async def update_meter(
 
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(meter, k, v)
-    meter.updated_at = datetime.utcnow()
+    meter.updated_at = utcnow()
     await save(db, meter)
     return {"success": True, "data": _meter_dict(meter)}
 
@@ -256,7 +257,7 @@ async def get_unit_meter_status(
             meter.last_power = live["power"]
             meter.last_power_factor = live["power_factor"]
             meter.is_connected = live.get("switch", True)
-            meter.last_synced_at = datetime.utcnow()
+            meter.last_synced_at = utcnow()
             meter.raw_status = live.get("raw", {})
             await save(db, meter)
         except Exception as e:
@@ -293,7 +294,7 @@ async def get_my_meter(
             meter.last_current = live["current"]
             meter.last_power = live["power"]
             meter.is_connected = live.get("switch", True)
-            meter.last_synced_at = datetime.utcnow()
+            meter.last_synced_at = utcnow()
             await save(db, meter)
         except Exception:
             pass
@@ -321,7 +322,7 @@ async def get_my_meter_history(
     user: User = Depends(get_current_user),
 ):
     meter = await _get_tenant_meter(db, user)
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     conditions = [
         MeterReading.meter_device == meter.id,
@@ -369,7 +370,7 @@ async def get_unit_meter_history(
     if not meter:
         raise HTTPException(status_code=404, detail="No meter for this unit")
 
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
     conditions = [MeterReading.meter_device == meter.id,
                   MeterReading.recorded_at >= since, MeterReading.is_active == True]
     skip = (page - 1) * limit
@@ -408,7 +409,7 @@ async def topup_my_meter(
 
     wallet.balance -= body.amount
     wallet.total_spent += body.amount
-    wallet.updated_at = datetime.utcnow()
+    wallet.updated_at = utcnow()
     await save(db, wallet)
 
     # Record transaction
@@ -437,7 +438,7 @@ async def topup_my_meter(
         except Exception:
             pass
 
-    meter.updated_at = datetime.utcnow()
+    meter.updated_at = utcnow()
     await save(db, meter)
 
     # Notify tenant
@@ -548,7 +549,7 @@ async def reset_meter_baseline(
         raise HTTPException(status_code=404, detail="Meter not found")
 
     meter.baseline_kwh = meter.last_kwh
-    meter.baseline_date = datetime.utcnow()
+    meter.baseline_date = utcnow()
     meter.credit_balance = 0.0
     await save(db, meter)
     return {"success": True, "message": "Baseline reset — ready for new tenant",

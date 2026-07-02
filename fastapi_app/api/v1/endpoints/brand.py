@@ -17,6 +17,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.config import settings
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/brand", tags=["Brand & Design"])
@@ -106,7 +107,7 @@ async def update_brand_asset(
         raise HTTPException(404, "Asset not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(asset, k, v)
-    asset.updated_at = datetime.utcnow()
+    asset.updated_at = utcnow()
     await db.commit()
     return {"message": "Asset updated"}
 

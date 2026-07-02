@@ -15,6 +15,7 @@ from models.unit import Unit
 from models.user import User
 from models.autopilot_action import AutopilotAction
 from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="analyst",
@@ -82,7 +83,7 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "vacant": vacant, "occupancy_pct": occupancy_pct, "active_tenants": active_tenants,
         "monthly_rent": f"₦{monthly_rent:,.0f}", "arrears": f"₦{arrears:,.0f}",
         "overdue_count": overdue_count, "avg_nps": avg_nps,
-        "as_of": datetime.utcnow().strftime("%Y-%m-%d"),
+        "as_of": utcnow().strftime("%Y-%m-%d"),
     }
 
     report = await ai_text(

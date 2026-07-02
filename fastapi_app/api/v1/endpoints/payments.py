@@ -19,6 +19,7 @@ from core.config import settings
 from models.base import gen_uuid
 from utils.pdf_service import generate_receipt_pdf
 from utils.email_service import send_payment_confirmation, send_rent_reminder
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
@@ -150,7 +151,7 @@ async def update_status(
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     payment.payment_status = body.get("status", payment.payment_status)
-    payment.updated_at = datetime.utcnow()
+    payment.updated_at = utcnow()
     await save(db, payment)
     return {"success": True, "data": _p(payment)}
 
@@ -230,12 +231,15 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
 @router.post("/callback")
 async def payment_callback(request: Request, db: AsyncSession = Depends(get_db)):
     secret = os.getenv("PAYSTACK_SECRET_KEY", "")
+    if not secret:
+        # Never accept unsigned payment confirmations: a missing key must
+        # disable the webhook, not the verification.
+        raise HTTPException(status_code=503, detail="Payment webhook not configured")
     raw_body = await request.body()
     sig = request.headers.get("x-paystack-signature", "")
-    if secret:
-        expected = hmac.new(secret.encode(), raw_body, hashlib.sha512).hexdigest()
-        if not hmac.compare_digest(expected, sig):
-            raise HTTPException(status_code=400, detail="Invalid Paystack signature")
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha512).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        raise HTTPException(status_code=400, detail="Invalid Paystack signature")
 
     import json
     try:
@@ -252,7 +256,7 @@ async def payment_callback(request: Request, db: AsyncSession = Depends(get_db))
         if payment and payment.payment_status == "pending":
             payment.payment_status = "completed"
             payment.paystack_response = data
-            payment.updated_at = datetime.utcnow()
+            payment.updated_at = utcnow()
             await save(db, payment)
             tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
             if tenant:
@@ -270,7 +274,7 @@ async def payment_callback(request: Request, db: AsyncSession = Depends(get_db))
         payment = await find_one(db, Payment, Payment.reference == ref)
         if payment:
             payment.payment_status = "completed" if event == "transfer.success" else "failed"
-            payment.updated_at = datetime.utcnow()
+            payment.updated_at = utcnow()
             await save(db, payment)
 
     return {"status": "ok"}

@@ -10,6 +10,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/service-requests", tags=["Service Requests"])
 
@@ -77,7 +78,7 @@ async def update_status(
     sr.assigned_to = body.get("assigned_to", sr.assigned_to)
     sr.note = body.get("note", sr.note)
     sr.updated_by = user.id
-    sr.updated_at = datetime.utcnow()
+    sr.updated_at = utcnow()
     await save(db, sr)
     return {"success": True, "data": _sr(sr)}
 

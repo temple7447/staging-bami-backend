@@ -15,6 +15,7 @@ from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
 from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="retention",
@@ -36,7 +37,7 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
     uid = str(user.id)
     estate_ids = await owner_estate_ids(db, user) or ["__none__"]
 
-    now = datetime.utcnow()
+    now = utcnow()
     horizon = now + timedelta(days=RENEWAL_WINDOW_DAYS)
 
     rows = (await db.execute(

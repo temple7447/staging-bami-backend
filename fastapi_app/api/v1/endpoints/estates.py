@@ -20,6 +20,7 @@ from core.db_helpers import find_all, find_one, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
 from utils.date_range import resolve_date_range
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/estates", tags=["Estates"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -89,7 +90,7 @@ async def get_overall_overview(
             "payments": {"pending_count": 0, "completed_last_30_days": 0},
         }}
 
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
     ninety_ago = now - timedelta(days=90)
     in_7  = now + timedelta(days=7)
@@ -248,7 +249,7 @@ async def upload_unit_images(
     imgs = list(unit.images or [])
     imgs.extend(uploaded)
     unit.images = imgs
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "data": {"images": unit.images, "videos": unit.videos or []}}
 
@@ -278,7 +279,7 @@ async def patch_unit_media(
         vids = list(unit.videos or [])
         vids.extend(new_videos)
         unit.videos = vids
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "data": {"images": unit.images, "videos": unit.videos}}
 
@@ -299,7 +300,7 @@ async def delete_unit_media(
     remove_video_ids = set(body.get("videoIds") or body.get("video_ids") or [])
     unit.images = [i for i in (unit.images or []) if i.get("public_id") not in remove_image_ids]
     unit.videos = [v for v in (unit.videos or []) if v.get("public_id") not in remove_video_ids]
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "data": {"images": unit.images, "videos": unit.videos}}
 
@@ -338,7 +339,7 @@ async def update_estate(
     if body.name:
         estate.set_slug()
     estate.updated_by = user.id
-    estate.updated_at = datetime.utcnow()
+    estate.updated_at = utcnow()
     await save(db, estate)
     return {"success": True, "data": _e(estate)}
 
@@ -356,7 +357,7 @@ async def delete_estate(
         raise HTTPException(status_code=404, detail="Estate not found")
     estate.is_active = False
     estate.updated_by = user.id
-    estate.updated_at = datetime.utcnow()
+    estate.updated_at = utcnow()
     await save(db, estate)
     return {"success": True, "message": "Estate deleted"}
 
@@ -373,7 +374,7 @@ async def get_estate_overview(
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
 
-    now        = datetime.utcnow()
+    now        = utcnow()
     thirty_ago = now - timedelta(days=30)
     in_30      = now + timedelta(days=30)
 
@@ -520,7 +521,7 @@ async def remove_unit_tenant(
         t.is_active = False
         t.status = "vacant"
         t.updated_by = user.id
-        t.updated_at = datetime.utcnow()
+        t.updated_at = utcnow()
         await save(db, t)
         if t.user:
             u = await db.get(User, t.user)
@@ -532,7 +533,7 @@ async def remove_unit_tenant(
     unit.occupied_by = None
     unit.occupied_since = None
     unit.updated_by = user.id
-    unit.updated_at = datetime.utcnow()
+    unit.updated_at = utcnow()
     await save(db, unit)
     return {"success": True, "message": "Tenant removed from unit"}
 
@@ -562,6 +563,6 @@ async def upload_estate_image(
     images = list(estate.images or [])
     images.append(img)
     estate.images = images
-    estate.updated_at = datetime.utcnow()
+    estate.updated_at = utcnow()
     await save(db, estate)
     return {"success": True, "data": img}

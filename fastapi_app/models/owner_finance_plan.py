@@ -2,6 +2,7 @@ from sqlalchemy import String, Float, JSON, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class OwnerFinancePlan(Base):
@@ -37,5 +38,5 @@ class OwnerFinancePlan(Base):
     sweep_current: Mapped[float] = mapped_column(Float, default=0.0)
     sinking_funds: Mapped[list] = mapped_column(JSON, default=list)          # [{name, target, current}]
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

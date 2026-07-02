@@ -25,6 +25,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.config import settings
 from utils.telegram_service import send_to_tenant_by_phone, send_to_owner, is_configured
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
@@ -122,7 +123,7 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
     )
     actions.append(_action(
         str(user.id), "marketer", "daily_briefing",
-        f"Daily Business Briefing — {datetime.utcnow().strftime('%d %b %Y')}",
+        f"Daily Business Briefing — {utcnow().strftime('%d %b %Y')}",
         "Your AI-generated daily briefing. Start your day here.",
         briefing, "internal", "daily_briefing",
         {"vacant": vacant, "overdue": overdue, "enquiries": enquiries, "issues": has_issues},
@@ -290,7 +291,7 @@ async def execute_action(
 
     # Update action
     action.status = "done"
-    action.executed_at = datetime.utcnow()
+    action.executed_at = utcnow()
     action.execution_result = result
     await db.commit()
 
@@ -590,7 +591,7 @@ async def run_auto_execute(
                     if phone:
                         await _tg_send(db, phone, action.content)
             action.status = "done"
-            action.executed_at = datetime.utcnow()
+            action.executed_at = utcnow()
             action.execution_result = {"auto_executed": True}
             executed += 1
         except Exception as e:

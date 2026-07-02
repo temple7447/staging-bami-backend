@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, and_
 from typing import Type, TypeVar, Optional, List, Any
 from datetime import datetime
+from utils.time_utils import utcnow
 
 T = TypeVar("T")
 
@@ -61,7 +62,7 @@ async def save(db: AsyncSession, obj: T) -> T:
 
 async def soft_delete(db: AsyncSession, obj: T, user_id: str = None) -> T:
     obj.is_active = False
-    obj.updated_at = datetime.utcnow()
+    obj.updated_at = utcnow()
     if user_id and hasattr(obj, "updated_by"):
         obj.updated_by = user_id
     db.add(obj)

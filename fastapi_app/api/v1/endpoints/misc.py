@@ -14,6 +14,7 @@ from core.database import get_db
 from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(tags=["Misc"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner"}
@@ -88,7 +89,7 @@ async def update_application_status(
         raise HTTPException(status_code=404, detail="Application not found")
     app.status = body.get("status", app.status)
     app.updated_by = user.id
-    app.updated_at = datetime.utcnow()
+    app.updated_at = utcnow()
     await save(db, app)
     return {"success": True, "data": _ra(app)}
 
@@ -124,7 +125,7 @@ async def delete_business_type(
     if not bt:
         raise HTTPException(status_code=404, detail="Not found")
     bt.is_active = False
-    bt.updated_at = datetime.utcnow()
+    bt.updated_at = utcnow()
     await save(db, bt)
     return {"success": True, "message": "Business type deleted"}
 
@@ -237,7 +238,7 @@ async def approve_bank_deposit(
     dep.status = "approved"
     dep.approved_by = user.id
     dep.notes = body.get("adminNote") or dep.notes
-    dep.updated_at = datetime.utcnow()
+    dep.updated_at = utcnow()
     await save(db, dep)
     return {"success": True, "message": "Deposit approved",
             "data": {"depositId": dep.id, "status": dep.status}}
@@ -256,7 +257,7 @@ async def reject_bank_deposit(
     dep.status = "rejected"
     dep.approved_by = user.id
     dep.notes = body.get("adminNote") or dep.notes
-    dep.updated_at = datetime.utcnow()
+    dep.updated_at = utcnow()
     await save(db, dep)
     return {"success": True, "message": "Deposit rejected",
             "data": {"depositId": dep.id, "status": dep.status}}

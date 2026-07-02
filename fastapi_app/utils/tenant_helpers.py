@@ -5,6 +5,7 @@ and processTenant helpers used across tenantController.js and dashboardControlle
 from datetime import datetime, timezone, timedelta
 from math import floor
 from utils.rent_calculator import get_current_rent, estate_rent_config
+from utils.time_utils import utcnow
 
 
 async def estate_config_for(db, estate_id):
@@ -26,7 +27,7 @@ def project_next_due_date(tenant) -> datetime | None:
          no outstanding balance → advance to next future anniversary
       5. Past but not legacy-default → genuine overdue, keep as-is
     """
-    now = datetime.utcnow()
+    now = utcnow()
     entry = tenant.entry_date if hasattr(tenant, "entry_date") else None
     stored = tenant.next_due_date if hasattr(tenant, "next_due_date") else None
 
@@ -70,7 +71,7 @@ def process_tenant(tenant, paid_fees: dict | None = None, estate_config=None) ->
         paid_fees = {"caution": set(), "legal": set()}
 
     tid = str(getattr(tenant, "id", getattr(tenant, "_id", "")))
-    origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", datetime.utcnow())
+    origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", utcnow())
 
     _rate, _cycle, _start = estate_config or (None, None, None)
     # Escalate from base_* so a stored, already-escalated amount is never
@@ -84,7 +85,7 @@ def process_tenant(tenant, paid_fees: dict | None = None, estate_config=None) ->
                         (getattr(tenant, "service_charge_outstanding", 0) or 0)
 
     projected_due = project_next_due_date(tenant)
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     days_until_due = int((projected_due - today).days) if projected_due else None
     arrears_months = floor(abs(days_until_due) / 30) if days_until_due is not None and days_until_due < 0 else 0
 

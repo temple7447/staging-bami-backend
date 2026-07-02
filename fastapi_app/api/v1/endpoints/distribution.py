@@ -12,6 +12,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/distribution", tags=["Distribution"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner"}
@@ -122,7 +123,7 @@ async def withdraw_from_bucket(
         raise HTTPException(status_code=400, detail="Insufficient balance in this bucket")
     setattr(wa, field, current - body.amount)
     wa.total_disbursed += body.amount
-    wa.updated_at = datetime.utcnow()
+    wa.updated_at = utcnow()
     await save(db, wa)
     return {"success": True, "message": "Withdrawal successful", "remaining": getattr(wa, field)}
 
@@ -140,6 +141,6 @@ async def family_withdraw(
         raise HTTPException(status_code=400, detail="Insufficient fulfillment savings balance")
     wa.fulfillment_engine_savings_balance -= amount
     wa.total_disbursed += amount
-    wa.updated_at = datetime.utcnow()
+    wa.updated_at = utcnow()
     await save(db, wa)
     return {"success": True, "message": "Family withdrawal successful"}

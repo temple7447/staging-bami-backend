@@ -12,6 +12,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
 
@@ -83,8 +84,8 @@ async def update_status(
         raise HTTPException(status_code=404, detail="Withdrawal not found")
     w.status = body.get("status", w.status)
     w.reviewed_by = user.id
-    w.reviewed_at = datetime.utcnow()
-    w.updated_at = datetime.utcnow()
+    w.reviewed_at = utcnow()
+    w.updated_at = utcnow()
     await save(db, w)
     return {"success": True, "data": _w(w)}
 

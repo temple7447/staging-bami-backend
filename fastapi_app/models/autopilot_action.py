@@ -2,6 +2,7 @@ from datetime import datetime
 from sqlalchemy import String, Boolean, Float, DateTime, JSON, Text, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from core.database import Base
+from utils.time_utils import utcnow
 
 
 class AutopilotAction(Base):
@@ -35,5 +36,5 @@ class AutopilotAction(Base):
     # Recipients (for messaging actions)
     recipients:  Mapped[list]  = mapped_column(JSON, default=list)  # [{name, phone, email}]
 
-    created_at:  Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at:  Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime)

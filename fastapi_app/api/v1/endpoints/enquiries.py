@@ -12,6 +12,7 @@ from core.db_helpers import find_all, find_one, save
 from models.base import gen_uuid
 from utils.event_hooks import fire_event
 import asyncio
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/enquiries", tags=["Enquiries"])
 
@@ -97,7 +98,7 @@ async def update_status(
     eq.status = body.get("status", eq.status)
     eq.note = body.get("note", eq.note)
     eq.updated_by = user.id
-    eq.updated_at = datetime.utcnow()
+    eq.updated_at = utcnow()
     await save(db, eq)
     return {"success": True, "data": _e(eq)}
 

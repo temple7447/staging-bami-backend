@@ -2,6 +2,7 @@ from sqlalchemy import String, Boolean, DateTime, Float, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class MeterReading(Base):
@@ -31,4 +32,4 @@ class MeterReading(Base):
     period_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

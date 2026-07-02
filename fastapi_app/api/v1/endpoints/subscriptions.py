@@ -11,6 +11,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 
@@ -153,7 +154,7 @@ async def update_subscription(
             updates[k] = _parse_date(updates[k])
     for k, v in updates.items():
         setattr(sub, k, v)
-    sub.updated_at = datetime.utcnow()
+    sub.updated_at = utcnow()
     await save(db, sub)
     return {"success": True, "data": _s(sub)}
 
@@ -170,7 +171,7 @@ async def delete_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
     sub.is_active = False
-    sub.updated_at = datetime.utcnow()
+    sub.updated_at = utcnow()
     await save(db, sub)
     return {"success": True, "message": "Subscription plan deleted"}
 

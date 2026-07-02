@@ -1,11 +1,22 @@
-from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text, Integer
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text, Integer, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, gen_uuid
+from models.base import Base, Money, gen_uuid
 from datetime import datetime
+from utils.time_utils import utcnow
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
+    __table_args__ = (
+        # A unit can only have one active tenant at a time — prevents the
+        # duplicate-row billing confusion seen with re-onboarded tenants.
+        Index(
+            "uq_tenants_active_unit", "unit",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     estate: Mapped[str] = mapped_column(String(36), index=True)
@@ -16,10 +27,10 @@ class Tenant(Base):
     tenant_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     tenant_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    rent_amount: Mapped[float] = mapped_column(Float, default=0.0)
-    base_rent: Mapped[float] = mapped_column(Float, default=0.0)
-    service_charge_amount: Mapped[float] = mapped_column(Float, default=0.0)
-    base_service_charge: Mapped[float] = mapped_column(Float, default=0.0)
+    rent_amount: Mapped[float] = mapped_column(Money, default=0.0)
+    base_rent: Mapped[float] = mapped_column(Money, default=0.0)
+    service_charge_amount: Mapped[float] = mapped_column(Money, default=0.0)
+    base_service_charge: Mapped[float] = mapped_column(Money, default=0.0)
 
     tenant_type: Mapped[str] = mapped_column(String(50), default="new")
     status: Mapped[str] = mapped_column(String(50), default="occupied", index=True)
@@ -41,13 +52,13 @@ class Tenant(Base):
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
-    rent_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
-    service_charge_outstanding: Mapped[float] = mapped_column(Float, default=0.0)
+    rent_outstanding: Mapped[float] = mapped_column(Money, default=0.0)
+    service_charge_outstanding: Mapped[float] = mapped_column(Money, default=0.0)
 
     # NPS — Level 1 "Sell & Serve 10": 0–10 recommend score (9–10 = promoter)
     nps_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     nps_asked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     nps_answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

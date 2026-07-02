@@ -18,6 +18,7 @@ from models.growth_plan import GrowthPlan
 from models.base import gen_uuid
 from core.security import get_current_user
 from core.database import get_db
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/growth", tags=["Growth / Level 7 Plan"])
@@ -78,6 +79,6 @@ async def save_plan(
         db.add(plan)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(plan, k, v)
-    plan.updated_at = datetime.utcnow()
+    plan.updated_at = utcnow()
     await db.commit()
     return {"success": True}

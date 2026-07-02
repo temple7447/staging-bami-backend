@@ -7,6 +7,7 @@ from datetime import datetime
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor
+from utils.time_utils import utcnow
 
 # Brand colours (matching JS original)
 C_BLUE    = HexColor("#4472c4")
@@ -82,7 +83,7 @@ def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dic
     c.setFillColor(C_BLACK)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(margin_l + 5, title_y, "RECEIPT")
-    payment_date = receipt_data.get("paymentDate", datetime.utcnow().strftime("%d/%m/%Y"))
+    payment_date = receipt_data.get("paymentDate", utcnow().strftime("%d/%m/%Y"))
     c.drawRightString(w - margin_r, title_y, f"DATE: {payment_date}")
 
     # Horizontal rule

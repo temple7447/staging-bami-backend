@@ -11,6 +11,7 @@ from models.enquiry import Enquiry
 from core.security import get_current_user
 from core.database import get_db
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/marketing", tags=["Marketing"])
 
@@ -137,7 +138,7 @@ async def update_campaign(
         raise HTTPException(404, "Campaign not found")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(c, k, v)
-    c.updated_at = datetime.utcnow()
+    c.updated_at = utcnow()
     await db.commit()
     return {"message": "Campaign updated"}
 

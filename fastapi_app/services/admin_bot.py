@@ -19,6 +19,7 @@ from models.wallet import Wallet
 from models.tenant_telegram import TenantTelegramSession
 from core.security import verify_password
 from models.base import gen_uuid
+from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def get_or_create_session(db: AsyncSession, telegram_id: str) -> TenantTel
 async def update_session(db: AsyncSession, session: TenantTelegramSession, **fields) -> None:
     for k, v in fields.items():
         setattr(session, k, v)
-    session.updated_at = datetime.utcnow()
+    session.updated_at = utcnow()
     await db.commit()
 
 
@@ -588,7 +589,7 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
                 return "Tenant not found."
             history = list(tenant.history or [])
             history.append({
-                "date": datetime.utcnow().isoformat(),
+                "date": utcnow().isoformat(),
                 "note": raw,
                 "added_by": user.name,
                 "type": "manager_note",
@@ -662,7 +663,7 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
 
             old_status = issue.status
             issue.status = new_status
-            issue.updated_at = datetime.utcnow()
+            issue.updated_at = utcnow()
 
             # Notify tenant
             if issue.tenant:
@@ -794,7 +795,7 @@ async def handle(db: AsyncSession, telegram_id: str, text: str, first_name: str 
 async def _dashboard(db: AsyncSession, user: User, estates: list[Estate], estate_ids: list[str]) -> str:
     if not estate_ids:
         return "No estates assigned."
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
 
     total_units = (await db.execute(select(func.count()).where(Unit.estate.in_(estate_ids), Unit.is_active == True))).scalar() or 0  # noqa: E712
@@ -822,7 +823,7 @@ async def _dashboard(db: AsyncSession, user: User, estates: list[Estate], estate
 async def _quick_report(db: AsyncSession, estate_ids: list[str]) -> str:
     if not estate_ids:
         return "No estates to report on."
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
 
     overdue_tenants = (await db.execute(
@@ -856,7 +857,7 @@ async def _quick_report(db: AsyncSession, estate_ids: list[str]) -> str:
 
 
 async def _send_reminders(db: AsyncSession, estate_ids: list[str], session: TenantTelegramSession) -> str:
-    now = datetime.utcnow()
+    now = utcnow()
     overdue = (await db.execute(
         select(Tenant).where(Tenant.estate.in_(estate_ids), Tenant.is_active == True, Tenant.next_due_date < now)  # noqa: E712
     )).scalars().all()
@@ -979,7 +980,7 @@ async def _list_enquiries(db: AsyncSession, estate_ids: list[str]) -> str:
 
 
 async def _estate_stats(db: AsyncSession, estate_id: str) -> dict:
-    now = datetime.utcnow()
+    now = utcnow()
     thirty_ago = now - timedelta(days=30)
     total = (await db.execute(select(func.count()).where(Unit.estate == estate_id, Unit.is_active == True))).scalar() or 0  # noqa: E712
     occupied = (await db.execute(select(func.count()).where(Unit.estate == estate_id, Unit.status == "occupied"))).scalar() or 0
