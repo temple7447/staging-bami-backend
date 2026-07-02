@@ -79,12 +79,6 @@
       "skillPath": "skills/slack-gif-creator/SKILL.md",
       "computedHash": "fab4fcfcaed371071069d61a3ab94dff15d10d36403ff269d147ea986cd98083"
     },
-    "template-skill": {
-      "source": "anthropics/skills",
-      "sourceType": "github",
-      "skillPath": "template/SKILL.md",
-      "computedHash": "38c88f722b574a922311d334a70c2008a2a5b896f06eaa75516d716e5725b26f"
-    },
     "theme-factory": {
       "source": "anthropics/skills",
       "sourceType": "github",
