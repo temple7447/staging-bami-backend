@@ -129,13 +129,14 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
             "lease_duration_months": lease_months,
             "year1": {
                 "label": "Current Year", "billing_start": billing_start, "billing_end": renewal_start,
-                "annual_rent": y1_rent["total_amount"], "annual_service": y1_svc["total_amount"],
+                "annual_rent": y1_rent["total_amount"], "annual_service_charge": y1_svc["total_amount"],
                 "monthly_rent": y1_rent["final_rent"], "monthly_service": y1_svc["final_rent"],
                 "total": y1_rent["total_amount"] + y1_svc["total_amount"],
             },
             "year2": {
                 "label": "Renewal Year", "billing_start": renewal_start,
-                "annual_rent": y2_rent["total_amount"], "annual_service": y2_svc["total_amount"],
+                "billing_end": renewal_start.replace(year=renewal_start.year + 1),
+                "annual_rent": y2_rent["total_amount"], "annual_service_charge": y2_svc["total_amount"],
                 "monthly_rent": y2_rent["final_rent"], "monthly_service": y2_svc["final_rent"],
                 "total": y2_rent["total_amount"] + y2_svc["total_amount"],
                 "rent_increased": y2_rent["final_rent"] > y1_rent["final_rent"],

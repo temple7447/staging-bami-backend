@@ -43,6 +43,18 @@ def _to_dt(v):
     return v if isinstance(v, datetime) else datetime.fromisoformat(str(v))
 
 
+def _cycles_at(at: datetime, anchor: datetime, cycle_years: int) -> int:
+    """Completed escalation cycles as of `at`, counting from `anchor`."""
+    if at < anchor:
+        return 0
+    years_diff = (
+        (at.year - anchor.year)
+        + (at.month - anchor.month) / 12
+        + (at.day - anchor.day) / 365
+    )
+    return floor(max(0, years_diff) / cycle_years)
+
+
 def calculate_effective_rent(
     base_amount: float,
     start_date:  datetime,
@@ -53,8 +65,12 @@ def calculate_effective_rent(
     cycle_years=None,
     increase_start=None,
 ) -> dict:
-    """Total rent for `months` months starting at `start_date`, applying the
-    estate's escalation. Returns {"total_amount", "final_rent"}."""
+    """Total rent for `months` months starting at `start_date`.
+
+    The whole span is priced FLAT at the rate in effect on `start_date`:
+    rent is agreed at the start of a term and held for that term, so an
+    increase whose cycle boundary falls mid-term only applies from the
+    next term. Returns {"total_amount", "final_rent"}."""
     r, cy = _resolve(rate, cycle_years, is_vacant)
 
     # No escalation configured -> flat rent for the whole span.
@@ -62,28 +78,10 @@ def calculate_effective_rent(
         amt = round(base_amount)
         return {"total_amount": amt * months, "final_rent": amt}
 
-    cycle_months = cy * 12
     start  = _to_dt(start_date)
-    origin = _to_dt(increase_start) if increase_start else _to_dt(origin_date)
-
-    start_y, start_m, start_d    = start.year,  start.month - 1,  start.day
-    origin_y, origin_m, origin_d = origin.year, origin.month - 1, origin.day
-    day_offset = (start_d - origin_d) / 30
-
-    total_amount = 0.0
-    current_rent = base_amount
-
-    for i in range(months):
-        abs_month = start_m + i
-        cur_y     = start_y + abs_month // 12
-        cur_m     = abs_month % 12
-        months_since_origin = (cur_y - origin_y) * 12 + (cur_m - origin_m) + day_offset
-        cycles = floor(max(0, round(months_since_origin)) / cycle_months)
-        monthly_rent = round(base_amount * (r ** cycles))
-        total_amount += monthly_rent
-        current_rent  = monthly_rent
-
-    return {"total_amount": total_amount, "final_rent": current_rent}
+    anchor = _to_dt(increase_start) if increase_start else _to_dt(origin_date)
+    monthly = round(base_amount * (r ** _cycles_at(start, anchor, cy)))
+    return {"total_amount": monthly * months, "final_rent": monthly}
 
 
 def get_current_rent(
@@ -101,13 +99,4 @@ def get_current_rent(
 
     now    = datetime.now(timezone.utc).replace(tzinfo=None)
     anchor = _to_dt(increase_start) if increase_start else _to_dt(origin_date)
-    if now < anchor:
-        return round(base_amount)
-
-    years_diff = (
-        (now.year - anchor.year)
-        + (now.month - anchor.month) / 12
-        + (now.day - anchor.day) / 365
-    )
-    cycles = floor(max(0, years_diff) / cy)
-    return round(base_amount * (r ** cycles))
+    return round(base_amount * (r ** _cycles_at(now, anchor, cy)))

@@ -80,24 +80,31 @@ async def _check_rent_increases():
     try:
         from core.database import AsyncSessionLocal
         from models.tenant import Tenant
+        from models.estate import Estate
         from core.db_helpers import find_all, save
+        from utils.rent_calculator import get_current_rent, estate_rent_config
 
         now = datetime.utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
+            estate_cfg: dict = {}
             updated = 0
             for t in tenants:
                 if not t.entry_date or not t.base_rent:
                     continue
-                years = (now - t.entry_date).days / 365.25
-                increase_pct = 0.05 * int(years)  # 5% per year
-                new_rent = round(t.base_rent * (1 + increase_pct), 2)
-                if new_rent != t.rent_amount:
+                if t.estate not in estate_cfg:
+                    estate_cfg[t.estate] = estate_rent_config(await db.get(Estate, t.estate) if t.estate else None)
+                _rate, _cycle, _start = estate_cfg[t.estate]
+                new_rent = get_current_rent(t.base_rent, t.entry_date, False, _rate, _cycle, _start)
+                svc_base = t.base_service_charge or 0
+                new_svc  = get_current_rent(svc_base, t.entry_date, False, _rate, _cycle, _start) if svc_base else (t.service_charge_amount or 0)
+                if new_rent != t.rent_amount or new_svc != t.service_charge_amount:
                     t.rent_amount = new_rent
+                    t.service_charge_amount = new_svc
                     t.updated_at = now
                     await save(db, t)
                     updated += 1
-            logger.info("[SCHEDULER] Rent increases applied: %d", updated)
+            logger.info("[SCHEDULER] Rent increases applied (estate policy): %d", updated)
     except Exception as e:
         logger.error("[SCHEDULER] Rent increase check failed: %s", e)
 

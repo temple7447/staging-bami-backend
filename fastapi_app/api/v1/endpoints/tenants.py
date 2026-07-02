@@ -328,16 +328,20 @@ async def pay_billing_items(
         raise HTTPException(status_code=404, detail="Wallet not found")
     origin = tenant.entry_date if tenant else datetime.utcnow()
     _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
+    # Price the period actually being paid for (the upcoming term), not the
+    # tenant's first year — otherwise escalations never reach this path.
+    period_start = (project_next_due_date(tenant) or tenant.next_due_date or datetime.utcnow()) if tenant else datetime.utcnow()
     items_to_process, total_amount = [], 0.0
     for item_id in body.item_ids:
-        if item_id == "rent" and tenant and tenant.rent_amount > 0:
-            result = calculate_effective_rent(tenant.rent_amount, tenant.entry_date or datetime.utcnow(), body.duration_months, False, origin, _r, _c, _s)
+        if item_id == "rent" and tenant and (tenant.base_rent or tenant.rent_amount or 0) > 0:
+            rent_base = tenant.base_rent or tenant.rent_amount
+            result = calculate_effective_rent(rent_base, period_start, body.duration_months, False, origin, _r, _c, _s)
             total_amount += result["total_amount"]
             items_to_process.append({"code": "rent", "amount": result["total_amount"], "duration": body.duration_months})
         elif item_id == "service_charge" and tenant:
-            base = tenant.service_charge_amount or 0
+            base = tenant.base_service_charge or tenant.service_charge_amount or 0
             if base > 0:
-                result = calculate_effective_rent(base, origin, body.duration_months, False, origin, _r, _c, _s)
+                result = calculate_effective_rent(base, period_start, body.duration_months, False, origin, _r, _c, _s)
                 total_amount += result["total_amount"]
                 items_to_process.append({"code": "service_charge", "amount": result["total_amount"]})
         elif item_id == "outstanding_rent" and tenant and (tenant.rent_outstanding or 0) > 0:
@@ -465,12 +469,13 @@ async def get_tenant(
         "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
         "yearly_breakdown": {
             "year1": {"label": "Current Year", "billing_start": billing_start, "billing_end": renewal_start,
-                      "annual_rent": y1_rent["total_amount"], "annual_service": y1_svc["total_amount"],
+                      "annual_rent": y1_rent["total_amount"], "annual_service_charge": y1_svc["total_amount"],
                       "monthly_rent": y1_rent["final_rent"], "monthly_service": y1_svc["final_rent"],
                       "one_time_fees": final_caution + final_legal,
                       "total": y1_rent["total_amount"] + y1_svc["total_amount"] + final_caution + final_legal},
             "year2": {"label": "Renewal Year", "billing_start": renewal_start,
-                      "annual_rent": y2_rent["total_amount"], "annual_service": y2_svc["total_amount"],
+                      "billing_end": renewal_start.replace(year=renewal_start.year + 1),
+                      "annual_rent": y2_rent["total_amount"], "annual_service_charge": y2_svc["total_amount"],
                       "monthly_rent": y2_rent["final_rent"], "monthly_service": y2_svc["final_rent"],
                       "total": y2_rent["total_amount"] + y2_svc["total_amount"],
                       "rent_increased": y2_rent["final_rent"] > y1_rent["final_rent"]},

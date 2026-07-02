@@ -73,8 +73,12 @@ def process_tenant(tenant, paid_fees: dict | None = None, estate_config=None) ->
     origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", datetime.utcnow())
 
     _rate, _cycle, _start = estate_config or (None, None, None)
-    current_rent    = get_current_rent(getattr(tenant, "rent_amount", 0), origin, False, _rate, _cycle, _start)
-    current_service = get_current_rent(getattr(tenant, "service_charge_amount", 0), origin, False, _rate, _cycle, _start)
+    # Escalate from base_* so a stored, already-escalated amount is never
+    # escalated a second time (rent_amount is scheduler-maintained).
+    rent_base = getattr(tenant, "base_rent", None) or getattr(tenant, "rent_amount", 0)
+    svc_base  = getattr(tenant, "base_service_charge", None) or getattr(tenant, "service_charge_amount", 0)
+    current_rent    = get_current_rent(rent_base, origin, False, _rate, _cycle, _start)
+    current_service = get_current_rent(svc_base, origin, False, _rate, _cycle, _start)
     total_monthly   = current_rent + current_service
     total_outstanding = (getattr(tenant, "rent_outstanding", 0) or 0) + \
                         (getattr(tenant, "service_charge_outstanding", 0) or 0)
