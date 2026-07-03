@@ -479,7 +479,8 @@ async def get_tenant(
         "unit_label": tenant.unit_label or (unit.label if unit else None),
         # Raw unit fee fields so the "Edit Unit Fees" form can pre-fill the
         # actual stored values (not the escalated/paid-adjusted display values).
-        "unit": ({
+        # Named unit_fees (not unit) to avoid colliding with the unit-label field.
+        "unit_fees": ({
             "id": unit.id,
             "monthly_price": unit.monthly_price,
             "service_charge_monthly": unit.service_charge_monthly,
