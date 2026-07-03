@@ -477,6 +477,15 @@ async def get_tenant(
         "lease_duration_months": lease_months, "next_due": renewal_start,
         "estate_name": estate.name if estate else None,
         "unit_label": tenant.unit_label or (unit.label if unit else None),
+        # Raw unit fee fields so the "Edit Unit Fees" form can pre-fill the
+        # actual stored values (not the escalated/paid-adjusted display values).
+        "unit": ({
+            "id": unit.id,
+            "monthly_price": unit.monthly_price,
+            "service_charge_monthly": unit.service_charge_monthly,
+            "caution_fee": unit.caution_fee,
+            "legal_fee": unit.legal_fee,
+        } if unit else None),
         "entry_date": tenant.entry_date, "status": tenant.status, "tenant_type": tenant.tenant_type,
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
