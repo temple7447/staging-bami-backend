@@ -31,11 +31,10 @@ def estate_rent_config(estate) -> tuple:
 
 
 def _resolve(rate, cycle_years, is_vacant):
-    r = INCREASE_RATE if rate is None else rate
-    if cycle_years is None:
-        cy = CYCLE_YEARS_VACANT if is_vacant else CYCLE_YEARS_OCCUPIED
-    else:
-        cy = cycle_years
+    # No configured policy => NO increase. Escalation is opt-in per estate, so
+    # a missing/None policy must never silently apply the old +26%/2yr default.
+    cy = 0 if cycle_years is None else cycle_years
+    r = 1.0 if rate is None else rate
     return r, cy
 
 

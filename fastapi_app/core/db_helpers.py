@@ -12,8 +12,11 @@ async def get_by_id(db: AsyncSession, model: Type[T], id: str) -> Optional[T]:
 
 
 async def find_one(db: AsyncSession, model: Type[T], *conditions) -> Optional[T]:
+    # .first() (not scalar_one_or_none) so a filter that unexpectedly matches
+    # more than one row returns a result instead of raising MultipleResultsFound
+    # and 500ing (e.g. legacy duplicate tenant emails).
     result = await db.execute(select(model).where(*conditions))
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def find_all(

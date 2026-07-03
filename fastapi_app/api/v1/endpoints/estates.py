@@ -190,7 +190,9 @@ async def create_estate(
 ):
     if user.role not in {"super_admin", "business_owner"}:
         raise HTTPException(status_code=403, detail="Not authorized to create estates")
-    estate = Estate(id=gen_uuid(), **body.model_dump(), owner=user.id, created_by=user.id)
+    # exclude_none so omitted policy fields fall back to the model defaults
+    # (no increase) instead of sending NULL into NOT NULL columns.
+    estate = Estate(id=gen_uuid(), **body.model_dump(exclude_none=True), owner=user.id, created_by=user.id)
     estate.set_slug()
     await save(db, estate)
     return {"success": True, "data": _e(estate)}
