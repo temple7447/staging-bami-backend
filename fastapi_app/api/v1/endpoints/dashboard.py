@@ -421,7 +421,7 @@ async def get_health_score(
     # ── Ask AI for scored breakdown ──────────────────────────────────────────
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     resp = await client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model="claude-haiku-4-5",
         max_tokens=600,
         system=(
             "You are a Nigerian property business analyst. Score this property business and return ONLY JSON. "

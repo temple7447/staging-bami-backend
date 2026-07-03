@@ -103,8 +103,10 @@ async def update_status(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in {"super_admin", "admin"}:
-        raise HTTPException(status_code=403, detail="Admins only")
+    # Payouts move real money out of the platform and are not estate-scoped,
+    # so approval is a platform-treasury function — super_admin only.
+    if user.role != "super_admin":
+        raise HTTPException(status_code=403, detail="Only platform administrators can review payouts")
     w = await find_one(db, Withdrawal, Withdrawal.id == wid)
     if not w:
         raise HTTPException(status_code=404, detail="Withdrawal not found")

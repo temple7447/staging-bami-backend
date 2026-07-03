@@ -16,6 +16,7 @@ from schemas.tenant import TenantCreate, TenantUpdate
 from schemas.unit import UnitCreate, UnitUpdate
 from core.security import get_current_user
 from core.database import get_db
+from core.authz import require_estate_access
 from core.db_helpers import find_all, find_one, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
@@ -198,9 +199,10 @@ async def create_estate(
 # ── Unit sub-routes (must be before /{estate_id} to avoid slug conflicts) ────
 
 @router.get("/unit/{unit_id}")
-async def get_estate_unit(unit_id: str, db: AsyncSession = Depends(get_db)):
+async def get_estate_unit(unit_id: str, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
     from api.v1.endpoints.units import get_unit as _get_unit
-    return await _get_unit(unit_id=unit_id, db=db)
+    return await _get_unit(unit_id=unit_id, db=db, user=user)
 
 
 @router.put("/unit/{unit_id}")
@@ -476,6 +478,7 @@ async def list_estate_vacant_units(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    await require_estate_access(db, user, estate_id)
     units = await find_all(db, Unit, Unit.estate == estate_id,
                            Unit.is_active == True, Unit.status == "vacant",
                            order_by=Unit.label.asc())

@@ -14,6 +14,7 @@ from models.unit import Unit
 from models.estate import Estate
 from core.security import get_current_user
 from core.database import get_db
+from core.authz import accessible_estate_ids, require_estate_access, require_tenant_access
 from core.db_helpers import find_one, find_all, save, count
 from utils.tenant_helpers import project_next_due_date
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
@@ -203,18 +204,24 @@ async def get_billing_summary(
         tenant = await find_one(db, Tenant, Tenant.id == tenant_id, Tenant.is_active == True)
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
+        await require_tenant_access(db, user, tenant)
         detail = await _build_tenant_detail(db, tenant)
         return {"success": True, "view_as": "admin_detail", "data": detail}
 
     if role in ADMIN_ROLES:
+        # Cross-business isolation: restrict to estates the caller can access.
+        allowed = await accessible_estate_ids(db, user)
         conditions = [Tenant.is_active == True]
-        if estate_id:
-            conditions.append(Tenant.estate == estate_id)
-        elif role != "super_admin":
-            allowed = user.assigned_estates or []
+        if allowed is not None:
             if not allowed:
-                raise HTTPException(status_code=400, detail="No estates assigned. Provide estateId.")
+                return {"success": True, "view_as": "admin_list",
+                        "data": {"tenants": [],
+                                 "summary": {"total_tenants": 0, "overdue_count": 0, "total_outstanding": 0}},
+                        "pagination": {"current_page": page, "total_pages": 0, "total_items": 0}}
             conditions.append(Tenant.estate.in_(allowed))
+        if estate_id:
+            await require_estate_access(db, user, estate_id)
+            conditions.append(Tenant.estate == estate_id)
 
         total = await count(db, Tenant, *conditions)
         skip = (page - 1) * limit
@@ -286,6 +293,7 @@ async def create_billing_item(
     tenant = await find_one(db, Tenant, Tenant.id == tenant_id, Tenant.is_active == True)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    await require_tenant_access(db, user, tenant, write=True)
     item = BillingItem(
         id=gen_uuid(), user=tenant.user, tenant=tenant.id, estate=tenant.estate,
         item_type=body.item_type, label=body.label, amount=body.amount,
@@ -308,6 +316,7 @@ async def get_tenant_billing_items(
     tenant = await find_one(db, Tenant, Tenant.id == tenant_id, Tenant.is_active == True)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
+    await require_tenant_access(db, user, tenant)
     conditions = [BillingItem.tenant == tenant.id]
     if not include_inactive:
         conditions.append(BillingItem.is_active == True)
@@ -329,6 +338,7 @@ async def update_billing_item(
     item = await find_one(db, BillingItem, BillingItem.id == item_id, BillingItem.is_active == True)
     if not item:
         raise HTTPException(status_code=404, detail="Billing item not found")
+    await require_estate_access(db, user, item.estate)
     if item.is_paid:
         raise HTTPException(status_code=400, detail="Cannot update a paid billing item")
     for k, v in body.model_dump(exclude_none=True).items():
@@ -349,6 +359,7 @@ async def delete_billing_item(
     item = await find_one(db, BillingItem, BillingItem.id == item_id, BillingItem.is_active == True)
     if not item:
         raise HTTPException(status_code=404, detail="Billing item not found")
+    await require_estate_access(db, user, item.estate)
     if item.is_paid:
         raise HTTPException(status_code=400, detail="Cannot delete a paid billing item")
     item.is_active = False

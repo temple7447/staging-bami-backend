@@ -12,6 +12,7 @@ from models.user import User
 from schemas.unit import UnitCreate, UnitUpdate
 from core.security import get_current_user
 from core.database import get_db
+from core.authz import accessible_estate_ids, require_estate_access
 from core.db_helpers import find_all, find_one, save, count
 from core.config import settings
 from models.base import gen_uuid
@@ -19,6 +20,15 @@ from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/units", tags=["Units"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
+
+
+async def _get_unit_scoped(db: AsyncSession, unit_id: str, user: User) -> Unit:
+    """Fetch an active unit, 404 unless it belongs to an estate the caller can access."""
+    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True)
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found")
+    await require_estate_access(db, user, unit.estate)
+    return unit
 
 
 def _u(u: Unit) -> dict:
@@ -45,7 +55,14 @@ async def list_units(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Cross-business isolation: never list units outside the caller's estates.
+    allowed = await accessible_estate_ids(db, user)
     conditions = [Unit.is_active == True]
+    if allowed is not None:
+        if not allowed:
+            return {"success": True, "count": 0, "data": [],
+                    "pagination": {"current_page": page, "total_pages": 0, "total_items": 0}}
+        conditions.append(Unit.estate.in_(allowed))
     if estate_id:
         conditions.append(Unit.estate == estate_id)
     if status:
@@ -75,6 +92,7 @@ async def create_unit(
     estate = await find_one(db, Estate, Estate.id == eid, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
+    await require_estate_access(db, user, eid)
     data = body.model_dump()
     data["estate"] = eid
     unit = Unit(id=gen_uuid(), **data, created_by=user.id)
@@ -85,10 +103,9 @@ async def create_unit(
 
 
 @router.get("/{unit_id}")
-async def get_unit(unit_id: str, db: AsyncSession = Depends(get_db)):
-    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True)
-    if not unit:
-        raise HTTPException(status_code=404, detail="Unit not found")
+async def get_unit(unit_id: str, db: AsyncSession = Depends(get_db),
+                   user: User = Depends(get_current_user)):
+    unit = await _get_unit_scoped(db, unit_id, user)
     return {"success": True, "data": _u(unit)}
 
 
@@ -101,9 +118,7 @@ async def update_unit(
 ):
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
-    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True)
-    if not unit:
-        raise HTTPException(status_code=404, detail="Unit not found")
+    unit = await _get_unit_scoped(db, unit_id, user)
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(unit, k, v)
     unit.updated_by = user.id
@@ -120,9 +135,7 @@ async def delete_unit(
 ):
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
-    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True)
-    if not unit:
-        raise HTTPException(status_code=404, detail="Unit not found")
+    unit = await _get_unit_scoped(db, unit_id, user)
     has_tenant = await find_one(db, Tenant, Tenant.unit == unit_id, Tenant.is_active == True)
     if has_tenant:
         raise HTTPException(status_code=400, detail="Cannot delete unit with active tenant")
@@ -146,9 +159,7 @@ async def upload_unit_image(
 ):
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
-    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True)
-    if not unit:
-        raise HTTPException(status_code=404, detail="Unit not found")
+    unit = await _get_unit_scoped(db, unit_id, user)
 
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,

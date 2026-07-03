@@ -11,6 +11,17 @@ from utils.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
+# Reuse one Anthropic client across requests instead of constructing per call.
+_client: "anthropic.AsyncAnthropic | None" = None
+
+
+def _get_client() -> "anthropic.AsyncAnthropic":
+    global _client
+    if _client is None:
+        _client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    return _client
+
+
 # ─── System prompt ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are the BamiHost AI — the official intelligence of the BamiHost platform. You are simultaneously:
@@ -1063,15 +1074,17 @@ async def get_coach_reply(
     user_id: str | None = None,
     role: str | None = None,
 ) -> str:
-    # Use AsyncAnthropic to avoid blocking the event loop (sync client causes MissingGreenlet)
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-    system = SYSTEM_PROMPT + L7_CURRICULUM + _build_coach_profile(user_profile)
+    # The SYSTEM_PROMPT + curriculum is large and identical for every user and
+    # every turn, so it's cached as a stable prefix; the per-user profile and
+    # live business data (which change every request) go in a separate,
+    # uncached block AFTER it so they never invalidate the cache.
+    static_system = SYSTEM_PROMPT + L7_CURRICULUM
+    dynamic_system = _build_coach_profile(user_profile)
 
     if db and user_id and role:
         try:
             biz_ctx = await fetch_business_context(db, user_id, role)
-            system += _format_context(biz_ctx)
+            dynamic_system += _format_context(biz_ctx)
         except Exception as e:
             logger.warning(f"Could not fetch business context for {user_id}: {e}")
         # The owner's OWN stated Level 7 plan (Scalable Impact Planner) — cite it.
@@ -1094,7 +1107,7 @@ async def get_coach_reply(
                 if gp.current_step:
                     parts.append(f"currently on planner step {gp.current_step}/7")
                 if parts:
-                    system += ("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTHE OWNER'S STATED PLAN "
+                    dynamic_system += ("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTHE OWNER'S STATED PLAN "
                                "(from their Scalable Impact Planner — reference it directly)\n"
                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + " · ".join(parts))
         except Exception as e:
@@ -1103,10 +1116,14 @@ async def get_coach_reply(
     trimmed = conversation_history[-MAX_HISTORY_MESSAGES:]
     messages = trimmed + [{"role": "user", "content": new_message}]
 
-    response = await client.messages.create(
+    system_blocks = [
+        {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": dynamic_system},
+    ]
+    response = await _get_client().messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=system,
+        system=system_blocks,
         messages=messages,
     )
     return response.content[0].text

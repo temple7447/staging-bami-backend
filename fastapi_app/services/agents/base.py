@@ -26,8 +26,19 @@ from models.user import User
 
 logger = logging.getLogger(__name__)
 
-HAIKU = "claude-haiku-4-5-20251001"
+HAIKU = "claude-haiku-4-5"
 SONNET = "claude-sonnet-4-6"
+
+# Reuse one client across calls — constructing an AsyncAnthropic per request
+# churns the underlying HTTP connection pool for no benefit.
+_client: "anthropic.AsyncAnthropic | None" = None
+
+
+def _get_client() -> "anthropic.AsyncAnthropic":
+    global _client
+    if _client is None:
+        _client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    return _client
 
 
 @dataclass
@@ -44,8 +55,7 @@ class AgentMeta:
 
 async def ai_text(system: str, prompt: str, model: str = HAIKU, max_tokens: int = 400) -> str:
     """Call Claude and return the text response (async-safe)."""
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    resp = await client.messages.create(
+    resp = await _get_client().messages.create(
         model=model, max_tokens=max_tokens, system=system,
         messages=[{"role": "user", "content": prompt}],
     )

@@ -413,7 +413,7 @@ async def skill_trigger(
 
     client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     response = await client.messages.create(
-        model="claude-haiku-4-5-20251001",  # use Haiku for speed on skill triggers
+        model="claude-haiku-4-5",  # use Haiku for speed on skill triggers
         max_tokens=200,
         system=system,
         messages=[{"role": "user", "content": user_message}],

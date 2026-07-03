@@ -30,7 +30,7 @@ from utils.time_utils import utcnow
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
 
-HAIKU = "claude-haiku-4-5-20251001"
+HAIKU = "claude-haiku-4-5"
 SONNET = "claude-sonnet-4-6"
 
 
@@ -264,17 +264,33 @@ async def execute_action(
 
     # Telegram send
     if action.platform in ("telegram", "whatsapp") and action.content:
+        from utils.telegram_service import send_to_tenant
+        # Cross-business guard: recipients are client-supplied, so only allow
+        # messaging tenants that belong to THIS owner's estates. Otherwise an
+        # owner could push arbitrary content to another business's tenants.
+        allowed_estates = set(await _owner_estate_ids(db, current_user))
+
+        async def _recipient_tenant(r: dict):
+            tid = r.get("tenant_id", "")
+            phone = r.get("phone", "")
+            if tid:
+                return await db.get(Tenant, tid)
+            if phone:
+                return (await db.execute(
+                    select(Tenant).where(Tenant.tenant_phone == phone, Tenant.is_active == True)  # noqa: E712
+                )).scalars().first()
+            return None
+
         sent = []
         failed = []
         for r in recipients:
-            phone = r.get("phone", "")
-            tenant_id = r.get("tenant_id", "")
             name = r.get("name", "")
-            if tenant_id:
-                from utils.telegram_service import send_to_tenant
-                res = await send_to_tenant(db, tenant_id, action.content)
-            elif phone:
-                res = await send_to_tenant_by_phone(db, phone, action.content)
+            tenant = await _recipient_tenant(r)
+            if (r.get("tenant_id") or r.get("phone")):
+                if not tenant or tenant.estate not in allowed_estates:
+                    failed.append({**r, "result": {"success": False, "error": "Recipient not in your estates"}})
+                    continue
+                res = await send_to_tenant(db, tenant.id, action.content)
             else:
                 # Fallback: notify the owner via Telegram with the message
                 res = await send_to_owner(db, str(current_user.id),
@@ -430,7 +446,7 @@ async def send_email_campaign(
             try:
                 client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
                 resp = await client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model="claude-haiku-4-5",
                     max_tokens=400,
                     system="You are writing personalized marketing emails for a Nigerian property company. Keep it warm and professional. Return HTML only.",
                     messages=[{

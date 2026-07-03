@@ -14,6 +14,7 @@ from models.wallet import Wallet
 from models.transaction import Transaction
 from core.security import get_current_user
 from core.database import get_db
+from core.authz import accessible_estate_ids, require_estate_access
 from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
@@ -102,6 +103,7 @@ async def register_meter(
     unit = await find_one(db, Unit, Unit.id == body.unit_id, Unit.is_active == True)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
+    await require_estate_access(db, user, unit.estate)
 
     existing = await find_one(db, MeterDevice, MeterDevice.device_id == body.device_id)
     if existing:
@@ -155,7 +157,13 @@ async def list_meters(
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
 
+    # Cross-business isolation: only meters in the caller's estates.
+    allowed = await accessible_estate_ids(db, user)
     conditions = [MeterDevice.is_active == True]
+    if allowed is not None:
+        if not allowed:
+            return {"success": True, "total": 0, "total_pages": 0, "page": page, "data": []}
+        conditions.append(MeterDevice.estate.in_(allowed))
     if estate_id:
         conditions.append(MeterDevice.estate == estate_id)
     if unit_id:
@@ -199,6 +207,7 @@ async def update_meter(
                            MeterDevice.is_active == True)
     if not meter:
         raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate)
 
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(meter, k, v)
@@ -220,6 +229,7 @@ async def delete_meter(
     meter = await find_one(db, MeterDevice, MeterDevice.id == meter_id)
     if not meter:
         raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate)
     meter.is_active = False
     await save(db, meter)
     return {"success": True, "message": "Meter unassigned"}
@@ -238,8 +248,10 @@ async def get_unit_meter_status(
     if not meter:
         raise HTTPException(status_code=404, detail="No meter for this unit")
 
-    # Permission: admin or tenant of this unit
-    if user.role not in ADMIN_ROLES:
+    # Permission: estate staff of this meter, or the tenant of this unit
+    if user.role in ADMIN_ROLES:
+        await require_estate_access(db, user, meter.estate)
+    else:
         tenant = await find_one(db, Tenant, Tenant.user == user.id,
                                 Tenant.unit == unit_id, Tenant.is_active == True)
         if not tenant:
@@ -369,6 +381,7 @@ async def get_unit_meter_history(
                            MeterDevice.is_active == True)
     if not meter:
         raise HTTPException(status_code=404, detail="No meter for this unit")
+    await require_estate_access(db, user, meter.estate)
 
     since = utcnow() - timedelta(days=days)
     conditions = [MeterReading.meter_device == meter.id,
@@ -481,6 +494,7 @@ async def disconnect_meter(
                            MeterDevice.is_active == True)
     if not meter:
         raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate)
 
     if settings.TUYA_CLIENT_ID:
         await tuya.set_switch(meter.device_id, False)
@@ -514,6 +528,7 @@ async def reconnect_meter(
                            MeterDevice.is_active == True)
     if not meter:
         raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate)
 
     if settings.TUYA_CLIENT_ID:
         await tuya.set_switch(meter.device_id, True)
@@ -547,6 +562,7 @@ async def reset_meter_baseline(
                            MeterDevice.is_active == True)
     if not meter:
         raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate)
 
     meter.baseline_kwh = meter.last_kwh
     meter.baseline_date = utcnow()
