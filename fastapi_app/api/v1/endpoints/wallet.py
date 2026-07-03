@@ -22,6 +22,7 @@ from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from utils.paystack import verify_transaction, PaystackError
 
 router = APIRouter(prefix="/wallet", tags=["Wallet"])
 ADMIN_ROLES = {"admin", "super_admin", "super_manager", "business_owner"}
@@ -75,27 +76,47 @@ async def create_wallet(
     return {"success": True, "data": {"id": wallet.id}}
 
 
+async def _credit_from_verified_reference(db, user, reference: str, description: str) -> Wallet:
+    """Credit the caller's wallet by the amount Paystack confirms for `reference`.
+
+    Never trusts a client-supplied amount, and a reference can only ever be
+    applied once (idempotency), so a top-up cannot be replayed for free money.
+    """
+    existing = await find_one(db, Transaction, Transaction.reference == reference)
+    if existing:
+        raise HTTPException(status_code=409, detail="This payment has already been applied")
+    try:
+        result = await verify_transaction(reference)
+    except PaystackError as e:
+        raise HTTPException(status_code=402, detail=f"Payment could not be verified: {e}")
+    if not result["success"]:
+        raise HTTPException(status_code=402, detail="Payment was not successful")
+    amount = result["amount"]
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Verified payment amount is zero")
+    wallet = await _get_or_create_wallet(db, user.id)
+    wallet.balance += amount
+    wallet.total_earnings += amount
+    wallet.updated_at = utcnow()
+    await save(db, wallet)
+    await _record_transaction(db, user.id, wallet.id, amount, "credit",
+                              method="paystack", reference=reference,
+                              description=description, created_by=user.id)
+    return wallet
+
+
 @router.post("/add-funds")
 async def add_funds(
     body: AddFundsRequest,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Admins can credit any user; tenants can only top up their own wallet (test/demo mode)
-    if user.role in ADMIN_ROLES:
-        target_user = await db.get(User, str(body.user_id)) if (hasattr(body, "user_id") and getattr(body, "user_id", None)) else user
-    else:
-        target_user = user
-    if not target_user:
-        raise HTTPException(status_code=404, detail="Target user not found")
-    wallet = await _get_or_create_wallet(db, target_user.id)
-    wallet.balance += body.amount
-    wallet.total_earnings += body.amount
-    wallet.updated_at = utcnow()
-    await save(db, wallet)
-    await _record_transaction(db, target_user.id, wallet.id, body.amount, "credit",
-                              description=getattr(body, "description", None) or "Wallet top-up",
-                              created_by=user.id)
+    # Self-service top-up must correspond to a real payment. Admins crediting
+    # another user without payment use the dedicated /admin/credit route.
+    if not body.reference:
+        raise HTTPException(status_code=400, detail="A Paystack payment reference is required to add funds")
+    wallet = await _credit_from_verified_reference(
+        db, user, body.reference, body.description or "Wallet top-up")
     return {"success": True, "message": "Funds added", "data": {"balance": wallet.balance}}
 
 
@@ -118,13 +139,10 @@ async def wallet_transaction(
     wallet = await _get_or_create_wallet(db, user.id)
 
     if tx_type == "deposit":
-        wallet.balance += amount
-        wallet.total_earnings += amount
-        wallet.updated_at = utcnow()
-        await save(db, wallet)
-        await _record_transaction(db, user.id, wallet.id, amount, "deposit",
-                                  method="bank_transfer", description=desc or "Deposit",
-                                  reference=ref, created_by=user.id)
+        # A deposit is real money in — verify it against Paystack, same as add-funds.
+        if not ref:
+            raise HTTPException(status_code=400, detail="A Paystack payment reference is required for a deposit")
+        wallet = await _credit_from_verified_reference(db, user, ref, desc or "Deposit")
         return {"success": True, "message": "Deposit recorded", "data": {"balance": wallet.balance}}
 
     elif tx_type == "withdrawal":
@@ -203,15 +221,41 @@ async def transfer_funds(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    # Resolve the recipient BEFORE moving any money — the old version debited
+    # the sender and credited nobody, destroying the funds.
+    recipient = None
+    if body.recipient_email:
+        recipient = await find_one(db, User, User.email == body.recipient_email)
+    elif body.recipient_id:
+        recipient = await db.get(User, str(body.recipient_id))
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    if recipient.id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot transfer to yourself")
+
     wallet = await _get_or_create_wallet(db, user.id)
     if wallet.balance < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance")
+
+    # Debit sender
     wallet.balance -= body.amount
     wallet.total_spent += body.amount
     wallet.updated_at = utcnow()
     await save(db, wallet)
     await _record_transaction(db, user.id, wallet.id, body.amount, "transfer",
-                              description=getattr(body, "description", "Transfer"), created_by=user.id)
+                              method="internal", description=body.description or f"Transfer to {recipient.email}",
+                              created_by=user.id)
+    # Credit recipient
+    r_wallet = await _get_or_create_wallet(db, recipient.id)
+    r_wallet.balance += body.amount
+    r_wallet.total_earnings += body.amount
+    r_wallet.updated_at = utcnow()
+    await save(db, r_wallet)
+    await _record_transaction(db, recipient.id, r_wallet.id, body.amount, "deposit",
+                              method="internal", description=body.description or f"Transfer from {user.email}",
+                              created_by=user.id)
     return {"success": True, "message": "Transfer successful", "balance": wallet.balance}
 
 

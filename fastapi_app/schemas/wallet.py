@@ -7,7 +7,10 @@ class CreateWalletRequest(BaseModel):
 
 
 class AddFundsRequest(BaseModel):
-    amount: float
+    amount: Optional[float] = None       # ignored for self top-up; amount comes from Paystack
+    reference: Optional[str] = None      # Paystack transaction reference (required for self top-up)
+    user_id: Optional[str] = None        # admin only: credit another user
+    description: Optional[str] = None
 
 
 class DeductFundsRequest(BaseModel):

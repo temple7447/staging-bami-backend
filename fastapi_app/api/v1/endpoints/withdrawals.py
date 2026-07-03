@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from models.withdrawal import Withdrawal
 from models.wallet import Wallet
 from models.user import User
+from models.transaction import Transaction
 from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
@@ -15,6 +16,16 @@ from models.base import gen_uuid
 from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
+
+REFUND_STATES = {"rejected", "declined", "cancelled", "canceled", "failed"}
+
+
+def _hold_ref(wid: str) -> str:
+    return f"WDL-HOLD-{wid}"
+
+
+def _refund_ref(wid: str) -> str:
+    return f"WDL-REFUND-{wid}"
 
 
 class WithdrawalRequest(BaseModel):
@@ -34,6 +45,8 @@ async def request_withdrawal(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
     wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
     if not wallet or wallet.balance < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient wallet balance")
@@ -41,15 +54,28 @@ async def request_withdrawal(
     bank_details = body.bank_details or {
         "bank_name": body.bank_name, "account_number": body.account_number, "account_name": body.account_name
     }
+    wid = gen_uuid()
+    # Place a HOLD: debit the wallet now so the same balance can't be
+    # requested for withdrawal twice. Refunded if the request is rejected.
+    wallet.balance -= body.amount
+    wallet.total_spent += body.amount
+    wallet.updated_at = utcnow()
     w = Withdrawal(
-        id=gen_uuid(),
+        id=wid,
         user=user.id,
         amount=body.amount,
         bank_details=bank_details,
         notes=body.notes or body.reason,
         status="pending",
     )
-    await save(db, w)
+    hold_tx = Transaction(
+        id=gen_uuid(), user=user.id, wallet_id=wallet.id, amount=body.amount,
+        type="withdrawal_hold", method="bank_transfer", status="pending",
+        reference=_hold_ref(wid), description="Withdrawal request (held)", created_by=user.id,
+    )
+    db.add_all([wallet, w, hold_tx])
+    await db.commit()
+    await db.refresh(w)
     return {"success": True, "message": "Withdrawal request submitted", "data": _w(w)}
 
 
@@ -82,11 +108,39 @@ async def update_status(
     w = await find_one(db, Withdrawal, Withdrawal.id == wid)
     if not w:
         raise HTTPException(status_code=404, detail="Withdrawal not found")
-    w.status = body.get("status", w.status)
+
+    new_status = (body.get("status") or w.status or "").lower()
+    to_add = [w]
+
+    # Rejecting a held request returns the money. Tie the refund to the actual
+    # hold transaction (and guard against a second refund) so it can never
+    # credit money that was not previously debited.
+    if new_status in REFUND_STATES:
+        hold = await find_one(db, Transaction, Transaction.reference == _hold_ref(wid),
+                              Transaction.type == "withdrawal_hold")
+        already = await find_one(db, Transaction, Transaction.reference == _refund_ref(wid),
+                                 Transaction.type == "withdrawal_refund")
+        if hold and not already:
+            wallet = await find_one(db, Wallet, Wallet.user_id == w.user)
+            if wallet:
+                wallet.balance += w.amount
+                wallet.total_spent -= w.amount  # reverse the hold
+                wallet.updated_at = utcnow()
+                to_add.append(wallet)
+                to_add.append(Transaction(
+                    id=gen_uuid(), user=w.user, wallet_id=wallet.id, amount=w.amount,
+                    type="withdrawal_refund", method="bank_transfer", status="completed",
+                    reference=_refund_ref(wid), description="Withdrawal rejected — refunded",
+                    created_by=user.id,
+                ))
+
+    w.status = new_status
     w.reviewed_by = user.id
     w.reviewed_at = utcnow()
     w.updated_at = utcnow()
-    await save(db, w)
+    db.add_all(to_add)
+    await db.commit()
+    await db.refresh(w)
     return {"success": True, "data": _w(w)}
 
 
