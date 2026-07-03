@@ -4,7 +4,7 @@ and processTenant helpers used across tenantController.js and dashboardControlle
 """
 from datetime import datetime, timezone, timedelta
 from math import floor
-from utils.rent_calculator import get_current_rent, estate_rent_config
+from utils.rent_calculator import get_current_rent, estate_rent_config, resolve_increase_start
 from utils.time_utils import utcnow
 
 
@@ -74,6 +74,7 @@ def process_tenant(tenant, paid_fees: dict | None = None, estate_config=None) ->
     origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", utcnow())
 
     _rate, _cycle, _start = estate_config or (None, None, None)
+    _start = resolve_increase_start(tenant, _start)      # tenant override wins over estate
     # Escalate from base_* so a stored, already-escalated amount is never
     # escalated a second time (rent_amount is scheduler-maintained).
     rent_base = getattr(tenant, "base_rent", None) or getattr(tenant, "rent_amount", 0)

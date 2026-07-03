@@ -14,7 +14,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, find_all, count, sum_col
 from utils.tenant_helpers import project_next_due_date, estate_config_for
-from utils.rent_calculator import calculate_effective_rent, get_current_rent
+from utils.rent_calculator import calculate_effective_rent, get_current_rent, resolve_increase_start
 from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -121,6 +121,7 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         renewal_start = projected_due
         billing_start = renewal_start.replace(year=renewal_start.year - 1)
         _r, _c, _s = await estate_config_for(db, tenant.estate)
+        _s = resolve_increase_start(tenant, _s)          # tenant override wins over estate
         y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
         y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _r, _c, _s)
         y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _r, _c, _s)

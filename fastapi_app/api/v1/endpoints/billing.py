@@ -17,7 +17,7 @@ from core.database import get_db
 from core.authz import accessible_estate_ids, require_estate_access, require_tenant_access
 from core.db_helpers import find_one, find_all, save, count
 from utils.tenant_helpers import project_next_due_date
-from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
+from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start
 from models.base import gen_uuid
 from utils.time_utils import utcnow
 
@@ -78,6 +78,7 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
     unit = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
+    _start = resolve_increase_start(tenant, _start)      # tenant override wins over estate
     now  = utcnow()
 
     projected_due = project_next_due_date(tenant)
@@ -241,6 +242,7 @@ async def get_billing_summary(
             if t.estate not in _cfg_cache:
                 _cfg_cache[t.estate] = estate_rent_config(await db.get(Estate, t.estate) if t.estate else None)
             _r, _c, _s = _cfg_cache[t.estate]
+            _s = resolve_increase_start(t, _s)           # tenant override wins over estate
             eff_rent = get_current_rent(t.rent_amount, origin, False, _r, _c, _s)
             svc_base = t.service_charge_amount or 0
             eff_svc  = get_current_rent(svc_base, origin, False, _r, _c, _s) if svc_base else 0

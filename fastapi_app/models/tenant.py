@@ -41,6 +41,11 @@ class Tenant(Base):
     lease_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     lease_duration_months: Mapped[int | None] = mapped_column(nullable=True)
 
+    # Per-tenant rent-increase anchor. Overrides the estate's start date for
+    # this tenant only; when null, the estate default (then entry date) is used.
+    # The percent/cycle stay estate-wide — this just fixes WHEN the clock starts.
+    rent_increase_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     user: Mapped[str | None] = mapped_column(String(36), nullable=True)
     telegram_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)

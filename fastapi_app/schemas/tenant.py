@@ -43,6 +43,7 @@ class TenantUpdate(BaseModel):
     electric_meter_number:      Optional[str]   = None
     entry_date:                 Optional[str]   = None
     next_due_date:              Optional[str]   = None
+    rent_increase_start:        Optional[str]   = None   # per-tenant increase anchor (override)
     rent_outstanding:           Optional[float] = None
     service_charge_outstanding: Optional[float] = None
 

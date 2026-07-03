@@ -30,6 +30,13 @@ def estate_rent_config(estate) -> tuple:
     return (rate, cycle, start)
 
 
+def resolve_increase_start(tenant, estate_start):
+    """Anchor for a tenant's rent increases, most specific first:
+    the tenant's own override, else the estate default. When both are None the
+    calculators fall back to the tenant's entry date. Rate/cycle stay estate-wide."""
+    return getattr(tenant, "rent_increase_start", None) or estate_start
+
+
 def _resolve(rate, cycle_years, is_vacant):
     # No configured policy => NO increase. Escalation is opt-in per estate, so
     # a missing/None policy must never silently apply the old +26%/2yr default.

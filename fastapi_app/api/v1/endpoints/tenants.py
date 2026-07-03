@@ -20,7 +20,7 @@ from core.authz import require_tenant_access, require_estate_access, accessible_
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
-from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config
+from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start
 from utils.email_service import send_welcome_email
 from models.base import gen_uuid
 from utils.time_utils import utcnow
@@ -342,6 +342,8 @@ async def pay_billing_items(
         raise HTTPException(status_code=404, detail="Wallet not found")
     origin = tenant.entry_date if tenant else utcnow()
     _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
+    if tenant:
+        _s = resolve_increase_start(tenant, _s)          # tenant override wins over estate
     # Price the period actually being paid for (the upcoming term), not the
     # tenant's first year — otherwise escalations never reach this path.
     period_start = (project_next_due_date(tenant) or tenant.next_due_date or utcnow()) if tenant else utcnow()
@@ -435,6 +437,7 @@ async def get_tenant(
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     origin = tenant.entry_date or tenant.created_at
     _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
+    _start = resolve_increase_start(tenant, _start)      # tenant override wins over estate
     rent_base = tenant.base_rent or tenant.rent_amount
     svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
     is_new    = tenant.tenant_type == "new"
@@ -563,6 +566,9 @@ async def update_tenant(
     if body.electric_meter_number is not None: tenant.electric_meter_number = body.electric_meter_number
     if body.entry_date is not None:    tenant.entry_date    = parse_flexible_date(body.entry_date)
     if body.next_due_date is not None: tenant.next_due_date = parse_flexible_date(body.next_due_date)
+    # Per-tenant increase anchor. An empty string clears it (fall back to estate/entry).
+    if body.rent_increase_start is not None:
+        tenant.rent_increase_start = parse_flexible_date(body.rent_increase_start)
     if body.rent_outstanding is not None:           tenant.rent_outstanding           = max(0, body.rent_outstanding)
     if body.service_charge_outstanding is not None: tenant.service_charge_outstanding = max(0, body.service_charge_outstanding)
     if history_meta:
