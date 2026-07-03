@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
@@ -67,8 +67,8 @@ async def create_payment(
 
 @router.get("")
 async def list_payments(
-    tenant_id: Optional[str] = None,
-    estate_id: Optional[str] = None,
+    tenant_id: Optional[str] = Query(None, alias="tenantId"),
+    estate_id: Optional[str] = Query(None, alias="estateId"),
     status: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
