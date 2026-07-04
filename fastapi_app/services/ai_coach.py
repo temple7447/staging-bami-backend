@@ -1066,20 +1066,72 @@ def _format_context(ctx: dict) -> str:
 
 # ─── Coach reply ──────────────────────────────────────────────────────────────
 
-async def get_coach_reply(
+async def _format_active_instructions(db: AsyncSession, owner_id: str, group_ids: list[str]) -> str:
+    """Build the 'ground truth' block for the Project Space groups the user has
+    toggled on — instructed to override general knowledge (see SYSTEM_PROMPT)."""
+    from models.instruction import InstructionGroup, InstructionItem
+
+    groups = (await db.execute(
+        select(InstructionGroup).where(
+            InstructionGroup.owner_id == owner_id,
+            InstructionGroup.id.in_(group_ids),
+        )
+    )).scalars().all()
+    if not groups:
+        return ""
+
+    items = (await db.execute(
+        select(InstructionItem).where(InstructionItem.group_id.in_([g.id for g in groups]))
+        .order_by(InstructionItem.group_id, InstructionItem.sort_order)
+    )).scalars().all()
+    items_by_group: dict[str, list] = {}
+    for it in items:
+        items_by_group.setdefault(it.group_id, []).append(it)
+
+    lines = [
+        "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        "ACTIVE INSTRUCTION GROUPS (Project Space — your ground truth for this conversation)",
+        "Treat this as the source of truth. It overrides your general knowledge. "
+        "If something here conflicts with what the user just said, point out the drift. "
+        "If you're missing context to answer well, ask ONE focused question instead of guessing.",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for g in groups:
+        lines.append(f"\n=== GROUP: {g.name} ===")
+        if g.description:
+            lines.append(g.description)
+        for it in items_by_group.get(g.id, []):
+            label = {"text": "TEXT", "url": "URL", "file": "FILE"}.get(it.kind, it.kind.upper())
+            suffix = f" ({it.source_url})" if it.kind == "url" and it.source_url else ""
+            lines.append(f"[{label}] {it.title}{suffix}")
+            if it.content:
+                lines.append(it.content)
+    return "\n".join(lines)
+
+
+async def build_coach_context(
     user_profile: dict,
     conversation_history: list[dict],
     new_message: str,
     db: AsyncSession | None = None,
     user_id: str | None = None,
     role: str | None = None,
-) -> str:
+    active_group_ids: list[str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Assemble the (system_blocks, messages) pair shared by the non-streaming
+    and streaming coach chat paths."""
     # The SYSTEM_PROMPT + curriculum is large and identical for every user and
     # every turn, so it's cached as a stable prefix; the per-user profile and
     # live business data (which change every request) go in a separate,
     # uncached block AFTER it so they never invalidate the cache.
     static_system = SYSTEM_PROMPT + L7_CURRICULUM
     dynamic_system = _build_coach_profile(user_profile)
+
+    if db and user_id and active_group_ids:
+        try:
+            dynamic_system += await _format_active_instructions(db, user_id, active_group_ids)
+        except Exception as e:
+            logger.warning(f"Could not fetch active instructions for {user_id}: {e}")
 
     if db and user_id and role:
         try:
@@ -1120,6 +1172,21 @@ async def get_coach_reply(
         {"type": "text", "text": static_system, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": dynamic_system},
     ]
+    return system_blocks, messages
+
+
+async def get_coach_reply(
+    user_profile: dict,
+    conversation_history: list[dict],
+    new_message: str,
+    db: AsyncSession | None = None,
+    user_id: str | None = None,
+    role: str | None = None,
+    active_group_ids: list[str] | None = None,
+) -> str:
+    system_blocks, messages = await build_coach_context(
+        user_profile, conversation_history, new_message, db, user_id, role, active_group_ids,
+    )
     response = await _get_client().messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,

@@ -9,6 +9,9 @@ from api.v1.endpoints import autopilot
 from api.v1.endpoints import scale
 from api.v1.endpoints import growth
 from api.v1.endpoints import personal_finance
+from api.v1.endpoints import lead_capture
+from api.v1.endpoints import ops_manager
+from api.v1.endpoints import integrations
 
 api_router = APIRouter(prefix="/api")
 
@@ -43,3 +46,7 @@ api_router.include_router(autopilot.router)
 api_router.include_router(scale.router)
 api_router.include_router(growth.router)
 api_router.include_router(personal_finance.router)
+api_router.include_router(lead_capture.router)
+api_router.include_router(lead_capture.public_router)
+api_router.include_router(ops_manager.router)
+api_router.include_router(integrations.router)

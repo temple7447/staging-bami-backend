@@ -71,6 +71,65 @@ def _action(owner_id: str, skill: str, action_type: str, title: str,
     )
 
 
+# ─── Ops Manager proposal executor ─────────────────────────────────────────────
+# Dispatches an approved AutopilotAction(skill="ops_manager") by its
+# action_type ("kind" in the proposal), actually applying trigger_context
+# (the proposal payload) to the relevant resource.
+
+async def _execute_ops_proposal(db: AsyncSession, current_user: User, action: AutopilotAction) -> dict:
+    payload = action.trigger_context or {}
+    kind = action.action_type
+    owner_id = str(current_user.id)
+
+    if kind == "lead_page":
+        from models.lead_page import LeadPage
+        from api.v1.endpoints.lead_capture import _slugify, _unique_slug
+
+        page_id = payload.get("id")
+        page = None
+        if page_id:
+            page = (await db.execute(
+                select(LeadPage).where(LeadPage.id == page_id, LeadPage.owner_id == owner_id)
+            )).scalar_one_or_none()
+        if page:
+            for k in ("title", "headline", "subheadline", "body", "cta_text", "thank_you_message"):
+                if k in payload:
+                    setattr(page, k, payload[k])
+            return {"success": True, "note": f"Updated lead page {page.slug}", "lead_page_id": page.id}
+        slug = await _unique_slug(db, _slugify(payload.get("title") or "page"))
+        page = LeadPage(
+            id=gen_uuid(), owner_id=owner_id, slug=slug,
+            title=payload.get("title", "Untitled page"),
+            headline=payload.get("headline", ""), subheadline=payload.get("subheadline", ""),
+            body=payload.get("body", ""), cta_text=payload.get("cta_text", "Get instant access"),
+        )
+        db.add(page)
+        await db.flush()
+        return {"success": True, "note": f"Created lead page /p/{page.slug}", "lead_page_id": page.id}
+
+    if kind == "integration":
+        from models.integration import BusinessIntegration
+        from utils.crypto import encrypt_secret
+
+        integ = BusinessIntegration(
+            id=gen_uuid(), owner_id=owner_id,
+            name=payload.get("name", "Integration"), kind=payload.get("kind", "custom"),
+            base_url=payload.get("base_url", ""), auth_header=payload.get("auth_header", "Authorization"),
+            auth_value_encrypted=encrypt_secret(payload["auth_value"]) if payload.get("auth_value") else None,
+        )
+        db.add(integ)
+        await db.flush()
+        return {"success": True, "note": f"Created integration '{integ.name}'", "integration_id": integ.id}
+
+    if kind == "task":
+        # No safe generic mutation exists for an arbitrary "task" — this is a
+        # reminder for the human, acknowledged not auto-actioned.
+        return {"success": True, "note": "Task acknowledged — action it manually"}
+
+    # report / agent_create / agent_update / other — nothing safe to auto-apply.
+    return {"success": True, "note": "Proposal acknowledged — no automatic action defined for this kind"}
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _owner_estate_ids(db: AsyncSession, user: User) -> list[str]:
@@ -258,6 +317,17 @@ async def execute_action(
 
     if action.status == "done":
         return {"message": "Already executed", "action": _serialize(action)}
+
+    # Ops Manager proposals dispatch by `action_type` (the proposal "kind"),
+    # not by `platform` — this is the approval executor the reference app
+    # (echo-web-heart) never built; there, "Approve" only flipped a status flag.
+    if action.skill == "ops_manager":
+        result = await _execute_ops_proposal(db, current_user, action)
+        action.status = "done"
+        action.executed_at = utcnow()
+        action.execution_result = result
+        await db.commit()
+        return {"success": result.get("success", True), "result": result, "action": _serialize(action)}
 
     recipients = body.recipients or action.recipients or []
     result: dict = {}

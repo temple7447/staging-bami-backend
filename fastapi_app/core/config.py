@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # Anthropic (Claude AI)
     ANTHROPIC_API_KEY: str = ""
 
+    # Fernet key used to encrypt Integrations Hub auth secrets at rest
+    INTEGRATION_ENCRYPTION_KEY: str = ""
+
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""

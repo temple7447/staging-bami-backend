@@ -1,6 +1,6 @@
-from sqlalchemy import String, Text, Float, DateTime, JSON
+from sqlalchemy import String, Text, Float, Integer, DateTime, JSON
 from sqlalchemy.orm import Mapped, mapped_column
-from models.base import Base, gen_uuid
+from models.base import Base, Money, gen_uuid
 from datetime import datetime
 from utils.time_utils import utcnow
 
@@ -10,6 +10,14 @@ class Deal(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     owner_id: Mapped[str] = mapped_column(String(36), index=True)
+
+    # Which pipeline this deal belongs to: "sales" (general CRM) or "level1"
+    # (the Scale-framework "Get 10 Customers" funnel — same table, filtered view).
+    pipeline: Mapped[str] = mapped_column(String(20), default="sales")
+    # Level 1 only: NPS score (0-10) and lifetime value, used for the
+    # graduation status (10 sales won, 10 promoters, Model 10 filled).
+    nps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ltv: Mapped[float | None] = mapped_column(Money, nullable=True)
 
     # Contact
     client_name: Mapped[str] = mapped_column(String(255))
@@ -23,6 +31,7 @@ class Deal(Base):
     value: Mapped[float] = mapped_column(Float, default=0.0)
 
     # Pipeline stage: lead, qualified, proposal, negotiation, won, lost
+    # (Level 1 pipeline additionally uses "delivered", after "won")
     stage: Mapped[str] = mapped_column(String(50), default="lead")
     probability: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
 
