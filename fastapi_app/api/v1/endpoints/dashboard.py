@@ -123,26 +123,82 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         billing_start = renewal_start.replace(year=renewal_start.year - 1)
         _r, _c, _s = await estate_config_for(db, tenant.estate)
         _s = resolve_increase_start(tenant, _s)          # tenant override wins over estate
-        y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
-        y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _r, _c, _s)
-        y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _r, _c, _s)
-        y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _r, _c, _s)
-        lease_months = max(0, (renewal_start.year - origin.year) * 12 + (renewal_start.month - origin.month))
+        cy_rent_proj = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
+        cy_svc_proj  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _r, _c, _s)
+        ny_rent_proj = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _r, _c, _s)
+        ny_svc_proj  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _r, _c, _s)
+
+        # Paid this calendar year, broken down by type (billing_items metadata wins)
+        year_start = datetime(now.year, 1, 1)
+        year_end   = datetime(now.year + 1, 1, 1)
+        cy_payments = await find_all(db, Payment,
+                                     Payment.tenant == tenant.id, Payment.payment_status == "completed",
+                                     Payment.created_at >= year_start, Payment.created_at < year_end)
+        cy_rent = cy_svc = cy_other = 0.0
+        for p in cy_payments:
+            items = (((p.paystack_response or {}).get("data") or {}).get("metadata") or {}).get("billing_items") or []
+            if items:
+                for item in items:
+                    code = item.get("code") or item.get("type") or ""
+                    if code == "rent":              cy_rent  += item.get("amount") or 0
+                    elif code == "service_charge":  cy_svc   += item.get("amount") or 0
+                    else:                           cy_other += item.get("amount") or 0
+            elif p.payment_type == "rent":            cy_rent  += p.amount
+            elif p.payment_type == "service_charge":  cy_svc   += p.amount
+            elif p.payment_type in ("caution_fee", "legal_fee", "deposit", "other"): cy_other += p.amount
+            else:                                     cy_rent  += p.amount  # bundle / initial — covers rent
+        cy_paid_total = cy_rent + cy_svc + cy_other
+
+        # One-time fees (new tenants, year 1 only, if not yet paid)
+        is_first_time = tenant.tenant_type == "new"
+        fee_payments = await find_all(db, Payment,
+                                      Payment.tenant == tenant.id, Payment.payment_status == "completed",
+                                      Payment.payment_type.in_(["caution_fee", "legal_fee", "initial", "bundle"]))
+        paid_fees = set()
+        for p in fee_payments:
+            if p.payment_type in ("caution_fee", "legal_fee"):
+                paid_fees.add(p.payment_type)
+            items = (((p.paystack_response or {}).get("data") or {}).get("metadata") or {}).get("billing_items") or []
+            for item in items:
+                code = item.get("code") or item.get("type") or ""
+                if code in ("caution_fee", "legal_fee"):
+                    paid_fees.add(code)
+
+        cy_other_proj = 0.0
+        cy_other_breakdown = []
+        if is_first_time and unit:
+            if "caution_fee" not in paid_fees and (unit.caution_fee or 0) > 0:
+                cy_other_proj += unit.caution_fee
+                cy_other_breakdown.append({"code": "caution_fee", "label": "Caution Fee", "amount": unit.caution_fee})
+            if "legal_fee" not in paid_fees and (unit.legal_fee or 0) > 0:
+                cy_other_proj += unit.legal_fee
+                cy_other_breakdown.append({"code": "legal_fee", "label": "Legal Fee", "amount": unit.legal_fee})
+
+        cy_proj_total = cy_rent_proj["total_amount"] + cy_svc_proj["total_amount"] + cy_other_proj
+        ny_total      = ny_rent_proj["total_amount"] + ny_svc_proj["total_amount"]
+
         overview["yearly_payment"] = {
-            "lease_duration_months": lease_months,
-            "year1": {
-                "label": "Current Year", "billing_start": billing_start, "billing_end": renewal_start,
-                "annual_rent": y1_rent["total_amount"], "annual_service_charge": y1_svc["total_amount"],
-                "monthly_rent": y1_rent["final_rent"], "monthly_service": y1_svc["final_rent"],
-                "total": y1_rent["total_amount"] + y1_svc["total_amount"],
+            "current_year": {
+                "year": billing_start.year,
+                "is_first_time": is_first_time,
+                "rent": cy_rent_proj["total_amount"],
+                "service_charge": cy_svc_proj["total_amount"],
+                **({"other": cy_other_proj, "other_breakdown": cy_other_breakdown} if cy_other_proj > 0 else {}),
+                "total": cy_proj_total,
+                "paid": {"rent": cy_rent, "service_charge": cy_svc,
+                         **({"other": cy_other} if cy_other > 0 else {}), "total": cy_paid_total},
+                "outstanding": max(0, cy_proj_total - cy_paid_total),
             },
-            "year2": {
-                "label": "Renewal Year", "billing_start": renewal_start,
-                "billing_end": renewal_start.replace(year=renewal_start.year + 1),
-                "annual_rent": y2_rent["total_amount"], "annual_service_charge": y2_svc["total_amount"],
-                "monthly_rent": y2_rent["final_rent"], "monthly_service": y2_svc["final_rent"],
-                "total": y2_rent["total_amount"] + y2_svc["total_amount"],
-                "rent_increased": y2_rent["final_rent"] > y1_rent["final_rent"],
+            "next_year": {
+                "year": renewal_start.year,
+                "is_first_time": False,
+                "renewal_start_date": renewal_start,
+                "monthly_rent": ny_rent_proj["final_rent"],
+                "monthly_service_charge": ny_svc_proj["final_rent"],
+                "projected_rent": ny_rent_proj["total_amount"],
+                "projected_service_charge": ny_svc_proj["total_amount"],
+                "projected_total": ny_total,
+                "rent_increased": ny_rent_proj["final_rent"] > cy_rent_proj["final_rent"],
             }
         }
     return overview
