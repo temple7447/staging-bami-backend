@@ -146,6 +146,13 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
         bedroom_type = (f"{unit.bedrooms} BED ROOM{'S' if unit.bedrooms != 1 else ''}"
                         if unit.bedrooms else (unit.category or ""))
 
+    # One-time fees belong to a NEW tenant's FIRST tenancy year only — that
+    # year's total is rent + service + fees (matches the dashboard Year Total,
+    # e.g. 420k + 150k + 150k + 100k = 820k). Later years: rent + service.
+    fees_apply = tenant.tenant_type not in ("existing", "transfer") and stay_year == 1
+    caution = (unit.caution_fee or 0) if (unit and fees_apply) else 0
+    legal   = (unit.legal_fee or 0) if (unit and fees_apply) else 0
+
     return {
         "unit": unit, "estate": estate,
         "estate_name": estate.name if estate else "BamiHost",
@@ -154,11 +161,11 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
         "increase_percent": estate.rent_increase_percent if estate else 0,
         "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
         "bedroom_type": bedroom_type,
-        "caution_fee": unit.caution_fee if unit else 0,
-        "legal_fee": unit.legal_fee if unit else 0,
+        "caution_fee": caution,
+        "legal_fee": legal,
         "annual_rent": y1r["total_amount"],
         "annual_service_charge": y1s["total_amount"],
-        "current_total": y1r["total_amount"] + y1s["total_amount"],
+        "current_total": y1r["total_amount"] + y1s["total_amount"] + caution + legal,
         "next_total": y2r["total_amount"] + y2s["total_amount"],
         "current_year": billing_start.year,
         "next_year": renewal.year,
