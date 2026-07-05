@@ -156,6 +156,8 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
         "bedroom_type": bedroom_type,
         "caution_fee": unit.caution_fee if unit else 0,
         "legal_fee": unit.legal_fee if unit else 0,
+        "annual_rent": y1r["total_amount"],
+        "annual_service_charge": y1s["total_amount"],
         "current_total": y1r["total_amount"] + y1s["total_amount"],
         "next_total": y2r["total_amount"] + y2s["total_amount"],
         "current_year": billing_start.year,
@@ -185,8 +187,26 @@ async def get_payment_receipts(
     payments = await find_all(db, Payment, Payment.tenant == tenant.id,
                               order_by=Payment.created_at.desc(), limit=100)
 
-    receipts = []
+    # One checkout can create several Payment rows sharing a reference (the
+    # rent/service bundle plus separate one-time fee rows) — merge them into a
+    # single receipt whose amount is the full sum the tenant actually paid.
+    grouped, seen_refs = [], {}
     for p in payments:
+        base_ref = (p.reference or "").split("-caution_fee")[0].split("-legal_fee")[0]
+        if base_ref and base_ref in seen_refs:
+            g = seen_refs[base_ref]
+            g["_total"] += p.amount or 0
+            if p.reference == base_ref:   # the main bundle row fronts the receipt
+                g["payment"] = p
+            continue
+        entry = {"payment": p, "_total": p.amount or 0}
+        if base_ref:
+            seen_refs[base_ref] = entry
+        grouped.append(entry)
+
+    receipts = []
+    for g in grouped:
+        p = g["payment"]
         receipts.append({
             "receipt_id": p.id,
             "reference": p.reference or p.id,
@@ -206,10 +226,10 @@ async def get_payment_receipts(
             "flat_type": tenant.unit_label or "",
             "move_in_date": tenant.entry_date,
             "expiry_date": ctx["expiry_date"],
-            "amount_paid": p.amount,
+            "amount_paid": g["_total"],
             "breakdown": {},
-            "rent": tenant.rent_amount,
-            "service_charge": tenant.service_charge_amount,
+            "rent": ctx["annual_rent"],
+            "service_charge": ctx["annual_service_charge"],
             "caution_fee": ctx["caution_fee"],
             "legal_fee": ctx["legal_fee"],
             "rent_outstanding": tenant.rent_outstanding,
@@ -269,12 +289,19 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant record not found for this payment")
     ctx = await _tenancy_receipt_context(db, tenant)
+    # Sum every payment row from the same checkout (bundle + separate fee rows)
+    amount_paid = payment.amount or 0
+    base_ref = (payment.reference or "").split("-caution_fee")[0].split("-legal_fee")[0]
+    if base_ref:
+        siblings = await find_all(db, Payment, Payment.tenant == tenant.id,
+                                  Payment.reference.like(f"{base_ref}%"))
+        amount_paid = sum(s.amount or 0 for s in siblings) or amount_paid
     receipt_data = {
-        "reference": payment.reference or payment.id,
+        "reference": base_ref or payment.reference or payment.id,
         "payment_date": payment.created_at,
-        "amount": payment.amount, "payment_type": payment.payment_type,
-        "rent": tenant.rent_amount, "rent_outstanding": tenant.rent_outstanding or 0,
-        "service_charge": tenant.service_charge_amount,
+        "amount": amount_paid, "payment_type": payment.payment_type,
+        "rent": ctx["annual_rent"], "rent_outstanding": tenant.rent_outstanding or 0,
+        "service_charge": ctx["annual_service_charge"],
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
         "caution_fee": ctx["caution_fee"], "legal_fee": ctx["legal_fee"],
         "outstanding_balance": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
