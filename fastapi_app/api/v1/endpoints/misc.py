@@ -1,5 +1,6 @@
 import cloudinary, cloudinary.uploader
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from pydantic import BaseModel
@@ -156,21 +157,25 @@ async def my_deposits(
     items = await find_all(db, BankDeposit, *conditions, order_by=BankDeposit.created_at.desc(), skip=skip, limit=limit)
     return {"success": True, "count": total, "total": total,
             "total_pages": -(-total // limit), "page": page,
-            "data": [_dep(i) for i in items]}
+            "data": await _deps_with_users(db, items)}
 
 
 @router.post("/bank-deposits", status_code=201)
 async def record_bank_deposit(
-    amount: Optional[float] = None,
-    bank_name: Optional[str] = None,
-    account_name: Optional[str] = None,
-    account_number: Optional[str] = None,
-    reference: Optional[str] = None,
-    paid_for: Optional[str] = None,
+    amount: Optional[float] = Form(None),
+    bank_name: Optional[str] = Form(None),
+    account_name: Optional[str] = Form(None),
+    account_number: Optional[str] = Form(None),
+    reference: Optional[str] = Form(None),
+    paid_for: Optional[str] = Form(None),
+    proof: Optional[UploadFile] = File(None),
     proof_image: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
+    if not amount or amount <= 0:
+        raise HTTPException(status_code=400, detail="A valid deposit amount is required")
     proof_url = None
+    proof_image = proof or proof_image
     if proof_image and proof_image.filename:
         cloudinary.config(
             cloud_name=settings.CLOUDINARY_CLOUD_NAME,
@@ -209,7 +214,7 @@ async def list_bank_deposits(
                            order_by=BankDeposit.created_at.desc(), skip=skip, limit=limit)
     return {"success": True, "count": total, "total": total,
             "total_pages": -(-total // limit), "page": page,
-            "data": [_dep(i) for i in items]}
+            "data": await _deps_with_users(db, items)}
 
 
 @router.get("/bank-deposits/{dep_id}")
@@ -222,7 +227,8 @@ async def get_bank_deposit(
         raise HTTPException(status_code=404, detail="Deposit not found")
     if user.role not in ADMIN_ROLES and dep.submitted_by != user.id:
         raise HTTPException(status_code=403, detail="Access denied")
-    return {"success": True, "data": _dep(dep)}
+    submitter = await db.get(User, dep.submitted_by) if dep.submitted_by else None
+    return {"success": True, "data": _dep(dep, submitter)}
 
 
 @router.patch("/bank-deposits/{dep_id}/approve")
@@ -237,7 +243,9 @@ async def approve_bank_deposit(
         raise HTTPException(status_code=404, detail="Deposit not found")
     dep.status = "approved"
     dep.approved_by = user.id
-    dep.notes = body.get("adminNote") or dep.notes
+    note = body.get("adminNote")
+    if note:  # keep the proof URL at the start of notes so it stays linkable
+        dep.notes = f"{dep.notes}\nAdmin: {note}" if (dep.notes or "").startswith("http") else note
     dep.updated_at = utcnow()
     await save(db, dep)
     return {"success": True, "message": "Deposit approved",
@@ -256,18 +264,36 @@ async def reject_bank_deposit(
         raise HTTPException(status_code=404, detail="Deposit not found")
     dep.status = "rejected"
     dep.approved_by = user.id
-    dep.notes = body.get("adminNote") or dep.notes
+    note = body.get("adminNote")
+    if note:  # keep the proof URL at the start of notes so it stays linkable
+        dep.notes = f"{dep.notes}\nAdmin: {note}" if (dep.notes or "").startswith("http") else note
     dep.updated_at = utcnow()
     await save(db, dep)
     return {"success": True, "message": "Deposit rejected",
             "data": {"depositId": dep.id, "status": dep.status}}
 
 
-def _dep(i: BankDeposit) -> dict:
-    return {"id": i.id, "amount": i.amount, "status": i.status, "bank_name": i.bank_name,
+def _dep(i: BankDeposit, submitter: Optional[User] = None) -> dict:
+    # The proof screenshot URL is the first line of notes; admin review notes follow it.
+    first_line = (i.notes or "").split("\n", 1)[0]
+    proof_url = first_line if first_line.startswith("http") else None
+    return {"id": i.id, "_id": i.id, "amount": i.amount, "status": i.status, "bank_name": i.bank_name,
             "reference": i.reference, "paid_for": i.paid_for, "notes": i.notes,
+            "proof_image_url": proof_url,
             "submitted_by": i.submitted_by, "approved_by": i.approved_by,
+            "user": ({"_id": submitter.id, "id": submitter.id,
+                      "name": submitter.name, "email": submitter.email}
+                     if submitter else None),
             "created_at": i.created_at, "updated_at": i.updated_at}
+
+
+async def _deps_with_users(db: AsyncSession, items: List[BankDeposit]) -> List[dict]:
+    ids = {i.submitted_by for i in items if i.submitted_by}
+    users = {}
+    if ids:
+        result = await db.execute(select(User).where(User.id.in_(ids)))
+        users = {u.id: u for u in result.scalars()}
+    return [_dep(i, users.get(i.submitted_by)) for i in items]
 
 
 @router.post("/upload")
