@@ -149,15 +149,21 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
         )
         if not has_completed:
             requires_initial = True
-            rent_r = calculate_effective_rent(tenant.rent_amount or 0, origin, 12, False, origin, _rate, _cycle, _start)
-            svc_r  = calculate_effective_rent(svc_base, origin, 12, False, origin, _rate, _cycle, _start) if svc_base else {"total_amount": 0}
+            rent_r  = calculate_effective_rent(tenant.rent_amount or 0, origin, 12, False, origin, _rate, _cycle, _start)
+            svc_r   = calculate_effective_rent(svc_base, origin, 12, False, origin, _rate, _cycle, _start) if svc_base else {"total_amount": 0}
+            rent_r6 = calculate_effective_rent(tenant.rent_amount or 0, origin, 6, False, origin, _rate, _cycle, _start)
+            svc_r6  = calculate_effective_rent(svc_base, origin, 6, False, origin, _rate, _cycle, _start) if svc_base else {"total_amount": 0}
             c_amount = get_current_rent(unit.caution_fee if unit else 0, origin, False, _rate, _cycle, _start)
             l_amount = get_current_rent(unit.legal_fee if unit else 0, origin, False, _rate, _cycle, _start)
+            fees = c_amount + l_amount
             initial_payment = {
                 "rent_12_months": rent_r["total_amount"],
                 "service_charge_12_months": svc_r["total_amount"],
+                "rent_6_months": rent_r6["total_amount"],
+                "service_charge_6_months": svc_r6["total_amount"],
                 "caution_fee": c_amount, "legal_fee": l_amount,
-                "total": rent_r["total_amount"] + svc_r["total_amount"] + c_amount + l_amount,
+                "total": rent_r["total_amount"] + svc_r["total_amount"] + fees,
+                "total_6_months": rent_r6["total_amount"] + svc_r6["total_amount"] + fees,
             }
 
     return {
@@ -167,6 +173,7 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
             "next_due_date": projected_due, "days_until_due": due_in,
             "is_overdue": overdue, "tenant_type": tenant.tenant_type, "status": tenant.status,
             "entry_date": tenant.entry_date,
+            "auto_pay_enabled": bool(tenant.auto_pay_enabled),
         },
         "charges": {"recurring": recurring, "one_time": one_time, "utility_bills": utility_bills},
         "summary": {

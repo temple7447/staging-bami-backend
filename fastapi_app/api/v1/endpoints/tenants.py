@@ -362,68 +362,142 @@ async def list_my_transactions(
     ]}
 
 
-@router.post("/me/billing/pay")
-async def pay_billing_items(
-    body: PayBillingItemsRequest,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    if body.duration_months not in (6, 12):
-        raise HTTPException(status_code=400, detail="Payment duration must be 6 or 12 months")
-    tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
-    wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
-    if not wallet:
-        raise HTTPException(status_code=404, detail="Wallet not found")
+async def execute_billing_payment(db: AsyncSession, tenant: Tenant, wallet: Wallet,
+                                   item_ids: list, duration_months: int, created_by: str,
+                                   source: str = "wallet") -> dict:
+    """Charge the wallet for the selected billing items. Shared by the tenant
+    pay endpoint and the auto-pay scheduler. Raises HTTPException on failure."""
     origin = tenant.entry_date if tenant else utcnow()
     _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
     if tenant:
         _s = resolve_increase_start(tenant, _s)          # tenant override wins over estate
+    unit = await db.get(Unit, tenant.unit) if tenant and tenant.unit else None
     # Price the period actually being paid for (the upcoming term), not the
     # tenant's first year — otherwise escalations never reach this path.
     period_start = (project_next_due_date(tenant) or tenant.next_due_date or utcnow()) if tenant else utcnow()
-    items_to_process, total_amount = [], 0.0
-    for item_id in body.item_ids:
+
+    from api.v1.endpoints.billing import _get_paid_one_time_fees
+    paid_fees = await _get_paid_one_time_fees(db, tenant.id) if tenant else set()
+    fees_apply = tenant and tenant.tenant_type not in ("existing", "transfer")
+
+    def _fee_amount(base):
+        return get_current_rent(base or 0, origin, False, _r, _c, _s)
+
+    items_to_process, fee_items, total_amount = [], [], 0.0
+    for item_id in item_ids:
         if item_id == "rent" and tenant and (tenant.base_rent or tenant.rent_amount or 0) > 0:
             rent_base = tenant.base_rent or tenant.rent_amount
-            result = calculate_effective_rent(rent_base, period_start, body.duration_months, False, origin, _r, _c, _s)
+            result = calculate_effective_rent(rent_base, period_start, duration_months, False, origin, _r, _c, _s)
             total_amount += result["total_amount"]
-            items_to_process.append({"code": "rent", "amount": result["total_amount"], "duration": body.duration_months})
+            items_to_process.append({"code": "rent", "amount": result["total_amount"], "duration": duration_months})
         elif item_id == "service_charge" and tenant:
             base = tenant.base_service_charge or tenant.service_charge_amount or 0
             if base > 0:
-                result = calculate_effective_rent(base, period_start, body.duration_months, False, origin, _r, _c, _s)
+                result = calculate_effective_rent(base, period_start, duration_months, False, origin, _r, _c, _s)
                 total_amount += result["total_amount"]
-                items_to_process.append({"code": "service_charge", "amount": result["total_amount"]})
+                items_to_process.append({"code": "service_charge", "amount": result["total_amount"], "duration": duration_months})
         elif item_id == "outstanding_rent" and tenant and (tenant.rent_outstanding or 0) > 0:
             total_amount += tenant.rent_outstanding
             items_to_process.append({"code": "outstanding_rent", "amount": tenant.rent_outstanding})
         elif item_id == "outstanding_service_charge" and tenant and (tenant.service_charge_outstanding or 0) > 0:
             total_amount += tenant.service_charge_outstanding
             items_to_process.append({"code": "outstanding_service_charge", "amount": tenant.service_charge_outstanding})
-    if not items_to_process:
+        elif item_id == "caution_fee" and fees_apply and unit and (unit.caution_fee or 0) > 0 \
+                and "caution_fee" not in paid_fees:
+            amt = _fee_amount(unit.caution_fee)
+            total_amount += amt
+            fee_items.append({"code": "caution_fee", "amount": amt})
+        elif item_id == "legal_fee" and fees_apply and unit and (unit.legal_fee or 0) > 0 \
+                and "legal_fee" not in paid_fees:
+            amt = _fee_amount(unit.legal_fee)
+            total_amount += amt
+            fee_items.append({"code": "legal_fee", "amount": amt})
+
+    all_items = items_to_process + fee_items
+    if not all_items:
         raise HTTPException(status_code=400, detail="No valid billing items found")
     if total_amount <= 0:
         raise HTTPException(status_code=400, detail="Total amount must be greater than zero")
+
+    # First payment of a NEW tenant must settle everything owed — rent,
+    # service charge, one-time fees and any arrears. Only the rent duration
+    # (6 or 12 months) is the tenant's choice.
+    if tenant and tenant.tenant_type == "new":
+        has_completed = await find_one(db, Payment, Payment.tenant == tenant.id,
+                                       Payment.payment_status == "completed",
+                                       Payment.payment_type.in_(["initial", "rent", "bundle"]))
+        if not has_completed:
+            required = {"rent"}
+            if (tenant.base_service_charge or tenant.service_charge_amount or 0) > 0:
+                required.add("service_charge")
+            if fees_apply and unit and (unit.caution_fee or 0) > 0 and "caution_fee" not in paid_fees:
+                required.add("caution_fee")
+            if fees_apply and unit and (unit.legal_fee or 0) > 0 and "legal_fee" not in paid_fees:
+                required.add("legal_fee")
+            if (tenant.rent_outstanding or 0) > 0:
+                required.add("outstanding_rent")
+            if (tenant.service_charge_outstanding or 0) > 0:
+                required.add("outstanding_service_charge")
+            missing = required - {i["code"] for i in all_items}
+            if missing:
+                labels = {"rent": "Rent", "service_charge": "Service Charge",
+                          "caution_fee": "Caution Fee", "legal_fee": "Legal Fee",
+                          "outstanding_rent": "Outstanding Rent",
+                          "outstanding_service_charge": "Outstanding Service Charge"}
+                names = ", ".join(labels.get(m, m) for m in sorted(missing))
+                raise HTTPException(status_code=400,
+                                    detail=f"Your first payment must cover everything due. Missing: {names}. "
+                                           "You can choose 6 or 12 months of rent, but all fees must be included.")
+
     if wallet.balance < total_amount:
-        raise HTTPException(status_code=400, detail=f"Insufficient wallet balance. Have: {wallet.balance}, need: {total_amount}")
+        raise HTTPException(status_code=400,
+                            detail=f"Insufficient wallet balance. Have: {wallet.balance}, need: {total_amount}")
 
     wallet.balance    -= total_amount
     wallet.total_spent += total_amount
     wallet.updated_at  = utcnow()
     await save(db, wallet)
 
-    payment = Payment(
-        id=gen_uuid(), tenant=tenant.id if tenant else None, amount=total_amount,
-        payment_type="bundle" if len(items_to_process) > 1 else items_to_process[0]["code"],
-        payment_status="completed", created_by=user.id,
+    reference = f"BILL-{gen_uuid()[:8].upper()}"
+    tx = Transaction(
+        id=gen_uuid(), user=tenant.user if tenant else created_by, tenant=tenant.id if tenant else None,
+        wallet_id=wallet.id, amount=total_amount, type="debit", method=source,
+        status="completed", reference=reference,
+        description="Auto-pay: " + ", ".join(i["code"] for i in all_items)
+                    if source == "auto_pay" else
+                    "Billing payment: " + ", ".join(i["code"] for i in all_items),
+        created_by=created_by,
     )
-    await save(db, payment)
+    await save(db, tx)
+
+    # One-time fees get their own Payment rows so every "is this fee paid?"
+    # check (billing list, dashboard, receipts) sees them by payment_type.
+    for fee in fee_items:
+        await save(db, Payment(
+            id=gen_uuid(), tenant=tenant.id if tenant else None, amount=fee["amount"],
+            payment_type=fee["code"], payment_status="completed",
+            reference=f"{reference}-{fee['code']}", created_by=created_by,
+        ))
+
+    if items_to_process:
+        payment = Payment(
+            id=gen_uuid(), tenant=tenant.id if tenant else None,
+            amount=sum(i["amount"] for i in items_to_process),
+            payment_type="bundle" if len(items_to_process) > 1 else items_to_process[0]["code"],
+            payment_status="completed", reference=reference, created_by=created_by,
+            # billing_items metadata drives the yearly summary, receipts and
+            # due-date reconciliation (which reads duration_months from here).
+            paystack_response={"data": {"metadata": {
+                "billing_items": all_items, "duration_months": duration_months, "source": source,
+            }}},
+        )
+        await save(db, payment)
 
     if tenant:
         if any(i["code"] == "rent" for i in items_to_process):
             base = tenant.next_due_date or tenant.entry_date or utcnow()
             new_due = base
-            for _ in range(body.duration_months):
+            for _ in range(duration_months):
                 m = (new_due.month % 12) + 1
                 y = new_due.year + (1 if new_due.month == 12 else 0)
                 new_due = new_due.replace(year=y, month=m)
@@ -438,8 +512,45 @@ async def pay_billing_items(
         from utils.nps import maybe_request_first_payment_nps
         await maybe_request_first_payment_nps(db, tenant.id)
 
-    return {"success": True, "message": "Payment processed successfully",
-            "data": {"total_paid": total_amount, "items": items_to_process, "wallet_balance": wallet.balance}}
+    return {"total_paid": total_amount, "items": all_items,
+            "wallet_balance": wallet.balance, "reference": reference,
+            "next_due_date": tenant.next_due_date if tenant else None}
+
+
+@router.post("/me/billing/pay")
+async def pay_billing_items(
+    body: PayBillingItemsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if body.duration_months not in (6, 12):
+        raise HTTPException(status_code=400, detail="Payment duration must be 6 or 12 months")
+    tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+    wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
+    if not wallet:
+        raise HTTPException(status_code=404, detail="Wallet not found")
+    result = await execute_billing_payment(db, tenant, wallet, body.item_ids,
+                                           body.duration_months, user.id)
+    return {"success": True, "message": "Payment processed successfully", "data": result}
+
+
+@router.patch("/me/auto-pay")
+async def toggle_auto_pay(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Tenant-controlled auto-pay: when rent is due, pay it from the wallet
+    automatically if the balance covers the full amount."""
+    tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant record not found")
+    tenant.auto_pay_enabled = bool(body.get("enabled"))
+    tenant.updated_at = utcnow()
+    await save(db, tenant)
+    return {"success": True,
+            "message": f"Auto-pay {'enabled' if tenant.auto_pay_enabled else 'disabled'}",
+            "data": {"auto_pay_enabled": tenant.auto_pay_enabled}}
 
 
 @router.post("/me/avatar")

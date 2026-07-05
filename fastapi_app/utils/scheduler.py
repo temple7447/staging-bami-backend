@@ -440,6 +440,54 @@ async def _check_lease_renewals():
         logger.error("[LEASES] Renewal check failed: %s", e)
 
 
+async def _run_auto_payments():
+    """Tenant-opt-in auto-pay: on/after the due date, pay rent + service charge
+    (and any arrears / unpaid first-time fees) from the wallet when the balance
+    covers the full amount. Runs before the 08:00 reminders so reminders
+    reflect the post-auto-pay state."""
+    try:
+        from core.database import AsyncSessionLocal
+        from models.tenant import Tenant
+        from models.wallet import Wallet
+        from core.db_helpers import find_all, find_one
+        from utils.email_service import send_payment_confirmation
+
+        now = utcnow()
+        paid = skipped = 0
+        async with AsyncSessionLocal() as db:
+            tenants = await find_all(db, Tenant, Tenant.is_active == True,
+                                     Tenant.status == "occupied",
+                                     Tenant.auto_pay_enabled == True)
+            for t in tenants:
+                if not t.next_due_date or t.next_due_date > now or not t.user:
+                    continue
+                wallet = await find_one(db, Wallet, Wallet.user_id == t.user)
+                if not wallet:
+                    continue
+                try:
+                    from api.v1.endpoints.tenants import execute_billing_payment
+                    # Pass every possible code — the executor keeps only what
+                    # actually applies (and enforces the new-tenant full bundle).
+                    result = await execute_billing_payment(
+                        db, t, wallet,
+                        ["rent", "service_charge", "outstanding_rent",
+                         "outstanding_service_charge", "caution_fee", "legal_fee"],
+                        12, t.user, source="auto_pay")
+                    paid += 1
+                    if t.tenant_email:
+                        await send_payment_confirmation(
+                            to_email=t.tenant_email, tenant_name=t.tenant_name or "Tenant",
+                            amount=result["total_paid"], reference=result["reference"],
+                            payment_type="auto_pay")
+                except Exception as pe:
+                    # Most commonly: insufficient balance. Leave it for reminders.
+                    skipped += 1
+                    logger.info("[SCHEDULER] Auto-pay skipped for %s: %s", t.id, pe)
+        logger.info("[SCHEDULER] Auto-pay — paid: %d, skipped: %d", paid, skipped)
+    except Exception as e:
+        logger.error("[SCHEDULER] Auto-pay run failed: %s", e)
+
+
 def _wrap(coro_fn):
     def job():
         # APScheduler runs jobs in a worker thread that has no event loop.
@@ -497,6 +545,8 @@ def start_scheduler():
                            hour=7, minute=0, id="autopilot_daily")
         _scheduler.add_job(_wrap(_check_lease_renewals), "cron",
                            hour=7, minute=30, id="lease_renewals")
+        _scheduler.add_job(_wrap(_run_auto_payments), "cron",
+                           hour=7, minute=45, id="auto_pay")
         _scheduler.start()
         logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min, autopilot@07:00, leases@07:30")
     except Exception as e:

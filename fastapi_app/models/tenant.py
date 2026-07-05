@@ -46,6 +46,10 @@ class Tenant(Base):
     # The percent/cycle stay estate-wide — this just fixes WHEN the clock starts.
     rent_increase_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Tenant-controlled: when due, pay rent + service charge from the wallet
+    # automatically if the balance covers the full amount.
+    auto_pay_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     user: Mapped[str | None] = mapped_column(String(36), nullable=True)
     telegram_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     profile_image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
