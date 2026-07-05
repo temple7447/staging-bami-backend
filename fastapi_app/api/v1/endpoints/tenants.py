@@ -472,7 +472,16 @@ async def get_tenant(
     y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
     y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
     ref_date = tenant.entry_date or tenant.created_at
-    lease_months = max(0, (renewal_start.year - ref_date.year) * 12 + (renewal_start.month - ref_date.month)) if ref_date else 0
+    if ref_date:
+        # next-due is the last day of the paid period, so count months to the day after
+        # (entry 1 Jan 2023 + due 31 Dec 2026 -> 48, not 47)
+        period_end = renewal_start + timedelta(days=1)
+        lease_months = (period_end.year - ref_date.year) * 12 + (period_end.month - ref_date.month)
+        if period_end.day < ref_date.day:
+            lease_months -= 1
+        lease_months = max(0, lease_months)
+    else:
+        lease_months = 0
 
     overview = {
         "rent": current_rent, "service_charge": current_service,
