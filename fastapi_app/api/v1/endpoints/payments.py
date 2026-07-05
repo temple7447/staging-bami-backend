@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from models.user import User
 from models.payment import Payment
 from models.tenant import Tenant
+from models.estate import Estate
 from models.wallet import Wallet
 from models.transaction import Transaction
 from models.wallet_account import WalletAccount
@@ -115,6 +116,7 @@ async def get_payment_receipts(
     if not tenant:
         return {"success": True, "count": 0, "receipts": []}
 
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
     payments = await find_all(db, Payment, Payment.tenant == tenant.id,
                               order_by=Payment.created_at.desc(), limit=100)
 
@@ -130,6 +132,10 @@ async def get_payment_receipts(
             "description": p.payment_type,
             "tenant_name": tenant.tenant_name,
             "phone": tenant.tenant_phone or "",
+            "estate_name": estate.name if estate else "BamiHost",
+            "estate_address": (estate.address if estate else "") or "",
+            "increase_percent": estate.rent_increase_percent if estate else 0,
+            "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
             "meter_no": tenant.electric_meter_number or "",
             "bedroom_type": "",
             "flat_type": tenant.unit_label or "",
@@ -195,14 +201,32 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
         raise HTTPException(status_code=404, detail="Payment not found")
     await _require_payment_access(db, user, payment)
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
+    estate = await db.get(Estate, tenant.estate) if tenant and tenant.estate else None
     receipt_data = {
-        "payment_id": payment.id, "reference": payment.reference,
+        "reference": payment.reference or payment.id,
+        "payment_date": payment.created_at,
         "amount": payment.amount, "payment_type": payment.payment_type,
-        "payment_status": payment.payment_status, "created_at": payment.created_at,
+        "payment_status": payment.payment_status,
+        "method": "wallet",
     }
-    tenant_info = {"tenant_name": tenant.tenant_name if tenant else "N/A",
-                   "tenant_email": tenant.tenant_email if tenant else ""}
-    estate_info = {"estate_name": "BamiHost Estate"}
+    tenant_info = {
+        "tenant_name": tenant.tenant_name if tenant else "N/A",
+        "phone": tenant.tenant_phone if tenant else "",
+        "unit_label": tenant.unit_label if tenant else "",
+        "meter_no": tenant.electric_meter_number if tenant else "",
+        "move_in_date": tenant.entry_date if tenant else None,
+        "expiry_date": tenant.next_due_date if tenant else None,
+        "rent": tenant.rent_amount if tenant else 0,
+        "service_charge": tenant.service_charge_amount if tenant else 0,
+        "rent_outstanding": tenant.rent_outstanding if tenant else 0,
+        "service_charge_outstanding": tenant.service_charge_outstanding if tenant else 0,
+    }
+    estate_info = {
+        "name": estate.name if estate else "BamiHost",
+        "address": estate.address if estate else "",
+        "increase_percent": estate.rent_increase_percent if estate else 0,
+        "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
+    }
     pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=receipt-{pid}.pdf"})

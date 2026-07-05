@@ -779,14 +779,14 @@ async def download_tenant_statement(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Generate a PDF payment statement for a tenant."""
-    from fastapi.responses import StreamingResponse
-    from io import BytesIO
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
+    """Generate a PDF payment statement for a tenant (shared BamiHost design)."""
+    from fastapi.responses import Response
+    from reportlab.platypus import Table, TableStyle, Spacer
+    from reportlab.lib.colors import white
+    from utils.pdf_service import (
+        brand_header, brand_footer, section_table, total_row, build_document,
+        content_width, fmt_naira, BRAND_BLUE, ZEBRA, BORDER, RED, GREEN, INK,
+    )
 
     tenant = await _get_tenant_or_404(db, tenant_id, current_user)
 
@@ -806,94 +806,61 @@ async def download_tenant_statement(
         select(Payment).where(*conds).order_by(Payment.created_at.desc())
     )).scalars().all()
 
-    # Build PDF in memory
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm,
-                            topMargin=2*cm, bottomMargin=2*cm)
-    styles = getSampleStyleSheet()
-    story = []
-
-    # Header
-    header_style = ParagraphStyle("header", fontSize=18, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e40af"))
-    story.append(Paragraph("BamiHost Property Management", header_style))
-    story.append(Spacer(1, 6))
-    story.append(Paragraph("Tenant Payment Statement", styles["Heading2"]))
-    story.append(Spacer(1, 12))
-
+    # Build PDF with the shared BamiHost design system
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    cw = content_width()
     period_label = f"{year or 'All Time'}" if not month else f"{datetime(year or 2025, month, 1).strftime('%B %Y')}"
 
-    meta = [
-        ["Tenant Name:", tenant.tenant_name or ""],
-        ["Email:", tenant.tenant_email or ""],
-        ["Phone:", tenant.tenant_phone or ""],
-        ["Unit:", tenant.unit or ""],
-        ["Period:", period_label],
-        ["Statement Date:", utcnow().strftime("%d %b %Y")],
-    ]
-    meta_tbl = Table(meta, colWidths=[5*cm, 10*cm])
-    meta_tbl.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(meta_tbl)
-    story.append(Spacer(1, 16))
+    story = brand_header(estate.name if estate else "BamiHost",
+                         (estate.address if estate else "") or "",
+                         "Tenant Payment Statement")
 
-    # Payments table
-    story.append(Paragraph("Payment History", styles["Heading3"]))
-    story.append(Spacer(1, 6))
+    story.append(section_table("Tenant Information", [
+        ("Tenant Name", tenant.tenant_name or ""),
+        ("Email",       tenant.tenant_email or ""),
+        ("Phone",       tenant.tenant_phone or ""),
+        ("Unit",        tenant.unit_label or tenant.unit or ""),
+        ("Period",      period_label),
+    ], cw))
+    story.append(Spacer(1, 12))
 
-    rows = [["Date", "Type", "Amount (₦)", "Status", "Reference"]]
+    rows = [["Date", "Type", "Amount (NGN)", "Status", "Reference"]]
     total = 0
     for p in payments:
         rows.append([
             p.created_at.strftime("%d/%m/%Y") if p.created_at else "",
             (p.payment_type or "").replace("_", " ").title(),
             f"{(p.amount or 0):,.0f}",
-            p.payment_status or "",
+            (p.payment_status or "").title(),
             (p.reference or "")[:20],
         ])
         if p.payment_status in ("completed", "success"):
             total += p.amount or 0
 
-    col_w = [3*cm, 4*cm, 4*cm, 3*cm, 4*cm]
-    tbl = Table(rows, colWidths=col_w, repeatRows=1)
+    tbl = Table(rows, colWidths=[cw * 0.15, cw * 0.22, cw * 0.20, cw * 0.16, cw * 0.27],
+                repeatRows=1)
     tbl.setStyle(TableStyle([
-        ("BACKGROUND",  (0, 0), (-1, 0), colors.HexColor("#1e40af")),
-        ("TEXTCOLOR",   (0, 0), (-1, 0), colors.white),
+        ("BACKGROUND",  (0, 0), (-1, 0), BRAND_BLUE),
+        ("TEXTCOLOR",   (0, 0), (-1, 0), white),
         ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE",    (0, 0), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.whitesmoke, colors.white]),
-        ("GRID",        (0, 0), (-1, -1), 0.3, colors.grey),
+        ("TEXTCOLOR",   (0, 1), (-1, -1), INK),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, ZEBRA]),
+        ("LINEBELOW",   (0, 0), (-1, -1), 0.4, BORDER),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
     ]))
     story.append(tbl)
     story.append(Spacer(1, 12))
 
-    # Totals
     outstanding = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
-    summary_data = [
-        ["Total Paid (this period)", f"₦{total:,.0f}"],
-        ["Total Outstanding", f"₦{outstanding:,.0f}"],
-    ]
-    sum_tbl = Table(summary_data, colWidths=[10*cm, 7*cm])
-    sum_tbl.setStyle(TableStyle([
-        ("FONTNAME",    (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE",    (0, 0), (-1, -1), 9),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("LINEABOVE",   (0, 0), (-1, 0), 1, colors.grey),
-    ]))
-    story.append(sum_tbl)
-    story.append(Spacer(1, 20))
-    story.append(Paragraph(
-        "This is a system-generated statement. Contact hello@bamihost.com for queries.",
-        ParagraphStyle("footer", fontSize=7, textColor=colors.grey)
-    ))
+    story.append(total_row("Total Paid (this period)", fmt_naira(total), cw, GREEN))
+    story.append(total_row("Total Outstanding", fmt_naira(outstanding), cw,
+                           RED if outstanding > 0 else GREEN))
+    story += brand_footer()
 
-    doc.build(story)
-    buf.seek(0)
-
+    pdf_bytes = build_document(story)
     filename = f"statement_{tenant.tenant_name or tenant_id}_{period_label.replace(' ', '_')}.pdf"
-    return StreamingResponse(buf, media_type="application/pdf",
-                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})

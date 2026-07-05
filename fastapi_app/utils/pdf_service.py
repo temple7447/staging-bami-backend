@@ -1,179 +1,238 @@
 """
-PDF receipt generator — Python port of emailService.js generateReceiptPdf().
-Uses ReportLab (already in requirements.txt).
+Unified PDF design system for every document BamiHost generates
+(payment receipts, tenant statements, …).
+
+One visual language everywhere:
+  • Letterhead: the estate/business name (dynamic — never a hardcoded client),
+    address lines, a blue rule, the document title and date.
+  • Blue section bars, zebra rows, thin grey grid.
+  • Red for outstanding amounts, green for paid/clear.
+  • Amber notice box for the estate's rent-increase policy — only when the
+    estate actually has one configured (cycle_years > 0).
+  • Footer: "BamiHost Property Management System • Ref … • generated date".
+
+Uses ReportLab platypus so content flows across pages.
 """
 import io
 from datetime import datetime
-from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.colors import HexColor
+from reportlab.lib.colors import HexColor, white
+from reportlab.lib.units import cm
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+)
 from utils.time_utils import utcnow
 
-# Brand colours (matching JS original)
-C_BLUE    = HexColor("#4472c4")
-C_GREEN   = HexColor("#70ad47")
-C_GOLD    = HexColor("#ffc000")
-C_RED     = HexColor("#ff0000")
-C_GREY    = HexColor("#e7e6e6")
-C_BLACK   = HexColor("#000000")
-C_WHITE   = HexColor("#ffffff")
-C_DKBLUE  = HexColor("#0056b3")
+# ── Design tokens (matched to the frontend print template) ────────────────────
+BRAND_BLUE  = HexColor("#1d4ed8")
+LABEL_BLUE  = HexColor("#2563eb")
+INK         = HexColor("#1e293b")
+MUTED       = HexColor("#64748b")
+RED         = HexColor("#dc2626")
+GREEN       = HexColor("#16a34a")
+ZEBRA       = HexColor("#f8fafc")
+BORDER      = HexColor("#e2e8f0")
+TOTAL_BG    = HexColor("#eff6ff")
+AMBER_BG    = HexColor("#fffbeb")
+AMBER_EDGE  = HexColor("#fde68a")
+AMBER_INK   = HexColor("#92400e")
+
+_TITLE   = ParagraphStyle("t",  fontName="Helvetica-Bold", fontSize=18, textColor=BRAND_BLUE, alignment=1)
+_SUB     = ParagraphStyle("s",  fontName="Helvetica",      fontSize=9,  textColor=MUTED, alignment=1, leading=12)
+_DOCT    = ParagraphStyle("d",  fontName="Helvetica-Bold", fontSize=13, textColor=INK, alignment=1, spaceBefore=6)
+_NOTE_T  = ParagraphStyle("nt", fontName="Helvetica-Bold", fontSize=9,  textColor=AMBER_INK)
+_NOTE_P  = ParagraphStyle("np", fontName="Helvetica",      fontSize=8,  textColor=HexColor("#78350f"), leading=11)
+_FOOT    = ParagraphStyle("f",  fontName="Helvetica",      fontSize=8,  textColor=HexColor("#94a3b8"), alignment=1)
 
 
-def _fmt(amount) -> str:
-    """Format a numeric amount as a PDF-safe Naira string."""
+def fmt_naira(amount) -> str:
+    """PDF-safe Naira string (Helvetica has no ₦ glyph)."""
     try:
-        return f"N {float(amount or 0):,.0f}"
+        return f"NGN {float(amount or 0):,.0f}"
     except (TypeError, ValueError):
-        return "N 0"
+        return "NGN 0"
 
+
+def _fmt_date(value) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%d %b %Y")
+    return str(value or "")
+
+
+def brand_header(business_name: str, address: str = "", doc_title: str = "RECEIPT",
+                 doc_date=None) -> list:
+    """Shared letterhead: business name, address, blue rule, title, date."""
+    flows = [
+        Paragraph((business_name or "BamiHost").upper(), _TITLE),
+        Spacer(1, 4),
+    ]
+    if address:
+        flows.append(Paragraph(address, _SUB))
+    flows += [
+        Spacer(1, 8),
+        HRFlowable(width="100%", thickness=2.5, color=BRAND_BLUE),
+        Paragraph(f"<font name='Helvetica-Bold'>{doc_title.upper()}</font>", _DOCT),
+        Paragraph(f"DATE: {_fmt_date(doc_date or utcnow())}", _SUB),
+        Spacer(1, 10),
+    ]
+    return flows
+
+
+def section_table(title: str, rows: list, content_w: float) -> Table:
+    """A titled section: blue header bar + label/value zebra rows.
+
+    rows: list of (label, value) or (label, value, value_color).
+    """
+    data = [[title.upper(), ""]]
+    styles = [
+        ("SPAN",       (0, 0), (1, 0)),
+        ("BACKGROUND", (0, 0), (1, 0), BRAND_BLUE),
+        ("TEXTCOLOR",  (0, 0), (1, 0), white),
+        ("FONTNAME",   (0, 0), (1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 9),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("LINEBELOW",  (0, 0), (-1, -2), 0.4, BORDER),
+        ("FONTNAME",   (0, 1), (0, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR",  (0, 1), (0, -1), LABEL_BLUE),
+        ("TEXTCOLOR",  (1, 1), (1, -1), INK),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, ZEBRA]),
+    ]
+    for idx, r in enumerate(rows, start=1):
+        label, value = r[0], r[1]
+        data.append([label, str(value if value is not None else "")])
+        if len(r) > 2 and r[2] is not None:
+            styles.append(("TEXTCOLOR", (1, idx), (1, idx), r[2]))
+            styles.append(("FONTNAME", (1, idx), (1, idx), "Helvetica-Bold"))
+    tbl = Table(data, colWidths=[content_w * 0.55, content_w * 0.45])
+    tbl.setStyle(TableStyle(styles))
+    return tbl
+
+
+def total_row(label: str, value: str, content_w: float, value_color=None) -> Table:
+    """Emphasised single-row total, visually attached to the section above it."""
+    tbl = Table([[label, value]], colWidths=[content_w * 0.55, content_w * 0.45])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), TOTAL_BG),
+        ("FONTNAME",   (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 9),
+        ("TEXTCOLOR",  (0, 0), (0, 0), INK),
+        ("TEXTCOLOR",  (1, 0), (1, 0), value_color or INK),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("LINEABOVE",  (0, 0), (-1, 0), 0.4, BORDER),
+    ]))
+    return tbl
+
+
+def increase_notice(percent: float, cycle_years: int, content_w: float) -> list:
+    """Amber policy notice — only rendered when the estate has a cycle configured."""
+    if not cycle_years or cycle_years <= 0 or not percent:
+        return []
+    yrs = f"every {cycle_years} year{'s' if cycle_years != 1 else ''}"
+    body = (f"Please be advised that there is a {percent:g}% increase in the combined "
+            f"Rent and Service Charge applicable {yrs} of continuous tenancy. "
+            "We appreciate your understanding and continued residency.")
+    inner = Table(
+        [[Paragraph("Important Notice Regarding Rent Adjustment", _NOTE_T)],
+         [Paragraph(body, _NOTE_P)]],
+        colWidths=[content_w - 12],
+    )
+    inner.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), AMBER_BG),
+        ("BOX",        (0, 0), (-1, -1), 0.8, AMBER_EDGE),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    return [Spacer(1, 14), inner]
+
+
+def brand_footer(reference: str = "") -> list:
+    ref = f" • Ref: {reference}" if reference else ""
+    return [
+        Spacer(1, 16),
+        HRFlowable(width="100%", thickness=0.5, color=BORDER),
+        Spacer(1, 6),
+        Paragraph(f"BamiHost Property Management System{ref} • "
+                  f"Generated {utcnow().strftime('%d %b %Y %H:%M')} UTC", _FOOT),
+    ]
+
+
+def build_document(story: list) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=1.8 * cm, leftMargin=1.8 * cm,
+                            topMargin=1.6 * cm, bottomMargin=1.6 * cm)
+    doc.build(story)
+    return buf.getvalue()
+
+
+def content_width() -> float:
+    w, _ = A4
+    return w - 2 * (1.8 * cm)
+
+
+# ── Payment receipt ────────────────────────────────────────────────────────────
 
 def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dict) -> bytes:
+    """Build the standard BamiHost payment receipt.
+
+    receipt_data: reference, payment_date, amount, payment_type, payment_status, method
+    tenant_info:  tenant_name, phone, unit_label, meter_no, move_in_date, expiry_date,
+                  rent, service_charge, rent_outstanding, service_charge_outstanding
+    estate_info:  name, address, increase_percent, increase_cycle_years
     """
-    Build a PDF receipt in memory and return the raw bytes.
+    rd, ti, ei = receipt_data or {}, tenant_info or {}, estate_info or {}
+    cw = content_width()
 
-    receipt_data keys (all optional, will default to 0/""):
-        paymentDate, moveInDate, expiryDate, currentYear, nextYear, yearDuration,
-        tenancyDuration, tenantTotalStay, rentAmount, rentOutstanding, serviceCharge,
-        serviceChargeOutstanding, cautionFee, legalFee, outstandingBalance,
-        currentTotalTenancyRate, nextTotalTenancyRate, nextIncreaseDate,
-        nextRentIncrease, nextServiceChargeIncrease, totalTenancyRateIncrease
+    story = brand_header(ei.get("name") or "BamiHost", ei.get("address") or "",
+                         "Payment Receipt", rd.get("payment_date"))
 
-    tenant_info keys: tenantName, unitLabel
-    estate_info keys: name (unused, kept for parity)
-    """
-    buf = io.BytesIO()
-    w, h = A4          # 595.28 x 841.89
-    margin_l = margin_r = 30
-    content_w = w - margin_l - margin_r
+    story.append(section_table("Payment Details", [
+        ("Reference",    rd.get("reference") or ""),
+        ("Payment Date", _fmt_date(rd.get("payment_date"))),
+        ("Payment Type", (rd.get("payment_type") or "").replace("_", " ").title()),
+        ("Method",       (rd.get("method") or "wallet").replace("_", " ").title()),
+        ("Status",       (rd.get("payment_status") or "").title(),
+         GREEN if rd.get("payment_status") in ("completed", "success", "paid") else None),
+    ], cw))
+    story.append(total_row("Amount Paid", fmt_naira(rd.get("amount")), cw, GREEN))
+    story.append(Spacer(1, 12))
 
-    c = canvas.Canvas(buf, pagesize=A4)
+    tenant_rows = [
+        ("Tenant Full Name", ti.get("tenant_name") or ""),
+        ("Phone Number",     ti.get("phone") or "—"),
+        ("Unit",             ti.get("unit_label") or "—"),
+    ]
+    if ti.get("meter_no"):
+        tenant_rows.append(("Meter No", ti["meter_no"]))
+    tenant_rows += [
+        ("Move In Date", _fmt_date(ti.get("move_in_date"))),
+        ("Next Due Date", _fmt_date(ti.get("expiry_date"))),
+    ]
+    story.append(section_table("Tenant Information", tenant_rows, cw))
+    story.append(Spacer(1, 12))
 
-    # ── Header ────────────────────────────────────────────────────────────────
-    c.setFont("Helvetica-Bold", 22)
-    c.setFillColor(C_BLUE)
-    c.drawString(margin_l, h - 50, "SAMFRED")
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(margin_l, h - 70, "GLOBAL RESOURCES LTD")
+    rent_out = float(ti.get("rent_outstanding") or 0)
+    svc_out  = float(ti.get("service_charge_outstanding") or 0)
+    summary_rows = [
+        ("Rent (annual)",           fmt_naira(ti.get("rent"))),
+        ("Service Charge (annual)", fmt_naira(ti.get("service_charge"))),
+    ]
+    if rent_out > 0:
+        summary_rows.append(("Rent Outstanding", fmt_naira(rent_out), RED))
+    if svc_out > 0:
+        summary_rows.append(("Service Charge Outstanding", fmt_naira(svc_out), RED))
+    story.append(section_table("Account Summary", summary_rows, cw))
+    outstanding = rent_out + svc_out
+    story.append(total_row("Outstanding Balance", fmt_naira(outstanding), cw,
+                           RED if outstanding > 0 else GREEN))
 
-    c.setFont("Helvetica", 12)
-    c.setFillColor(C_BLACK)
-    c.drawString(margin_l, h - 90, "BALADO ESTATE MASON IFIE OFF MATRIX DEPOT")
-    c.drawString(margin_l, h - 106, "Tel: 07052258160, 0905665358")
-
-    # Logo box
-    logo_x = w - margin_r - 80
-    c.setFillColor(C_DKBLUE)
-    c.setStrokeColor(HexColor("#2c5aa0"))
-    c.rect(logo_x, h - 120, 80, 80, fill=1, stroke=1)
-    c.setFillColor(C_WHITE)
-    c.setFont("Helvetica-Bold", 10)
-    c.drawCentredString(logo_x + 40, h - 75, "SAM FRED")
-    c.drawCentredString(logo_x + 40, h - 88, "LOGO")
-
-    c.setFillColor(C_BLACK)
-    c.setFont("Helvetica", 10)
-    for i, label in enumerate(["1 BED ROOM", "2 BED ROOMS", "3 BED ROOMS"]):
-        c.drawRightString(w - margin_r, h - 140 - i * 12, label)
-
-    # ── Receipt title + date ──────────────────────────────────────────────────
-    title_y = h - 165
-    c.setFillColor(C_GREY)
-    c.rect(margin_l, title_y - 5, 100, 25, fill=1, stroke=0)
-    c.setFillColor(C_BLACK)
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(margin_l + 5, title_y, "RECEIPT")
-    payment_date = receipt_data.get("paymentDate", utcnow().strftime("%d/%m/%Y"))
-    c.drawRightString(w - margin_r, title_y, f"DATE: {payment_date}")
-
-    # Horizontal rule
-    rule_y = title_y - 12
-    c.setStrokeColor(C_BLACK)
-    c.setLineWidth(2)
-    c.line(margin_l, rule_y, w - margin_r, rule_y)
-
-    # ── Rows ──────────────────────────────────────────────────────────────────
-    col1_w    = 260
-    col2_w    = content_w - col1_w
-    row_h     = 22
-    current_y = rule_y - row_h
-
-    def draw_row(label, value, label_color=C_BLUE, value_color=C_BLUE, bold=True):
-        nonlocal current_y
-        c.setStrokeColor(HexColor("#999999"))
-        c.setLineWidth(0.5)
-        c.rect(margin_l,          current_y, col1_w, row_h, fill=0)
-        c.rect(margin_l + col1_w, current_y, col2_w, row_h, fill=0)
-        c.setFillColor(label_color)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(margin_l + 8, current_y + 6, label)
-        c.setFillColor(value_color)
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", 11)
-        c.drawString(margin_l + col1_w + 8, current_y + 6, str(value or ""))
-        current_y -= row_h
-
-    rd = receipt_data
-    draw_row("TENANT FULL NAME:",   tenant_info.get("tenantName", ""))
-    draw_row("BEDROOM TYPE:",       tenant_info.get("unitLabel", "Standard"))
-    draw_row("FLAT TYPE:",          tenant_info.get("unitLabel", ""))
-    draw_row("MOVE IN DATE:",       rd.get("moveInDate", ""))
-    draw_row("EXPIRY DATE:",        rd.get("expiryDate", ""))
-    draw_row("RENT:",               _fmt(rd.get("rentAmount", 0)))
-    draw_row("RENT OUTSTANDING:",   _fmt(rd.get("rentOutstanding", 0)), value_color=C_RED)
-    draw_row("SERVICE CHARGE:",     _fmt(rd.get("serviceCharge", 0)))
-    draw_row("SERVICE CHARGE OUTSTANDING:", _fmt(rd.get("serviceChargeOutstanding", 0)), value_color=C_RED)
-    draw_row("1 TIME CAUTION FEE:", _fmt(rd.get("cautionFee", 0)))
-    draw_row("1 TIME LEGAL FEE:",   _fmt(rd.get("legalFee", 0)))
-    draw_row("OUTSTANDING BALANCE:", _fmt(rd.get("outstandingBalance", 0)), value_color=C_RED)
-    draw_row(
-        f"CURRENT TOTAL TENANCY RATE: {rd.get('currentYear', '')}",
-        _fmt(rd.get("currentTotalTenancyRate", 0)),
-        label_color=C_GREEN, value_color=C_GREEN,
-    )
-    draw_row(
-        f"NEXT TOTAL TENANCY RATE {rd.get('nextYear', '')}:",
-        _fmt(rd.get("nextTotalTenancyRate", 0)),
-        label_color=C_GOLD, value_color=C_GOLD,
-    )
-    draw_row("TENANCY DURATION:",   rd.get("tenancyDuration", "1 YEAR"))
-    draw_row("TENANT TOTAL STAY:",  rd.get("tenantTotalStay", "1st YEAR"))
-    draw_row("YEAR DURATION",       rd.get("yearDuration", ""))
-
-    inc_date = rd.get("nextIncreaseDate", "")
-    draw_row(
-        f"NEXT RENTAL INCREASE BY (26%) ON {inc_date}:",
-        _fmt(rd.get("nextRentIncrease", 0)),
-        label_color=C_RED, value_color=C_RED,
-    )
-    draw_row(
-        f"NEXT SERVICE CHARGE INCREASE BY (26%) {inc_date}:",
-        _fmt(rd.get("nextServiceChargeIncrease", 0)),
-        label_color=C_RED, value_color=C_RED,
-    )
-    draw_row(
-        f"TOTAL TENANCY RATE INCREASE BY (26%) ON {inc_date}:",
-        _fmt(rd.get("totalTenancyRateIncrease", 0)),
-        label_color=C_RED, value_color=C_RED,
-    )
-
-    # ── Footer notice ─────────────────────────────────────────────────────────
-    footer_y = current_y - 20
-    c.setFont("Helvetica-Bold", 12)
-    c.setFillColor(C_RED)
-    c.drawString(margin_l, footer_y, "Important Notice Regarding Rent Adjustment")
-    c.setFont("Helvetica", 10)
-    c.setFillColor(C_BLACK)
-    notice = (
-        "Please be advised that there will be a 26% increase in the combined Rent and "
-        "Service Charge applicable every two (2) years of continuous tenancy. We appreciate "
-        "your understanding and continued residency."
-    )
-    from reportlab.lib.utils import simpleSplit
-    lines = simpleSplit(notice, "Helvetica", 10, content_w)
-    text_y = footer_y - 16
-    for line in lines:
-        c.drawString(margin_l, text_y, line)
-        text_y -= 14
-
-    c.save()
-    return buf.getvalue()
+    story += increase_notice(ei.get("increase_percent") or 0,
+                             int(ei.get("increase_cycle_years") or 0), cw)
+    story += brand_footer(rd.get("reference") or "")
+    return build_document(story)
