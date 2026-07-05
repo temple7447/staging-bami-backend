@@ -106,6 +106,71 @@ async def list_payments(
     }
 
 
+def _ordinal(n: int) -> str:
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
+    """Everything the classic receipt shows about the tenancy: current/next
+    tenancy rates (estate-policy aware), increase amounts and date, stay info."""
+    from models.unit import Unit
+    from utils.tenant_helpers import estate_config_for, project_next_due_date
+    from utils.rent_calculator import calculate_effective_rent, resolve_increase_start
+
+    unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    owner  = await db.get(User, estate.owner) if estate and estate.owner else None
+    origin = tenant.entry_date or tenant.created_at or utcnow()
+    _r, _c, _s = await estate_config_for(db, tenant.estate)
+    _s = resolve_increase_start(tenant, _s)
+
+    renewal = project_next_due_date(tenant) or tenant.next_due_date or utcnow()
+    billing_start = renewal.replace(year=renewal.year - 1)
+    rent_base = tenant.base_rent or tenant.rent_amount or 0
+    svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
+    y1r = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
+    y1s = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _r, _c, _s)
+    y2r = calculate_effective_rent(rent_base, renewal, 12, False, origin, _r, _c, _s)
+    y2s = calculate_effective_rent(svc_base, renewal, 12, False, origin, _r, _c, _s)
+    increased = (y2r["total_amount"] + y2s["total_amount"]) > (y1r["total_amount"] + y1s["total_amount"])
+
+    lease_months = max(0, (renewal.year - origin.year) * 12 + (renewal.month - origin.month)
+                       + (1 if renewal.day >= origin.day else 0))
+    duration = (f"{lease_months // 12} YEAR{'S' if lease_months // 12 != 1 else ''}"
+                if lease_months and lease_months % 12 == 0 else f"{lease_months} MONTHS")
+    stay_year = max(1, billing_start.year - origin.year + 1)
+
+    bedroom_type = ""
+    if unit:
+        bedroom_type = (f"{unit.bedrooms} BED ROOM{'S' if unit.bedrooms != 1 else ''}"
+                        if unit.bedrooms else (unit.category or ""))
+
+    return {
+        "unit": unit, "estate": estate,
+        "estate_name": estate.name if estate else "BamiHost",
+        "estate_address": (estate.address if estate else "") or "",
+        "estate_phone": (owner.phone if owner else "") or "",
+        "increase_percent": estate.rent_increase_percent if estate else 0,
+        "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
+        "bedroom_type": bedroom_type,
+        "caution_fee": unit.caution_fee if unit else 0,
+        "legal_fee": unit.legal_fee if unit else 0,
+        "current_total": y1r["total_amount"] + y1s["total_amount"],
+        "next_total": y2r["total_amount"] + y2s["total_amount"],
+        "current_year": billing_start.year,
+        "next_year": renewal.year,
+        "tenancy_duration": duration,
+        "tenant_total_stay": f"{_ordinal(stay_year)} YEAR",
+        "year_duration": f"{billing_start.year} - {renewal.year}",
+        "next_increase_date": renewal if increased else None,
+        "next_rent_increase": y2r["total_amount"] if increased else 0,
+        "next_service_charge_increase": y2s["total_amount"] if increased else 0,
+        "total_increase": (y2r["total_amount"] + y2s["total_amount"]) if increased else 0,
+        "expiry_date": renewal,
+    }
+
+
 @router.get("/receipts")
 async def get_payment_receipts(
     db: AsyncSession = Depends(get_db),
@@ -116,13 +181,12 @@ async def get_payment_receipts(
     if not tenant:
         return {"success": True, "count": 0, "receipts": []}
 
-    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    ctx = await _tenancy_receipt_context(db, tenant)
     payments = await find_all(db, Payment, Payment.tenant == tenant.id,
                               order_by=Payment.created_at.desc(), limit=100)
 
     receipts = []
     for p in payments:
-        year = p.created_at.year if p.created_at else 0
         receipts.append({
             "receipt_id": p.id,
             "reference": p.reference or p.id,
@@ -132,35 +196,36 @@ async def get_payment_receipts(
             "description": p.payment_type,
             "tenant_name": tenant.tenant_name,
             "phone": tenant.tenant_phone or "",
-            "estate_name": estate.name if estate else "BamiHost",
-            "estate_address": (estate.address if estate else "") or "",
-            "increase_percent": estate.rent_increase_percent if estate else 0,
-            "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
+            "estate_name": ctx["estate_name"],
+            "estate_address": ctx["estate_address"],
+            "estate_phone": ctx["estate_phone"],
+            "increase_percent": ctx["increase_percent"],
+            "increase_cycle_years": ctx["increase_cycle_years"],
             "meter_no": tenant.electric_meter_number or "",
-            "bedroom_type": "",
+            "bedroom_type": ctx["bedroom_type"],
             "flat_type": tenant.unit_label or "",
             "move_in_date": tenant.entry_date,
-            "expiry_date": tenant.next_due_date,
+            "expiry_date": ctx["expiry_date"],
             "amount_paid": p.amount,
             "breakdown": {},
             "rent": tenant.rent_amount,
             "service_charge": tenant.service_charge_amount,
-            "caution_fee": 0,
-            "legal_fee": 0,
+            "caution_fee": ctx["caution_fee"],
+            "legal_fee": ctx["legal_fee"],
             "rent_outstanding": tenant.rent_outstanding,
             "service_charge_outstanding": tenant.service_charge_outstanding,
             "outstanding_balance": tenant.rent_outstanding + tenant.service_charge_outstanding,
-            "current_total_tenancy_rate": tenant.rent_amount + tenant.service_charge_amount,
-            "next_total_tenancy_rate": tenant.rent_amount + tenant.service_charge_amount,
-            "tenancy_duration": "12 months",
-            "tenant_total_stay": "",
-            "year_duration": "12 months",
-            "current_year": year,
-            "next_year": year + 1,
-            "next_increase_date": None,
-            "next_rent_increase": 0,
-            "next_service_charge_increase": 0,
-            "total_tenancy_rate_increase": 0,
+            "current_total_tenancy_rate": ctx["current_total"],
+            "next_total_tenancy_rate": ctx["next_total"],
+            "tenancy_duration": ctx["tenancy_duration"],
+            "tenant_total_stay": ctx["tenant_total_stay"],
+            "year_duration": ctx["year_duration"],
+            "current_year": ctx["current_year"],
+            "next_year": ctx["next_year"],
+            "next_increase_date": ctx["next_increase_date"],
+            "next_rent_increase": ctx["next_rent_increase"],
+            "next_service_charge_increase": ctx["next_service_charge_increase"],
+            "total_tenancy_rate_increase": ctx["total_increase"],
         })
     return {"success": True, "count": len(receipts), "receipts": receipts}
 
@@ -201,31 +266,39 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
         raise HTTPException(status_code=404, detail="Payment not found")
     await _require_payment_access(db, user, payment)
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
-    estate = await db.get(Estate, tenant.estate) if tenant and tenant.estate else None
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant record not found for this payment")
+    ctx = await _tenancy_receipt_context(db, tenant)
     receipt_data = {
         "reference": payment.reference or payment.id,
         "payment_date": payment.created_at,
         "amount": payment.amount, "payment_type": payment.payment_type,
-        "payment_status": payment.payment_status,
-        "method": "wallet",
+        "rent": tenant.rent_amount, "rent_outstanding": tenant.rent_outstanding or 0,
+        "service_charge": tenant.service_charge_amount,
+        "service_charge_outstanding": tenant.service_charge_outstanding or 0,
+        "caution_fee": ctx["caution_fee"], "legal_fee": ctx["legal_fee"],
+        "outstanding_balance": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+        "current_total": ctx["current_total"], "next_total": ctx["next_total"],
+        "current_year": ctx["current_year"], "next_year": ctx["next_year"],
+        "tenancy_duration": ctx["tenancy_duration"],
+        "tenant_total_stay": ctx["tenant_total_stay"],
+        "year_duration": ctx["year_duration"],
+        "next_increase_date": ctx["next_increase_date"],
+        "next_rent_increase": ctx["next_rent_increase"],
+        "next_service_charge_increase": ctx["next_service_charge_increase"],
+        "total_increase": ctx["total_increase"],
     }
     tenant_info = {
-        "tenant_name": tenant.tenant_name if tenant else "N/A",
-        "phone": tenant.tenant_phone if tenant else "",
-        "unit_label": tenant.unit_label if tenant else "",
-        "meter_no": tenant.electric_meter_number if tenant else "",
-        "move_in_date": tenant.entry_date if tenant else None,
-        "expiry_date": tenant.next_due_date if tenant else None,
-        "rent": tenant.rent_amount if tenant else 0,
-        "service_charge": tenant.service_charge_amount if tenant else 0,
-        "rent_outstanding": tenant.rent_outstanding if tenant else 0,
-        "service_charge_outstanding": tenant.service_charge_outstanding if tenant else 0,
+        "tenant_name": tenant.tenant_name, "phone": tenant.tenant_phone or "",
+        "meter_no": tenant.electric_meter_number or "",
+        "bedroom_type": ctx["bedroom_type"], "flat_type": tenant.unit_label or "",
+        "move_in_date": tenant.entry_date, "expiry_date": ctx["expiry_date"],
     }
     estate_info = {
-        "name": estate.name if estate else "BamiHost",
-        "address": estate.address if estate else "",
-        "increase_percent": estate.rent_increase_percent if estate else 0,
-        "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
+        "name": ctx["estate_name"], "address": ctx["estate_address"],
+        "phone": ctx["estate_phone"],
+        "increase_percent": ctx["increase_percent"],
+        "increase_cycle_years": ctx["increase_cycle_years"],
     }
     pdf_bytes = generate_receipt_pdf(receipt_data, tenant_info, estate_info)
     return Response(content=pdf_bytes, media_type="application/pdf",

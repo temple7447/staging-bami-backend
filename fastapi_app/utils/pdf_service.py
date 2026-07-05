@@ -176,63 +176,154 @@ def content_width() -> float:
     return w - 2 * (1.8 * cm)
 
 
-# ── Payment receipt ────────────────────────────────────────────────────────────
+# ── Payment receipt (classic letterhead-table layout) ─────────────────────────
+# Faithful to the original paper receipt: company name top-left with a logo
+# box top-right, "RECEIPT + DATE" title bar, then ONE continuous bordered
+# two-column table — blue labels/values, red outstanding rows, green current
+# tenancy rate, gold next tenancy rate — and the red adjustment notice below.
+# Everything is dynamic per estate (name, address, increase %, cycle, dates).
+
+R_BLUE  = HexColor("#4472c4")
+R_GREEN = HexColor("#70ad47")
+R_GOLD  = HexColor("#bf9000")
+R_RED   = HexColor("#ff0000")
+R_GREY  = HexColor("#e7e6e6")
+
+_CO_NAME = ParagraphStyle("co",   fontName="Helvetica-Bold", fontSize=20, textColor=R_BLUE, leading=24)
+_CO_SUB  = ParagraphStyle("cos",  fontName="Helvetica",      fontSize=11, textColor=INK, leading=15)
+_LOGO_TX = ParagraphStyle("lg",   fontName="Helvetica-Bold", fontSize=10, textColor=white, alignment=1, leading=13)
+_NOTICE_T = ParagraphStyle("rnt", fontName="Helvetica-Bold", fontSize=11, textColor=R_RED, leading=14)
+_NOTICE_B = ParagraphStyle("rnb", fontName="Helvetica",      fontSize=10, textColor=R_RED, leading=13)
+
 
 def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dict) -> bytes:
-    """Build the standard BamiHost payment receipt.
+    """Classic tenancy receipt.
 
-    receipt_data: reference, payment_date, amount, payment_type, payment_status, method
-    tenant_info:  tenant_name, phone, unit_label, meter_no, move_in_date, expiry_date,
-                  rent, service_charge, rent_outstanding, service_charge_outstanding
-    estate_info:  name, address, increase_percent, increase_cycle_years
+    tenant_info:  tenant_name, phone, meter_no, bedroom_type, flat_type,
+                  move_in_date, expiry_date
+    receipt_data: payment_date, reference, amount, rent, rent_outstanding,
+                  service_charge, service_charge_outstanding, caution_fee, legal_fee,
+                  outstanding_balance, current_total, next_total, current_year,
+                  next_year, tenancy_duration, tenant_total_stay, year_duration,
+                  next_increase_date, next_rent_increase,
+                  next_service_charge_increase, total_increase
+    estate_info:  name, address, phone, increase_percent, increase_cycle_years
     """
     rd, ti, ei = receipt_data or {}, tenant_info or {}, estate_info or {}
     cw = content_width()
+    name = (ei.get("name") or "BamiHost").upper()
+    initials = "".join(w[0] for w in name.split()[:2]).upper() or "BH"
 
-    story = brand_header(ei.get("name") or "BamiHost", ei.get("address") or "",
-                         "Payment Receipt", rd.get("payment_date"))
+    # Letterhead: name/address/tel left, logo box right
+    left_lines = [Paragraph(name, _CO_NAME)]
+    if ei.get("address"):
+        left_lines.append(Paragraph(str(ei["address"]).upper(), _CO_SUB))
+    if ei.get("phone"):
+        left_lines.append(Paragraph(f"Tel: {ei['phone']}", _CO_SUB))
+    logo = Table([[Paragraph(initials, _LOGO_TX)]], colWidths=[70], rowHeights=[70])
+    logo.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#0056b3")),
+        ("BOX",        (0, 0), (-1, -1), 1.2, HexColor("#2c5aa0")),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    header = Table([[left_lines, logo]], colWidths=[cw - 90, 90])
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN",  (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
 
-    story.append(section_table("Payment Details", [
-        ("Reference",    rd.get("reference") or ""),
-        ("Payment Date", _fmt_date(rd.get("payment_date"))),
-        ("Payment Type", (rd.get("payment_type") or "").replace("_", " ").title()),
-        ("Method",       (rd.get("method") or "wallet").replace("_", " ").title()),
-        ("Status",       (rd.get("payment_status") or "").title(),
-         GREEN if rd.get("payment_status") in ("completed", "success", "paid") else None),
-    ], cw))
-    story.append(total_row("Amount Paid", fmt_naira(rd.get("amount")), cw, GREEN))
-    story.append(Spacer(1, 12))
+    # RECEIPT title (grey highlight) + date
+    title = Table(
+        [["RECEIPT", f"DATE: {_fmt_date(rd.get('payment_date'))}"]],
+        colWidths=[cw * 0.5, cw * 0.5])
+    title.setStyle(TableStyle([
+        ("FONTNAME",  (0, 0), (-1, -1), "Helvetica-Bold"),
+        ("FONTSIZE",  (0, 0), (-1, -1), 13),
+        ("TEXTCOLOR", (0, 0), (-1, -1), INK),
+        ("BACKGROUND", (0, 0), (0, 0), R_GREY),
+        ("ALIGN",     (1, 0), (1, 0), "RIGHT"),
+        ("LEFTPADDING",   (0, 0), (0, 0), 6),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
 
-    tenant_rows = [
-        ("Tenant Full Name", ti.get("tenant_name") or ""),
-        ("Phone Number",     ti.get("phone") or "—"),
-        ("Unit",             ti.get("unit_label") or "—"),
+    # The one continuous table. Each row: (label, value, color)
+    rows = [
+        ("TENANT FULL NAME:", ti.get("tenant_name") or "", R_BLUE),
+        ("PHONE NUMBER:",     ti.get("phone") or "", R_BLUE),
+        ("Meter No:",         ti.get("meter_no") or "", R_BLUE),
     ]
-    if ti.get("meter_no"):
-        tenant_rows.append(("Meter No", ti["meter_no"]))
-    tenant_rows += [
-        ("Move In Date", _fmt_date(ti.get("move_in_date"))),
-        ("Next Due Date", _fmt_date(ti.get("expiry_date"))),
+    if ti.get("bedroom_type"):
+        rows.append(("BEDROOM TYPE:", str(ti["bedroom_type"]).upper(), R_BLUE))
+    rows += [
+        ("FLAT TYPE:",     str(ti.get("flat_type") or "").upper(), R_BLUE),
+        ("MOVE IN DATE:",  _fmt_date(ti.get("move_in_date")).upper(), R_BLUE),
+        ("EXPIRY DATE:",   _fmt_date(ti.get("expiry_date")).upper(), R_BLUE),
+        ("AMOUNT PAID:",   fmt_naira(rd.get("amount")), R_GREEN),
+        ("RENT:",          fmt_naira(rd.get("rent")), R_BLUE),
+        ("RENT OUTSTANDING:", fmt_naira(rd.get("rent_outstanding")), R_RED),
+        ("SERVICE CHARGE:",   fmt_naira(rd.get("service_charge")), R_BLUE),
+        ("SERVICE CHARGE OUTSTANDING:", fmt_naira(rd.get("service_charge_outstanding")), R_RED),
+        ("1 TIME CAUTION FEE:", fmt_naira(rd.get("caution_fee")), R_BLUE),
+        ("1 TIME LEGAL FEE:",   fmt_naira(rd.get("legal_fee")), R_BLUE),
+        ("OUTSTANDING BALANCE:", fmt_naira(rd.get("outstanding_balance")), R_RED),
+        (f"CURRENT TOTAL TENANCY RATE: {rd.get('current_year') or ''}",
+         fmt_naira(rd.get("current_total")), R_GREEN),
+        (f"NEXT TOTAL TENANCY RATE {rd.get('next_year') or ''}:",
+         fmt_naira(rd.get("next_total")), R_GOLD),
+        ("TENANCY DURATION:",  rd.get("tenancy_duration") or "", R_BLUE),
+        ("TENANT TOTAL STAY:", rd.get("tenant_total_stay") or "", R_BLUE),
+        ("YEAR DURATION:",     rd.get("year_duration") or "", R_BLUE),
     ]
-    story.append(section_table("Tenant Information", tenant_rows, cw))
-    story.append(Spacer(1, 12))
 
-    rent_out = float(ti.get("rent_outstanding") or 0)
-    svc_out  = float(ti.get("service_charge_outstanding") or 0)
-    summary_rows = [
-        ("Rent (annual)",           fmt_naira(ti.get("rent"))),
-        ("Service Charge (annual)", fmt_naira(ti.get("service_charge"))),
+    pct = ei.get("increase_percent") or 0
+    cyc = int(ei.get("increase_cycle_years") or 0)
+    inc_date = _fmt_date(rd.get("next_increase_date")).upper()
+    if pct and cyc > 0 and rd.get("next_increase_date"):
+        rows += [
+            (f"NEXT RENTAL INCREASE BY ({pct:g}%) ON {inc_date}:",
+             fmt_naira(rd.get("next_rent_increase")), R_RED),
+            (f"NEXT SERVICE CHARGE INCREASE BY ({pct:g}%) ON {inc_date}:",
+             fmt_naira(rd.get("next_service_charge_increase")), R_RED),
+            (f"TOTAL TENANCY RATE INCREASE BY ({pct:g}%) ON {inc_date}:",
+             fmt_naira(rd.get("total_increase")), R_RED),
+        ]
+
+    label_style = ParagraphStyle("rl", fontName="Helvetica-Bold", fontSize=10, leading=12)
+    value_style = ParagraphStyle("rv", fontName="Helvetica",      fontSize=10, leading=12)
+    data, styles = [], [
+        ("GRID",          (0, 0), (-1, -1), 0.75, INK),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 3.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 6),
     ]
-    if rent_out > 0:
-        summary_rows.append(("Rent Outstanding", fmt_naira(rent_out), RED))
-    if svc_out > 0:
-        summary_rows.append(("Service Charge Outstanding", fmt_naira(svc_out), RED))
-    story.append(section_table("Account Summary", summary_rows, cw))
-    outstanding = rent_out + svc_out
-    story.append(total_row("Outstanding Balance", fmt_naira(outstanding), cw,
-                           RED if outstanding > 0 else GREEN))
+    for idx, (label, value, color) in enumerate(rows):
+        ls = ParagraphStyle(f"rl{idx}", parent=label_style, textColor=color)
+        vs = ParagraphStyle(f"rv{idx}", parent=value_style, textColor=color)
+        data.append([Paragraph(label, ls), Paragraph(str(value), vs)])
+    tbl = Table(data, colWidths=[cw * 0.5, cw * 0.5], repeatRows=0)
+    tbl.setStyle(TableStyle(styles))
 
-    story += increase_notice(ei.get("increase_percent") or 0,
-                             int(ei.get("increase_cycle_years") or 0), cw)
-    story += brand_footer(rd.get("reference") or "")
+    story = [header, Spacer(1, 8), title, tbl]
+
+    if pct and cyc > 0:
+        yrs = f"every {'two (2)' if cyc == 2 else f'{cyc}'} year{'s' if cyc != 1 else ''}"
+        story += [
+            Spacer(1, 10),
+            Paragraph("Important Notice Regarding Rent Adjustment", _NOTICE_T),
+            Paragraph(
+                f"Please be advised that there will be a {pct:g}% increase in the combined Rent "
+                f"and Service Charge applicable {yrs} of continuous tenancy. We appreciate "
+                "your understanding and continued residency.", _NOTICE_B),
+        ]
+
+    ref = rd.get("reference") or ""
+    story += [
+        Spacer(1, 8),
+        Paragraph(f"BamiHost Property Management System{' • Ref: ' + ref if ref else ''} • "
+                  f"Generated {utcnow().strftime('%d %b %Y')}", _FOOT),
+    ]
     return build_document(story)
