@@ -85,6 +85,7 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         "status": tenant.status, "tenant_type": tenant.tenant_type,
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
+        "meter_number": (unit.meter_number if unit else None) or tenant.electric_meter_number or None,
     }
 
     bills = await find_all(db, BillingItem, BillingItem.user == user_id,
