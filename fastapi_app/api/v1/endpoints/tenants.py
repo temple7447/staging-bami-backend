@@ -65,6 +65,36 @@ async def _reconcile_next_due_date(db: AsyncSession, tenant: Tenant) -> datetime
     return latest
 
 
+async def _reject_active_email_conflict(
+    db: AsyncSession, user: User, email: str,
+    exclude_tenant_id: str | None = None,
+    same_unit: tuple[str, str] | None = None,   # (estate_id, unit_label) being assigned
+) -> None:
+    """One active tenancy per email. The tenant dashboard, billing and payments
+    all assume a user has a single active tenant record, so an email stays
+    locked to its apartment until that tenant is moved out (is_active=False)."""
+    conds = [func.lower(Tenant.tenant_email) == email.lower(), Tenant.is_active == True]
+    if exclude_tenant_id:
+        conds.append(Tenant.id != exclude_tenant_id)
+    dup = await find_one(db, Tenant, *conds)
+    if not dup:
+        return
+    # Re-adding into the same unit is fine: the old record gets displaced.
+    if same_unit and dup.estate == same_unit[0] and dup.unit_label == same_unit[1]:
+        return
+    allowed = await accessible_estate_ids(db, user)
+    if allowed is None or dup.estate in allowed:
+        estate = await db.get(Estate, dup.estate) if dup.estate else None
+        where = f" in {estate.name}" if estate else ""
+        where += f", unit {dup.unit_label}" if dup.unit_label else ""
+        detail = (f"This email already belongs to an active tenant{where}. "
+                  "Move that tenant out first, or use a different email.")
+    else:
+        detail = ("This email already belongs to an active tenant in another business "
+                  "on the platform. Use a different email.")
+    raise HTTPException(status_code=409, detail=detail)
+
+
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("", status_code=201)
@@ -90,6 +120,10 @@ async def create_tenant(
     email_addr  = (body.tenant_email or body.email or "").strip()
     phone       = body.tenant_phone or body.whatsapp or ""
     tenant_type = body.tenant_type or "new"
+
+    if email_addr:
+        await _reject_active_email_conflict(db, user, email_addr,
+                                            same_unit=(estate_id, unit.label))
 
     duration = body.duration_months
     if tenant_type == "new":
@@ -543,7 +577,10 @@ async def update_tenant(
     new_name = (body.tenant_name or "").strip() or " ".join(filter(None, [body.first_name, body.other_names, body.surname])).strip()
     if new_name: tenant.tenant_name = new_name
     if body.tenant_email or body.email:
-        tenant.tenant_email = body.tenant_email or body.email
+        new_email = (body.tenant_email or body.email or "").strip()
+        if new_email and new_email.lower() != (tenant.tenant_email or "").lower():
+            await _reject_active_email_conflict(db, user, new_email, exclude_tenant_id=tenant.id)
+        tenant.tenant_email = new_email or tenant.tenant_email
     if body.tenant_phone or body.whatsapp:
         tenant.tenant_phone = body.tenant_phone or body.whatsapp
     history_meta: dict = {}
