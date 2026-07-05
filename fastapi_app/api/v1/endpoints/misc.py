@@ -241,6 +241,26 @@ async def approve_bank_deposit(
     dep = await find_one(db, BankDeposit, BankDeposit.id == dep_id)
     if not dep:
         raise HTTPException(status_code=404, detail="Deposit not found")
+    if dep.status != "pending":
+        raise HTTPException(status_code=400,
+                            detail=f"Deposit already {dep.status}. Only pending deposits can be approved.")
+    if not dep.amount or dep.amount <= 0:
+        raise HTTPException(status_code=400,
+                            detail="This deposit has no amount recorded and cannot be approved. Reject it and ask the tenant to resubmit.")
+    if not dep.submitted_by:
+        raise HTTPException(status_code=400, detail="Deposit has no submitting user to credit")
+
+    # Credit the submitter's wallet — approving IS the payment confirmation.
+    from api.v1.endpoints.wallet import _get_or_create_wallet, _record_transaction
+    wallet = await _get_or_create_wallet(db, dep.submitted_by)
+    wallet.balance += dep.amount
+    wallet.total_earnings += dep.amount
+    wallet.updated_at = utcnow()
+    await save(db, wallet)
+    await _record_transaction(db, dep.submitted_by, wallet.id, dep.amount, "credit",
+                              method="bank_transfer", reference=f"bank_deposit_{dep.id}",
+                              description="Bank deposit approved", created_by=user.id)
+
     dep.status = "approved"
     dep.approved_by = user.id
     note = body.get("adminNote")
@@ -248,8 +268,8 @@ async def approve_bank_deposit(
         dep.notes = f"{dep.notes}\nAdmin: {note}" if (dep.notes or "").startswith("http") else note
     dep.updated_at = utcnow()
     await save(db, dep)
-    return {"success": True, "message": "Deposit approved",
-            "data": {"depositId": dep.id, "status": dep.status}}
+    return {"success": True, "message": f"Deposit approved. Wallet credited with ₦{dep.amount:,.0f}",
+            "data": {"depositId": dep.id, "status": dep.status, "newWalletBalance": wallet.balance}}
 
 
 @router.patch("/bank-deposits/{dep_id}/reject")
@@ -262,6 +282,9 @@ async def reject_bank_deposit(
     dep = await find_one(db, BankDeposit, BankDeposit.id == dep_id)
     if not dep:
         raise HTTPException(status_code=404, detail="Deposit not found")
+    if dep.status == "approved":
+        raise HTTPException(status_code=400,
+                            detail="Deposit already approved and the wallet credited — it can no longer be rejected.")
     dep.status = "rejected"
     dep.approved_by = user.id
     note = body.get("adminNote")
