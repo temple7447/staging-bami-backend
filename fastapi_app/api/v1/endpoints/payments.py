@@ -135,10 +135,8 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
     y2s = calculate_effective_rent(svc_base, renewal, 12, False, origin, _r, _c, _s)
     increased = (y2r["total_amount"] + y2s["total_amount"]) > (y1r["total_amount"] + y1s["total_amount"])
 
-    lease_months = max(0, (renewal.year - origin.year) * 12 + (renewal.month - origin.month)
-                       + (1 if renewal.day >= origin.day else 0))
-    duration = (f"{lease_months // 12} YEAR{'S' if lease_months // 12 != 1 else ''}"
-                if lease_months and lease_months % 12 == 0 else f"{lease_months} MONTHS")
+    # Tenancy runs in fixed annual cycles — the receipt always shows 1 YEAR.
+    duration = "1 YEAR"
     stay_year = max(1, billing_start.year - origin.year + 1)
 
     bedroom_type = ""
