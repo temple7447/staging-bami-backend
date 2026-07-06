@@ -19,7 +19,7 @@ from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="analyst",
-    name="Analyst",
+    name="Amara · Analyst",
     emoji="📊",
     description="Writes a weekly plain-English portfolio report: occupancy, revenue, top risk, next best action.",
     # A read-only summary sent to the owner is always safe to auto-run.

@@ -11,7 +11,7 @@ from services.agents.base import AgentMeta, owner_estate_ids
 
 META = AgentMeta(
     key="designer",
-    name="Designer",
+    name="Deji · Designer",
     emoji="🎨",
     description="Designs branded marketing graphics for every new listing, automatically.",
     auto_safe=["listing_graphic"],  # designing an image is always safe to auto-run

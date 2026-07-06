@@ -10,7 +10,7 @@ from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_i
 
 META = AgentMeta(
     key="finance",
-    name="Finance",
+    name="Femi · Finance",
     emoji="💰",
     description="Sends rent reminders, generates payment links, and flags cash-flow risk.",
     # Reminders are safe to auto-send; payment LINKS (money) stay manual.

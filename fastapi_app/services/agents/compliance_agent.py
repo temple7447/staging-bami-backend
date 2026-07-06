@@ -19,7 +19,7 @@ from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="compliance",
-    name="Compliance",
+    name="Chidi · Compliance",
     emoji="📋",
     description="Tracks expired/missing tenancy agreements and drafts the paperwork-regularisation reminders.",
     # Legal paperwork always needs a human eye before it goes out.

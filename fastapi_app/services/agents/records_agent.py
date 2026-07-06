@@ -27,7 +27,7 @@ from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="records",
-    name="Records",
+    name="Remi · Records",
     emoji="🗂️",
     description="The document controller — keeps every tenant file complete, the payment trail auditable, and a filing register the owner can trust.",
     # The register is an internal report that never leaves the business, so it

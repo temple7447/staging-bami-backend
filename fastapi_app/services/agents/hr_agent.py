@@ -9,7 +9,7 @@ from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_i
 
 META = AgentMeta(
     key="hr",
-    name="HR",
+    name="Hauwa · HR",
     emoji="👥",
     description="Flags when the portfolio is big enough to hire, and drafts the role.",
     auto_safe=[],  # hiring is always a human decision

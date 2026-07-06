@@ -9,7 +9,7 @@ from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_i
 
 META = AgentMeta(
     key="operations",
-    name="Operations",
+    name="Obi · Operations",
     emoji="🔧",
     description="Triages open issues, assigns the best vendor, and tracks resolution.",
     auto_safe=["maintenance_plan"],  # producing a plan is safe; dispatching a vendor stays manual

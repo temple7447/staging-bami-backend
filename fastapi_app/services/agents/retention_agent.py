@@ -19,7 +19,7 @@ from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="retention",
-    name="Retention",
+    name="Ronke · Retention",
     emoji="🔁",
     description="Watches lease expiries, drafts renewal offers, and flags at-risk tenants before they churn.",
     # Drafting a renewal offer is safe; SENDING it (a commercial offer that may

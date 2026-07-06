@@ -13,7 +13,7 @@ from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_i
 
 META = AgentMeta(
     key="marketer",
-    name="Marketer",
+    name="Moji · Marketer",
     emoji="📣",
     description="Writes & schedules social posts for vacant units, with the Designer's graphics.",
     # Drafting content is safe to auto-generate; actual posting/blasting still needs approval.

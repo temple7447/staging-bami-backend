@@ -9,7 +9,7 @@ from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_i
 
 META = AgentMeta(
     key="sales",
-    name="Sales",
+    name="Sade · Sales",
     emoji="💼",
     description="Scores leads and sends warm follow-ups to every pending enquiry.",
     # Drafting follow-ups is safe; sending is gated unless the owner opts in.

@@ -20,7 +20,7 @@ from utils.time_utils import utcnow
 
 META = AgentMeta(
     key="collections",
-    name="Collections",
+    name="Chike · Collections",
     emoji="⏰",
     description="Escalation ladder for overdue rent — gentle reminder → firm notice → final notice + owner alert.",
     # Chasing money is sensitive; every notice waits for approval.
