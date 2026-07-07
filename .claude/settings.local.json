@@ -52,7 +52,11 @@
       "Bash(awk -F: '{print $1}')",
       "Bash(npm test *)",
       "Bash(grep -n \"getTenant\\\\|/tenants/\\\\${\" /Users/temple/Documents/Bami/BamiHustle-frontend/src/services/estatesApi.ts)",
-      "Bash(node scripts/fixBaseRent.js)"
+      "Bash(node scripts/fixBaseRent.js)",
+      "mcp__claude_ai_Google_Drive__list_recent_files",
+      "Skill(schedule)",
+      "mcp__claude_ai_Google_Drive__search_files",
+      "mcp__claude_ai_Google_Drive__read_file_content"
     ],
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
