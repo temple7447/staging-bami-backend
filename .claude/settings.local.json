@@ -56,7 +56,8 @@
       "mcp__claude_ai_Google_Drive__list_recent_files",
       "Skill(schedule)",
       "mcp__claude_ai_Google_Drive__search_files",
-      "mcp__claude_ai_Google_Drive__read_file_content"
+      "mcp__claude_ai_Google_Drive__read_file_content",
+      "Skill(run)"
     ],
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
