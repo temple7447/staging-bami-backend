@@ -740,6 +740,72 @@ async def update_tenant(
             "data": {"id": tenant.id, "tenant_name": tenant.tenant_name}}
 
 
+@router.post("/{tenant_id}/resend-credentials")
+async def resend_tenant_credentials(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Re-issue login credentials to a tenant. Generates a fresh temporary
+    password and emails it to the tenant's *current* email — even if the login
+    email was changed or the tenant forgot their password. The linked login
+    account is created/synced so the emailed credentials always work."""
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admins only")
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
+
+    email_addr = (tenant.tenant_email or "").strip()
+    if not email_addr:
+        raise HTTPException(status_code=400,
+                            detail="This tenant has no email address. Add one first, then resend credentials.")
+
+    generated_password = generate_temp_password(6)
+
+    # Find (or create) the login account for this tenant, keeping its email in
+    # sync with the tenant's current email so the credentials we send are valid.
+    account = await db.get(User, tenant.user) if tenant.user else None
+    if account is None:
+        # Fall back to any existing user on this email before creating a new one.
+        account = await find_one(db, User, func.lower(User.email) == email_addr.lower())
+
+    if account:
+        if account.role != "tenant":
+            raise HTTPException(status_code=400, detail=f"Email registered as {account.role}")
+        if account.email.lower() != email_addr.lower():
+            clash = await find_one(db, User, func.lower(User.email) == email_addr.lower(), User.id != account.id)
+            if clash:
+                raise HTTPException(status_code=409, detail="Another account already uses this email.")
+            account.email = email_addr
+        account.password = hash_password(generated_password)
+        account.is_active = True
+        await save(db, account)
+    else:
+        account = User(id=gen_uuid(), name=tenant.tenant_name or "Tenant", email=email_addr,
+                       password=hash_password(generated_password), role="tenant",
+                       created_by=user.id, email_verified=True)
+        await save(db, account)
+        if not await find_one(db, Wallet, Wallet.user_id == account.id):
+            await save(db, Wallet(id=gen_uuid(), user_id=account.id, balance=0.0, currency="NGN"))
+
+    if tenant.user != account.id:
+        tenant.user = account.id
+
+    history = tenant.history or []
+    history.append({"event": "note", "note": "Login credentials re-sent",
+                    "meta": {"email": email_addr}, "created_by": user.id,
+                    "created_at": utcnow().isoformat()})
+    tenant.history = history
+    tenant.updated_by = user.id
+    tenant.updated_at = utcnow()
+    await save(db, tenant)
+
+    result = await send_welcome_email(email_addr, tenant.tenant_name or "Tenant", generated_password)
+    if not result.get("success"):
+        raise HTTPException(status_code=502,
+                            detail="Credentials reset but the email could not be sent. Please try again.")
+
+    return {"success": True, "message": f"Login credentials sent to {email_addr}"}
+
+
 @router.delete("/{tenant_id}")
 async def delete_tenant(
     tenant_id: str,
