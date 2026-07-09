@@ -27,6 +27,7 @@ class Settings(BaseSettings):
         "http://localhost:8080,"
         "http://localhost:4200,"
         "https://www.bamihost.com,"
+        "https://staging.bamihost.com,"
         "https://staging-baminhost.vercel.app"
     )
 
