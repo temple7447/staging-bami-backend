@@ -15,7 +15,7 @@ Out-of-scope ids raise 404 rather than 403 so resource ids cannot be
 probed across businesses.
 """
 from fastapi import HTTPException
-from sqlalchemy import select, or_
+from sqlalchemy import select
 
 from models.estate import Estate
 
@@ -29,9 +29,11 @@ async def accessible_estate_ids(db, user) -> set | None:
     if is_platform_admin(user):
         return None
     if user.role == "business_owner":
+        # Strictly the estates they own. Ownership is the single source of truth
+        # (onboarding/reassignment moves Estate.owner); created_by is deliberately
+        # NOT honoured, so a reassigned estate stops being visible to its creator.
         result = await db.execute(
-            select(Estate.id).where(Estate.is_active == True,
-                                    or_(Estate.owner == user.id, Estate.created_by == user.id))
+            select(Estate.id).where(Estate.is_active == True, Estate.owner == user.id)
         )
         return {r[0] for r in result.all()}
     if user.role in {"admin", "manager", "super_manager"}:

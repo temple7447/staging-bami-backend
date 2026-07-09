@@ -29,7 +29,8 @@ ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manag
 
 def _check_estate_access(estate: Estate, user: User):
     if user.role == "business_owner":
-        if estate.owner != user.id and estate.created_by != user.id:
+        # Owner is the single source of truth (see core.authz.accessible_estate_ids).
+        if estate.owner != user.id:
             raise HTTPException(status_code=403, detail="You do not have access to this estate")
     elif user.role == "admin":
         if user.id not in (estate.managers or []):
@@ -41,9 +42,9 @@ async def _accessible_estate_ids(db: AsyncSession, user: User) -> list[str]:
         result = await db.execute(select(Estate.id).where(Estate.is_active == True))
         return [r[0] for r in result.all()]
     elif user.role == "business_owner":
+        # Owner-only (see core.authz.accessible_estate_ids) — created_by is not honoured.
         result = await db.execute(
-            select(Estate.id).where(Estate.is_active == True,
-                                    or_(Estate.owner == user.id, Estate.created_by == user.id))
+            select(Estate.id).where(Estate.is_active == True, Estate.owner == user.id)
         )
         return [r[0] for r in result.all()]
     elif user.role in {"admin", "manager", "super_manager"}:

@@ -56,6 +56,14 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=As
 async def connect_db(app=None):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # One-time, idempotent backfill: business-owner access is now strictly
+        # Estate.owner-based, so any legacy estate with no owner must inherit its
+        # creator or it would vanish from that owner's dashboard. A no-op once done.
+        from sqlalchemy import text
+        await conn.execute(text(
+            "UPDATE estates SET owner = created_by "
+            "WHERE owner IS NULL AND created_by IS NOT NULL"
+        ))
     db_type = "PostgreSQL (Neon)" if _is_postgres else "SQLite"
     logger.info(f"{db_type} database ready — tables created/verified")
 
