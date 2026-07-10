@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-import anthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,22 +22,14 @@ from models.autopilot_action import AutopilotAction
 from models.base import gen_uuid
 from models.estate import Estate
 from models.user import User
+from services import llm
 
 logger = logging.getLogger(__name__)
 
-HAIKU = "claude-haiku-4-5"
-SONNET = "claude-sonnet-4-6"
-
-# Reuse one client across calls — constructing an AsyncAnthropic per request
-# churns the underlying HTTP connection pool for no benefit.
-_client: "anthropic.AsyncAnthropic | None" = None
-
-
-def _get_client() -> "anthropic.AsyncAnthropic":
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    return _client
+# Model TIERS (provider-agnostic — see services/llm.py). Kept as HAIKU/SONNET
+# names so existing agent calls like ai_text(..., model=SONNET) still resolve.
+HAIKU = llm.FAST
+SONNET = llm.DEEP
 
 
 @dataclass
@@ -54,12 +45,12 @@ class AgentMeta:
 
 
 async def ai_text(system: str, prompt: str, model: str = HAIKU, max_tokens: int = 400) -> str:
-    """Call Claude and return the text response (async-safe)."""
-    resp = await _get_client().messages.create(
-        model=model, max_tokens=max_tokens, system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.content[0].text.strip() if resp.content else ""
+    """Call the configured LLM and return the text response (async-safe).
+
+    `model` carries a tier (HAIKU/SONNET → llm.FAST/DEEP); the concrete model id
+    is resolved per provider inside services/llm.py.
+    """
+    return await llm.text(system, prompt, tier=model, max_tokens=max_tokens)
 
 
 def make_action(owner_id: str, skill: str, action_type: str, title: str,

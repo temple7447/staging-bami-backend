@@ -1,7 +1,6 @@
 import json
 import logging
 
-import anthropic
 import cloudinary
 import cloudinary.uploader
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
@@ -18,11 +17,12 @@ from core.database import get_db
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from services import llm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/brand", tags=["Brand & Design"])
 
-SONNET = "claude-sonnet-4-6"
+SONNET = llm.DEEP
 
 
 class BrandAssetCreate(BaseModel):
@@ -196,14 +196,7 @@ async def generate_brand_identity(
     )
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        resp = await client.messages.create(
-            model=SONNET,
-            max_tokens=1024,
-            system=BRAND_SYSTEM,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = resp.content[0].text.strip()
+        raw = await llm.text(BRAND_SYSTEM, prompt, tier=SONNET, max_tokens=1024)
         # Strip accidental code fences
         if raw.startswith("```"):
             raw = raw.split("```", 2)[1].lstrip("json").strip()

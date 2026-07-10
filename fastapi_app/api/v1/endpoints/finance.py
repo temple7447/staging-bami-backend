@@ -192,8 +192,7 @@ async def get_forecast(
     current_user: User = Depends(get_current_user),
 ):
     """AI-powered 3-month financial forecast."""
-    import anthropic
-    from core.config import settings
+    from services import llm
 
     uid = str(current_user.id)
     now = utcnow()
@@ -232,21 +231,18 @@ async def get_forecast(
         f"Leases expiring next 90 days: {len(expiring_90)}"
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    resp = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=600,
-        system=(
+    text = await llm.text(
+        (
             "You are a Nigerian property finance expert. Generate a 3-month financial forecast "
             "in JSON format ONLY. No prose outside the JSON. Format:\n"
             '{"months":[{"month":"Month Year","projected_revenue":0,"projected_collections":0,'
             '"risk_notes":"..."}],"summary":"...","recommendations":["...","...","..."]}'
         ),
-        messages=[{"role": "user", "content": f"Business snapshot: {snapshot}. Forecast next 3 months."}],
-    )
+        f"Business snapshot: {snapshot}. Forecast next 3 months.",
+        tier=llm.DEEP, max_tokens=600,
+    ) or "{}"
 
     import json
-    text = resp.content[0].text.strip() if resp.content else "{}"
     try:
         forecast = json.loads(text)
     except Exception:

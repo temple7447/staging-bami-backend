@@ -17,18 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 async def _ai_content(system: str, prompt: str, max_tokens: int = 300) -> str:
-    """Generate AI content using Claude Haiku for speed."""
+    """Generate AI content via the configured LLM provider (fast tier)."""
     try:
-        import anthropic
-        from core.config import settings
-        client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        resp = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=max_tokens,
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return resp.content[0].text.strip() if resp.content else ""
+        from services import llm
+        return await llm.text(system, prompt, tier=llm.FAST, max_tokens=max_tokens)
     except Exception as e:
         logger.warning(f"[EVENT_HOOK] AI content failed: {e}")
         return ""

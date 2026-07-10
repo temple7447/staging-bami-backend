@@ -2,7 +2,6 @@ import re
 import logging
 import secrets
 
-import anthropic
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -18,13 +17,14 @@ from core.database import get_db
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from services import llm
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/lead-capture", tags=["Lead Capture"])
 public_router = APIRouter(prefix="/public/lead-pages", tags=["Public Lead Pages"])
 
-SONNET = "claude-sonnet-4-6"
+SONNET = llm.DEEP
 
 
 def _slugify(text: str) -> str:
@@ -268,13 +268,12 @@ async def generate_lead_page(
     if not body.prompt or len(body.prompt) > 2000:
         raise HTTPException(400, "prompt must be 1-2000 characters")
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
     try:
-        response = await client.messages.create(
-            model=SONNET,
-            max_tokens=1024,
-            tools=[GENERATE_TOOL],
-            tool_choice={"type": "tool", "name": "generate_lead_page"},
+        result = await llm.complete(
+            system=(
+                "You generate high-converting lead-capture landing page copy for a "
+                "Nigerian small-business audience. Always call the generate_lead_page tool."
+            ),
             messages=[{
                 "role": "user",
                 "content": (
@@ -282,16 +281,18 @@ async def generate_lead_page(
                     "for a Nigerian small-business audience:\n\n" + body.prompt
                 ),
             }],
+            tier=SONNET,
+            max_tokens=1024,
+            tools=[GENERATE_TOOL],
+            tool_choice_name="generate_lead_page",
         )
     except Exception as e:
         logger.error(f"generate_lead_page failed: {e}", exc_info=True)
         raise HTTPException(502, "AI generation failed — try again")
 
-    tool_use = next((b for b in response.content if b.type == "tool_use"), None)
-    if not tool_use:
+    page = result.tool_input
+    if not page:
         raise HTTPException(502, "AI did not return structured page content")
-
-    page = tool_use.input
     page.setdefault("fields", [
         {"key": "name", "label": "Your name", "type": "text", "required": True},
         {"key": "email", "label": "Email", "type": "email", "required": True},

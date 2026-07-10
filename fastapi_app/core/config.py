@@ -76,8 +76,19 @@ class Settings(BaseSettings):
     TUYA_BASE_URL: str = "https://openapi.tuyaeu.com"
     TUYA_ELECTRICITY_RATE: float = 70.0   # ₦ per kWh default tariff
 
-    # Anthropic (Claude AI)
+    # ── AI provider ────────────────────────────────────────────────────────
+    # Which LLM backend the app uses for all text/reasoning calls.
+    #   "deepseek"  → DeepSeek (OpenAI-compatible API)  [current]
+    #   "anthropic" → Claude   (flip back here anytime)
+    # Image generation always stays on Gemini (DeepSeek has no image model).
+    AI_PROVIDER: str = "deepseek"
+
+    # Anthropic (Claude AI) — kept so AI_PROVIDER can be flipped back to it.
     ANTHROPIC_API_KEY: str = ""
+
+    # DeepSeek (OpenAI-compatible). Get a key at https://platform.deepseek.com
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
 
     # Fernet key used to encrypt Integrations Hub auth secrets at rest
     INTEGRATION_ENCRYPTION_KEY: str = ""

@@ -395,8 +395,7 @@ async def skill_trigger(
     Called when a business event happens (e.g., new property listed, new enquiry).
     Returns targeted skill advice for the relevant skill.
     """
-    import anthropic
-    from core.config import settings
+    from services import llm
 
     skill = body.skill.lower()
     event_label = EVENT_LABELS.get(body.event, body.event.replace("_", " "))
@@ -415,14 +414,8 @@ async def skill_trigger(
         f"Business snapshot:{live_summary[:1500]}"  # trim for speed
     )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = await client.messages.create(
-        model="claude-haiku-4-5",  # use Haiku for speed on skill triggers
-        max_tokens=200,
-        system=system,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    advice = response.content[0].text.strip() if response.content else "Check your skill dashboard for next steps."
+    advice = await llm.text(system, user_message, tier=llm.FAST, max_tokens=200) \
+        or "Check your skill dashboard for next steps."
 
     return {
         "skill": skill,

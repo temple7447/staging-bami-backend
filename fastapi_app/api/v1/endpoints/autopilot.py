@@ -4,7 +4,6 @@ Monitors the business 24/7, generates AI content, and executes actions
 (WhatsApp blasts, reminders, post captions, follow-ups, reports).
 """
 import logging
-import anthropic
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,26 +25,21 @@ from core.database import get_db
 from core.config import settings
 from utils.telegram_service import send_to_tenant_by_phone, send_to_owner, is_configured
 from utils.time_utils import utcnow
+from services import llm
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/autopilot", tags=["Autopilot"])
 
-HAIKU = "claude-haiku-4-5"
-SONNET = "claude-sonnet-4-6"
+# Provider-agnostic model tiers (see services/llm.py).
+HAIKU = llm.FAST
+SONNET = llm.DEEP
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async def _ai(system: str, prompt: str, model: str = HAIKU, max_tokens: int = 400) -> str:
-    """Call Claude and return the text response."""
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.content[0].text.strip() if resp.content else ""
+    """Call the configured LLM and return the text response."""
+    return await llm.text(system, prompt, tier=model, max_tokens=max_tokens)
 
 
 def _action(owner_id: str, skill: str, action_type: str, title: str,
@@ -497,8 +491,6 @@ async def send_email_campaign(
     current_user: User = Depends(get_current_user),
 ):
     """Send bulk email campaign to a list of recipients. AI personalization optional."""
-    import anthropic
-    from core.config import settings
     from utils.email_service import send_email, is_configured
 
     if not is_configured():
@@ -514,17 +506,11 @@ async def send_email_campaign(
         html_body = body.body
         if body.ai_personalize:
             try:
-                client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-                resp = await client.messages.create(
-                    model="claude-haiku-4-5",
-                    max_tokens=400,
-                    system="You are writing personalized marketing emails for a Nigerian property company. Keep it warm and professional. Return HTML only.",
-                    messages=[{
-                        "role": "user",
-                        "content": f"Personalize this email for {name}:\n\n{body.body}"
-                    }],
-                )
-                html_body = resp.content[0].text.strip() if resp.content else body.body
+                html_body = await llm.text(
+                    "You are writing personalized marketing emails for a Nigerian property company. Keep it warm and professional. Return HTML only.",
+                    f"Personalize this email for {name}:\n\n{body.body}",
+                    tier=llm.FAST, max_tokens=400,
+                ) or body.body
             except Exception:
                 html_body = body.body
 

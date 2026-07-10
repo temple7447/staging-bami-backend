@@ -1,4 +1,3 @@
-import anthropic
 import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -8,18 +7,9 @@ from sqlalchemy import select, func, desc
 
 from core.config import settings
 from utils.time_utils import utcnow
+from services import llm
 
 logger = logging.getLogger(__name__)
-
-# Reuse one Anthropic client across requests instead of constructing per call.
-_client: "anthropic.AsyncAnthropic | None" = None
-
-
-def _get_client() -> "anthropic.AsyncAnthropic":
-    global _client
-    if _client is None:
-        _client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    return _client
 
 
 # ─── System prompt ─────────────────────────────────────────────────────────────
@@ -1187,13 +1177,8 @@ async def get_coach_reply(
     system_blocks, messages = await build_coach_context(
         user_profile, conversation_history, new_message, db, user_id, role, active_group_ids,
     )
-    response = await _get_client().messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system_blocks,
-        messages=messages,
-    )
-    return response.content[0].text
+    result = await llm.complete(system_blocks, messages, tier=llm.DEEP, max_tokens=1024)
+    return result.text
 
 
 def _build_coach_profile(profile: dict) -> str:

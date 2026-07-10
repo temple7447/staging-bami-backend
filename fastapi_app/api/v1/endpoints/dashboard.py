@@ -413,9 +413,8 @@ async def get_health_score(
     current_user: User = Depends(get_current_user),
 ):
     """Returns a 0-100 AI business health score with dimension breakdown and action tips."""
-    import anthropic
     import json, re
-    from core.config import settings
+    from services import llm
     from models.tenant import Tenant
     from models.unit import Unit
     from models.estate import Estate
@@ -477,11 +476,8 @@ async def get_health_score(
     )
 
     # ── Ask AI for scored breakdown ──────────────────────────────────────────
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-    resp = await client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=600,
-        system=(
+    text = await llm.text(
+        (
             "You are a Nigerian property business analyst. Score this property business and return ONLY JSON. "
             "Format: {\"overall\": 78, \"dimensions\": [{\"name\": \"Occupancy\", \"score\": 85, \"max\": 100, \"comment\": \"...\"},"
             "{\"name\": \"Cash Collection\", \"score\": 70, \"max\": 100, \"comment\": \"...\"},"
@@ -490,10 +486,9 @@ async def get_health_score(
             "{\"name\": \"Lease Stability\", \"score\": 75, \"max\": 100, \"comment\": \"...\"}],"
             "\"summary\": \"...\", \"top_actions\": [\"...\", \"...\", \"...\"]}"
         ),
-        messages=[{"role": "user", "content": f"Business snapshot: {snapshot}. Score it."}],
-    )
-
-    text = resp.content[0].text.strip() if resp.content else "{}"
+        f"Business snapshot: {snapshot}. Score it.",
+        tier=llm.FAST, max_tokens=600,
+    ) or "{}"
     try:
         result = json.loads(text)
     except Exception:
