@@ -1,5 +1,14 @@
 import logging
+import warnings
 from contextlib import asynccontextmanager
+
+# Silence a spurious pydantic-2.13 / Python-3.14 warning: our schemas use
+# `alias_generator=to_camel`, and on Optional[...] (union) fields pydantic
+# mis-reports the generated camelCase alias as having "no effect" — but the
+# aliases work correctly (verified). Pure log noise; suppress it before any
+# schema is built (i.e. before the router import below).
+from pydantic.warnings import UnsupportedFieldAttributeWarning
+warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
