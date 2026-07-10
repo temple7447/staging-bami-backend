@@ -31,6 +31,21 @@ def upgrade() -> None:
                existing_nullable=False)
     # Drift reconciliation: model declares these NOT NULL; backfill any NULLs
     # left by the pre-Alembic era before tightening.
+    #
+    # The columns themselves had no ADD COLUMN migration (the baseline assumed
+    # they pre-existed). On a database where estates was create_all'd before
+    # the columns entered the model they are absent, so the UPDATE/alter below
+    # would 500. Add them if missing first so this revision is self-healing.
+    _estate_cols = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("estates")}
+    if "rent_increase_percent" not in _estate_cols:
+        op.add_column("estates", sa.Column("rent_increase_percent", sa.Float(),
+                      nullable=False, server_default="26.0"))
+    if "rent_increase_cycle_years" not in _estate_cols:
+        op.add_column("estates", sa.Column("rent_increase_cycle_years", sa.Integer(),
+                      nullable=False, server_default="2"))
+    if "rent_increase_start" not in _estate_cols:
+        op.add_column("estates", sa.Column("rent_increase_start", sa.DateTime(),
+                      nullable=True))
     op.execute("UPDATE estates SET rent_increase_percent = 26.0 WHERE rent_increase_percent IS NULL")
     op.execute("UPDATE estates SET rent_increase_cycle_years = 2 WHERE rent_increase_cycle_years IS NULL")
     op.alter_column('estates', 'rent_increase_percent',
