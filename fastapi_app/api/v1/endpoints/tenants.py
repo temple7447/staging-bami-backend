@@ -109,7 +109,7 @@ async def create_tenant(
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
-    await require_estate_access(db, user, estate_id)
+    await require_estate_access(db, user, estate_id, "manager")
     unit = await find_one(db, Unit, Unit.id == body.unit_id, Unit.estate == estate_id, Unit.is_active == True)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found in this estate")
@@ -749,9 +749,7 @@ async def resend_tenant_credentials(
     password and emails it to the tenant's *current* email — even if the login
     email was changed or the tenant forgot their password. The linked login
     account is created/synced so the emailed credentials always work."""
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)  # manager+ per property
 
     email_addr = (tenant.tenant_email or "").strip()
     if not email_addr:
@@ -811,9 +809,7 @@ async def delete_tenant(
     tenant_id: str,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
-    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)  # manager+ per property
     if tenant.user:
         u = await db.get(User, tenant.user)
         if u:

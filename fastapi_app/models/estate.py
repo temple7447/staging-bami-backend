@@ -17,6 +17,10 @@ class Estate(Base):
     total_units: Mapped[int] = mapped_column(Integer, default=0)
     owner: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     managers: Mapped[list] = mapped_column(JSON, default=list)
+    # Per-property team: [{"user_id": str, "email": str, "role": "admin"|"manager"|"viewer"}].
+    # The owner above is the implicit property admin; members grant additional
+    # emails a role scoped to THIS estate only. See core/authz.py for enforcement.
+    members: Mapped[list] = mapped_column(JSON, default=list)
     images: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 

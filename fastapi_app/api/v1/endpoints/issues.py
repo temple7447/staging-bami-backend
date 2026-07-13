@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from models.issue import Issue
 from models.user import User
 from core.security import get_current_user
+from core.authz import require_estate_access, is_platform_admin
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
@@ -93,6 +94,12 @@ async def update_issue(
     issue = await find_one(db, Issue, Issue.id == issue_id, Issue.is_active == True)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    # Editing an issue is a manager-level action scoped to its property. Issues
+    # without an estate may only be edited by the reporter or a platform admin.
+    if issue.estate:
+        await require_estate_access(db, user, issue.estate, "manager")
+    elif not (is_platform_admin(user) or issue.reporter == user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     allowed = {"title", "description", "category", "priority", "status", "stage", "assigned_to", "note"}
     for k, v in body.items():
@@ -109,11 +116,13 @@ async def update_issue(
 
 @router.delete("/{issue_id}")
 async def delete_issue(issue_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     issue = await find_one(db, Issue, Issue.id == issue_id)
     if not issue:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.estate:
+        await require_estate_access(db, user, issue.estate, "manager")
+    elif not (is_platform_admin(user) or issue.reporter == user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
     issue.is_active = False
     issue.updated_at = utcnow()
     await save(db, issue)

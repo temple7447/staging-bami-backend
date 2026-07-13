@@ -15,7 +15,7 @@ from models.transaction import Transaction
 from models.wallet_account import WalletAccount
 from core.security import get_current_user
 from core.database import get_db
-from core.authz import accessible_estate_ids, require_tenant_access
+from core.authz import accessible_estate_ids, require_tenant_access, require_estate_access
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
@@ -57,8 +57,10 @@ async def create_payment(
     tenant = await find_one(db, Tenant, Tenant.id == body.tenant, Tenant.is_active == True)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    # Estate staff or the tenant themself may record a payment for this tenant.
-    await require_tenant_access(db, user, tenant)
+    # The tenant themself may pay; otherwise recording a payment is a manager-level
+    # staff action scoped to the tenant's property (viewers cannot record payments).
+    if not (tenant.user and tenant.user == user.id):
+        await require_estate_access(db, user, tenant.estate, "manager")
     data = body.model_dump()
     data["estate"] = tenant.estate  # never trust a caller-supplied estate id
     payment = Payment(id=gen_uuid(), **data, payment_status="pending", created_by=user.id)

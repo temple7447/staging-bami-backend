@@ -14,9 +14,13 @@ from models.user import User
 from schemas.estate import EstateCreate, EstateUpdate
 from schemas.tenant import TenantCreate, TenantUpdate
 from schemas.unit import UnitCreate, UnitUpdate
-from core.security import get_current_user
+from core.security import get_current_user, hash_password, require_super_admin
 from core.database import get_db
-from core.authz import require_estate_access
+from core.authz import require_estate_access, has_property_role, property_role, require_estate_role, PROPERTY_ROLES
+from models.wallet import Wallet
+from utils.tenant_helpers import generate_temp_password
+from utils.email_service import send_welcome_email
+from pydantic import BaseModel
 from core.db_helpers import find_all, find_one, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
@@ -27,14 +31,13 @@ router = APIRouter(prefix="/estates", tags=["Estates"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
 
 
-def _check_estate_access(estate: Estate, user: User):
-    if user.role == "business_owner":
-        # Owner is the single source of truth (see core.authz.accessible_estate_ids).
-        if estate.owner != user.id:
-            raise HTTPException(status_code=403, detail="You do not have access to this estate")
-    elif user.role == "admin":
-        if user.id not in (estate.managers or []):
-            raise HTTPException(status_code=403, detail="You do not have access to this estate")
+def _check_estate_access(estate: Estate, user: User, min_role: str = "admin"):
+    """Property-scoped gate. Editing property settings requires the property
+    ADMIN (owner or an admin member); super_admin always passes."""
+    if not has_property_role(estate, user, min_role):
+        if property_role(estate, user) is not None:
+            raise HTTPException(status_code=403, detail="Only the property admin can edit this property")
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 async def _accessible_estate_ids(db: AsyncSession, user: User) -> list[str]:
@@ -321,7 +324,7 @@ async def get_estate(
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
-    _check_estate_access(estate, user)
+    _check_estate_access(estate, user, "viewer")  # any member may view
     return {"success": True, "data": _e(estate)}
 
 
@@ -355,11 +358,10 @@ async def delete_estate(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in {"super_admin", "business_owner"}:
-        raise HTTPException(status_code=403, detail="Not authorized")
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
+    _check_estate_access(estate, user, "admin")  # only the property admin may delete
     estate.is_active = False
     estate.updated_by = user.id
     estate.updated_at = utcnow()
@@ -516,8 +518,7 @@ async def remove_unit_tenant(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
+    await require_estate_role(db, user, estate_id, "manager")
     unit = await find_one(db, Unit, Unit.id == unit_id, Unit.estate == estate_id, Unit.is_active == True)
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found in this estate")
@@ -553,11 +554,10 @@ async def upload_estate_image(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
+    _check_estate_access(estate, user, "admin")  # estate media is a property-settings edit
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,
         api_key=settings.CLOUDINARY_API_KEY,
@@ -572,3 +572,174 @@ async def upload_estate_image(
     estate.updated_at = utcnow()
     await save(db, estate)
     return {"success": True, "data": img}
+
+
+# ── Per-property team (members & roles) ───────────────────────────────────────
+# The platform admin (super_admin) assigns emails to per-property roles
+# (admin | manager | viewer). The onboarded owner is the implicit admin; these
+# endpoints add/adjust additional members. Enforcement lives in core/authz.py.
+
+class MemberAssign(BaseModel):
+    name: str
+    email: str
+    role: str                      # admin | manager | viewer
+    phone: str | None = None
+    sendCredentials: bool = True
+
+
+class MemberUpdate(BaseModel):
+    role: str
+
+
+async def _serialize_members(db: AsyncSession, estate: Estate) -> list[dict]:
+    out = []
+    for m in (estate.members or []):
+        if not isinstance(m, dict):
+            continue
+        u = await db.get(User, m.get("user_id")) if m.get("user_id") else None
+        out.append({
+            "userId": m.get("user_id"),
+            "email": (u.email if u else m.get("email")),
+            "name": (u.name if u else None),
+            "role": m.get("role"),
+            "isActive": (u.is_active if u else None),
+        })
+    return out
+
+
+@router.get("/{estate_id}/members")
+async def list_estate_members(
+    estate_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The property's team. Any member (viewer+) may view it."""
+    estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
+    if not estate:
+        raise HTTPException(status_code=404, detail="Estate not found")
+    _check_estate_access(estate, user, "viewer")
+    owner = await db.get(User, estate.owner) if estate.owner else None
+    return {
+        "success": True,
+        "owner": ({"userId": owner.id, "email": owner.email, "name": owner.name, "role": "admin"} if owner else None),
+        "members": await _serialize_members(db, estate),
+    }
+
+
+@router.post("/{estate_id}/members", status_code=201)
+async def add_estate_member(
+    estate_id: str,
+    body: MemberAssign,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """Assign an email a per-property role. Creates the login account if new
+    (emailing temp credentials) or attaches an existing account."""
+    role = (body.role or "").strip().lower()
+    if role not in PROPERTY_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {', '.join(PROPERTY_ROLES)}")
+    estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
+    if not estate:
+        raise HTTPException(status_code=404, detail="Estate not found")
+    email = (body.email or "").strip().lower()
+    name = (body.name or "").strip()
+    if not email or not name:
+        raise HTTPException(status_code=400, detail="Name and email are required")
+    if estate.owner and (owner := await db.get(User, estate.owner)) and owner.email.lower() == email:
+        raise HTTPException(status_code=409, detail="This email is already the property owner (admin)")
+
+    user = await find_one(db, User, func.lower(User.email) == email)
+    created = False
+    password = None
+    if not user:
+        password = generate_temp_password(8)
+        user = User(id=gen_uuid(), name=name, email=email, phone=(body.phone or None),
+                    password=hash_password(password), role="manager",
+                    assigned_estates=[estate_id], created_by=actor.id, email_verified=True)
+        await save(db, user)
+        await save(db, Wallet(id=gen_uuid(), user_id=user.id, balance=0, currency="NGN"))
+        created = True
+    else:
+        assigned = list(user.assigned_estates or [])
+        if estate_id not in assigned:
+            assigned.append(estate_id)
+            user.assigned_estates = assigned
+            await save(db, user)
+
+    # Upsert the member entry (one role per user per estate).
+    members = [m for m in (estate.members or [])
+               if not (isinstance(m, dict) and m.get("user_id") == user.id)]
+    members.append({"user_id": user.id, "email": email, "role": role})
+    estate.members = members
+    estate.updated_by = actor.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+
+    if created and body.sendCredentials:
+        try:
+            await send_welcome_email(email, name, password)
+        except Exception:
+            pass
+
+    return {"success": True, "message": "Member assigned",
+            "data": {"userId": user.id, "email": email, "name": user.name,
+                     "role": role, "accountCreated": created}}
+
+
+@router.put("/{estate_id}/members/{user_id}")
+async def update_estate_member(
+    estate_id: str,
+    user_id: str,
+    body: MemberUpdate,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """Change a member's per-property role."""
+    role = (body.role or "").strip().lower()
+    if role not in PROPERTY_ROLES:
+        raise HTTPException(status_code=400, detail=f"role must be one of {', '.join(PROPERTY_ROLES)}")
+    estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
+    if not estate:
+        raise HTTPException(status_code=404, detail="Estate not found")
+    # Rebuild with NEW dicts — mutating the JSON dicts in place isn't detected as a
+    # change by SQLAlchemy (committed vs new compare equal) and silently won't save.
+    found = False
+    new_members = []
+    for m in (estate.members or []):
+        if isinstance(m, dict) and m.get("user_id") == user_id:
+            new_members.append({**m, "role": role})
+            found = True
+        else:
+            new_members.append(m)
+    if not found:
+        raise HTTPException(status_code=404, detail="Member not found on this property")
+    estate.members = new_members
+    estate.updated_by = actor.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+    return {"success": True, "message": "Member role updated"}
+
+
+@router.delete("/{estate_id}/members/{user_id}")
+async def remove_estate_member(
+    estate_id: str,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    """Remove a member from the property (releases their access to it)."""
+    estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
+    if not estate:
+        raise HTTPException(status_code=404, detail="Estate not found")
+    members = [m for m in (estate.members or [])
+               if not (isinstance(m, dict) and m.get("user_id") == user_id)]
+    estate.members = members
+    estate.updated_by = actor.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+    # Detach the estate from the user's assigned_estates too.
+    u = await db.get(User, user_id)
+    if u and estate_id in (u.assigned_estates or []):
+        u.assigned_estates = [e for e in u.assigned_estates if e != estate_id]
+        await save(db, u)
+    return {"success": True, "message": "Member removed"}

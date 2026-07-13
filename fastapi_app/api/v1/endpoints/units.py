@@ -84,15 +84,13 @@ async def create_unit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     eid = estate_id or body.estate
     if not eid:
         raise HTTPException(status_code=400, detail="estateId is required")
     estate = await find_one(db, Estate, Estate.id == eid, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
-    await require_estate_access(db, user, eid)
+    await require_estate_access(db, user, eid, "manager")
     data = body.model_dump()
     data["estate"] = eid
     unit = Unit(id=gen_uuid(), **data, created_by=user.id)
@@ -116,9 +114,8 @@ async def update_unit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     unit = await _get_unit_scoped(db, unit_id, user)
+    await require_estate_access(db, user, unit.estate, "manager")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(unit, k, v)
     unit.updated_by = user.id
@@ -133,9 +130,8 @@ async def delete_unit(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     unit = await _get_unit_scoped(db, unit_id, user)
+    await require_estate_access(db, user, unit.estate, "manager")
     has_tenant = await find_one(db, Tenant, Tenant.unit == unit_id, Tenant.is_active == True)
     if has_tenant:
         raise HTTPException(status_code=400, detail="Cannot delete unit with active tenant")
@@ -157,9 +153,8 @@ async def upload_unit_image(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Admins only")
     unit = await _get_unit_scoped(db, unit_id, user)
+    await require_estate_access(db, user, unit.estate, "manager")
 
     cloudinary.config(
         cloud_name=settings.CLOUDINARY_CLOUD_NAME,
