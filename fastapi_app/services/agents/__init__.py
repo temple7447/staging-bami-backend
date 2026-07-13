@@ -16,7 +16,8 @@ from services.agents import (
     designer_agent, marketer_agent, sales_agent,
     finance_agent, operations_agent, hr_agent,
     retention_agent, collections_agent, analyst_agent, compliance_agent,
-    records_agent, gm_agent,
+    records_agent, metering_agent, legal_agent, support_agent,
+    procurement_agent, gm_agent,
 )
 from services.agents.base import AgentMeta
 
@@ -34,6 +35,10 @@ ALL_AGENTS = [
     analyst_agent,
     compliance_agent,
     records_agent,
+    metering_agent,
+    legal_agent,
+    support_agent,
+    procurement_agent,
     gm_agent,
 ]
 
