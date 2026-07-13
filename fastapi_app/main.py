@@ -42,6 +42,7 @@ import models.instruction, models.voice_note  # noqa: F401
 import models.model10_entry  # noqa: F401
 import models.lead_page, models.lead  # noqa: F401
 import models.ops_thread, models.ops_report, models.integration  # noqa: F401
+import models.head_office  # noqa: F401
 from middleware.logging import logging_middleware
 from middleware.camelize import camelize_response_middleware
 
