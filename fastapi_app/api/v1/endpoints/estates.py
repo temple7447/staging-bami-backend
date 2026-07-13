@@ -16,7 +16,7 @@ from schemas.tenant import TenantCreate, TenantUpdate
 from schemas.unit import UnitCreate, UnitUpdate
 from core.security import get_current_user, hash_password, require_super_admin
 from core.database import get_db
-from core.authz import require_estate_access, has_property_role, property_role, require_estate_role, PROPERTY_ROLES
+from core.authz import require_estate_access, has_property_role, property_role, require_estate_role, PROPERTY_ROLES, accessible_estate_ids
 from models.wallet import Wallet
 from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
@@ -41,25 +41,16 @@ def _check_estate_access(estate: Estate, user: User, min_role: str = "admin"):
 
 
 async def _accessible_estate_ids(db: AsyncSession, user: User) -> list[str]:
-    if user.role == "super_admin":
+    """Estate ids the user may see — owned ∪ member-of ∪ assigned. Delegates to
+    core.authz so per-property membership is honoured consistently."""
+    ids = await accessible_estate_ids(db, user)
+    if ids is None:  # platform admin — unrestricted
         result = await db.execute(select(Estate.id).where(Estate.is_active == True))
         return [r[0] for r in result.all()]
-    elif user.role == "business_owner":
-        # Owner-only (see core.authz.accessible_estate_ids) — created_by is not honoured.
-        result = await db.execute(
-            select(Estate.id).where(Estate.is_active == True, Estate.owner == user.id)
-        )
-        return [r[0] for r in result.all()]
-    elif user.role in {"admin", "manager", "super_manager"}:
-        assigned = user.assigned_estates or []
-        result = await db.execute(
-            select(Estate.id).where(Estate.is_active == True, Estate.id.in_(assigned))
-        )
-        return [r[0] for r in result.all()]
-    return []
+    return list(ids)
 
 
-def _e(e: Estate) -> dict:
+def _e(e: Estate, user: User | None = None) -> dict:
     return {
         "id": e.id, "name": e.name, "slug": e.slug, "description": e.description,
         "address": e.address, "total_units": e.total_units,
@@ -68,6 +59,9 @@ def _e(e: Estate) -> dict:
         "rent_increase_percent": getattr(e, "rent_increase_percent", 26.0),
         "rent_increase_cycle_years": getattr(e, "rent_increase_cycle_years", 2),
         "rent_increase_start": getattr(e, "rent_increase_start", None),
+        # The caller's effective role on THIS estate — lets the UI hide/disable
+        # controls (admin edits everything; manager does ops; viewer read-only).
+        "my_role": property_role(e, user) if user is not None else None,
     }
 
 
@@ -183,7 +177,7 @@ async def list_estates(
     skip = (page - 1) * limit
     total = await count(db, Estate, *conditions)
     items = await find_all(db, Estate, *conditions, order_by=Estate.created_at.desc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "total": total, "data": [_e(e) for e in items]}
+    return {"success": True, "count": len(items), "total": total, "data": [_e(e, user) for e in items]}
 
 
 @router.post("", status_code=201)
@@ -199,7 +193,7 @@ async def create_estate(
     estate = Estate(id=gen_uuid(), **body.model_dump(exclude_none=True), owner=user.id, created_by=user.id)
     estate.set_slug()
     await save(db, estate)
-    return {"success": True, "data": _e(estate)}
+    return {"success": True, "data": _e(estate, user)}
 
 
 # ── Unit sub-routes (must be before /{estate_id} to avoid slug conflicts) ────
@@ -325,7 +319,7 @@ async def get_estate(
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
     _check_estate_access(estate, user, "viewer")  # any member may view
-    return {"success": True, "data": _e(estate)}
+    return {"success": True, "data": _e(estate, user)}
 
 
 @router.put("/{estate_id}")
@@ -349,7 +343,7 @@ async def update_estate(
     estate.updated_by = user.id
     estate.updated_at = utcnow()
     await save(db, estate)
-    return {"success": True, "data": _e(estate)}
+    return {"success": True, "data": _e(estate, user)}
 
 
 @router.delete("/{estate_id}")
