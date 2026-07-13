@@ -658,7 +658,15 @@ async def add_estate_member(
         if estate_id not in assigned:
             assigned.append(estate_id)
             user.assigned_estates = assigned
-            await save(db, user)
+        # Existing account: (re)issue a fresh temporary password so EVERY assigned
+        # member receives working login credentials for their new access — the same
+        # as a brand-new account. (Their previous password stops working; they use
+        # the newly emailed one.)
+        if body.sendCredentials:
+            password = generate_temp_password(8)
+            user.password = hash_password(password)
+            user.email_verified = True
+        await save(db, user)
 
     # Upsert the member entry (one role per user per estate).
     members = [m for m in (estate.members or [])
@@ -669,15 +677,19 @@ async def add_estate_member(
     estate.updated_at = utcnow()
     await save(db, estate)
 
-    if created and body.sendCredentials:
+    # Email credentials to everyone (new or existing) whenever we issued a password.
+    credentials_sent = False
+    if body.sendCredentials and password:
         try:
-            await send_welcome_email(email, name, password)
+            await send_welcome_email(email, user.name, password)
+            credentials_sent = True
         except Exception:
             pass
 
     return {"success": True, "message": "Member assigned",
             "data": {"userId": user.id, "email": email, "name": user.name,
-                     "role": role, "accountCreated": created}}
+                     "role": role, "accountCreated": created,
+                     "credentialsSent": credentials_sent}}
 
 
 @router.put("/{estate_id}/members/{user_id}")
