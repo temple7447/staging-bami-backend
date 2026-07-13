@@ -12,7 +12,7 @@ from models.meter_device import MeterDevice
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -22,6 +22,7 @@ META = AgentMeta(
     description="Watches smart-meter credit balances and connectivity; drafts low-balance top-up reminders and flags offline meters.",
     # Reminders are drafted for a human to send; nothing auto-executes on hardware.
     auto_safe=[],
+    business_line="Smart Metering",
 )
 
 
@@ -68,14 +69,12 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": utcnow().strftime("%Y-%m-%d"),
     }
 
-    guidance = await ai_text(
-        "You are an energy/metering operations lead for a Nigerian property business running prepaid "
-        "smart meters. In under 110 words, give a 3-step action plan to keep power from lapsing: which "
-        "meters to top up first, the WhatsApp/SMS message to send tenants on prepaid meters, and how to "
-        "get offline meters back online. Practical and specific.",
+    guidance = await ai_analyze(
+        "an energy/metering operations lead running prepaid smart meters",
         f"Low-balance prepaid meters: {len(low)} — {ctx['low']}. "
-        f"Offline meters (not reporting): {len(offline)} — {ctx['offline'] or 'none'}. "
-        "What should the operator do right now?")
+        f"Offline meters (not reporting): {len(offline)} — {ctx['offline'] or 'none'}.",
+        "Keep power from lapsing: which meters to top up first, the exact message to send "
+        "tenants on low prepaid meters, and how to get offline meters back online.")
 
     priority = "high" if low else "medium"
     title_bits = []

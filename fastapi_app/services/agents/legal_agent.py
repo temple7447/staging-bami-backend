@@ -15,7 +15,7 @@ from models.tenant import Tenant
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -66,14 +66,13 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": now.strftime("%Y-%m-%d"),
     }
 
-    guidance = await ai_text(
-        "You are a property lawyer for a Nigerian landlord. In under 130 words, draft a short, warm "
-        "renewal-notice message the owner can send to tenants whose lease is ending soon (mention that a "
-        "renewed tenancy agreement will be prepared and any rent-increase applies per the agreement), then "
-        "list the 3 documents/steps to get the renewal signed before the current lease lapses. Plain "
-        "language, professional, Nigeria-appropriate.",
-        f"{len(rows)} tenancy agreement(s) end within 60 days: {detail}. "
-        "Draft the renewal notice and the steps to get it signed in time.")
+    guidance = await ai_analyze(
+        "a property lawyer for a Nigerian landlord",
+        f"{len(rows)} tenancy agreement(s) end within 60 days: {detail}.",
+        "Draft a short, warm renewal-notice message the owner can send (note a renewed agreement "
+        "will be prepared and any rent-increase applies per the agreement), then list the exact "
+        "documents/steps to get each renewal signed before the current lease lapses.",
+        max_tokens=560)
 
     return [make_action(
         uid, "legal", "legal_draft",

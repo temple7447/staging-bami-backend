@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.issue import Issue
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -62,13 +62,12 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": utcnow().strftime("%Y-%m-%d"),
     }
 
-    guidance = await ai_text(
-        "You are a procurement/vendor manager for a Nigerian property business. In under 120 words, given "
-        "the recurring maintenance categories, recommend which one to put on a fixed vendor contract or bulk "
-        "supply first (and why it saves money vs per-callout), and draft a 2-line RFQ message to send to 2–3 "
-        "vendors to get quotes. Concrete and cost-focused.",
+    guidance = await ai_analyze(
+        "a procurement/vendor manager",
         f"Maintenance issues in the last {WINDOW_DAYS} days by category: {breakdown}. "
-        "Which should we negotiate a vendor contract for, and what RFQ do we send?")
+        f"Total issues: {len(issues)}.",
+        "Recommend which category to put on a fixed vendor contract or bulk supply first "
+        "(and why it beats paying per-callout), and draft a 2-line RFQ to send to 2–3 vendors.")
 
     top_cat = ranked[0][0]
     return [make_action(

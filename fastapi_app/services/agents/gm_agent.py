@@ -16,7 +16,9 @@ from models.tenant import Tenant
 from models.unit import Unit
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids, SONNET
+from services.agents.base import (
+    AgentMeta, ai_analyze, make_action, owner_estate_ids, active_business_lines, SONNET,
+)
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -26,6 +28,7 @@ META = AgentMeta(
     description="The General Manager — reads every agent's output and the company vitals, then writes one State of the Company briefing with what needs the owner today.",
     # A read-only executive summary is always safe to deliver automatically.
     auto_safe=["state_of_company"],
+    business_line="Company-wide",
 )
 
 
@@ -91,16 +94,34 @@ async def scan(db: AsyncSession, user: User,
               f"Rent run-rate ₦{monthly_rent:,.0f}/mo · Arrears ₦{arrears:,.0f} · "
               f"{expiring_60d} lease(s) end within 60 days")
 
-    briefing = await ai_text(
-        "You are the General Manager of a Nigerian property business, briefing the owner. From the "
-        "vitals and the team's new action items, write a State of the Company briefing in under 150 "
-        "words: 1) one plain sentence on overall health, 2) the top 2-3 priorities across the WHOLE "
-        "team right now and why they matter, 3) exactly what needs the owner's decision or approval "
-        "today. Direct, calm, no fluff — like a trusted GM at the morning stand-up.",
-        f"Vitals: {vitals}.\n"
-        f"Team desk this run:\n" + ("\n".join(desk_lines) or "no new items — a quiet day") + "\n"
+    # ── Cross-business-line: BamiHost runs MANY businesses, not just estate ──
+    lines = await active_business_lines(db, user)
+    metering_line = ""
+    if "Smart Metering" in lines:
+        from models.meter_device import MeterDevice
+        m_rows = (await db.execute(
+            select(MeterDevice).where(
+                MeterDevice.estate.in_(estate_ids), MeterDevice.is_active == True,  # noqa: E712
+            )
+        )).scalars().all()
+        low = sum(1 for d in m_rows if d.prepaid_mode and (d.credit_balance or 0) <= (d.low_balance_threshold or 0))
+        offline = sum(1 for d in m_rows if not d.is_online)
+        metering_line = (f"Smart Metering — {len(m_rows)} meter(s), "
+                         f"{low} low on credit, {offline} offline")
+
+    lines_label = ", ".join(lines) if lines else "Real Estate"
+
+    briefing = await ai_analyze(
+        "the General Manager briefing the owner",
+        f"Active business lines: {lines_label}.\n"
+        f"Real Estate vitals: {vitals}.\n"
+        + (f"{metering_line}.\n" if metering_line else "")
+        + "Team desk this run:\n" + ("\n".join(desk_lines) or "no new items — a quiet day") + "\n"
         f"High-priority titles: {'; '.join(urgent) or 'none'}.",
-        model=SONNET, max_tokens=400)
+        "Write today's State of the Company briefing covering ALL active business lines "
+        "(never assume estate is the only one): overall health, the top 2-3 priorities across "
+        "the WHOLE team and why, and exactly what needs the owner's decision today.",
+        max_tokens=520)
 
     desk_section = "\n\nTEAM DESK — THIS RUN\n" + ("\n".join(f"• {l}" for l in desk_lines)
                                                   or "• No agent raised anything this run.")
@@ -111,7 +132,10 @@ async def scan(db: AsyncSession, user: User,
         f"{len(team_actions)} team item(s)",
         "Gbenga read every agent's output and the company vitals. This is the one briefing to read "
         "first — and what needs your decision today.",
-        briefing + "\n\nVITALS\n• " + vitals.replace(" · ", "\n• ") + desk_section,
+        briefing + f"\n\nBUSINESS LINES\n• {lines_label}"
+        + (f"\n\nVITALS\n• " + vitals.replace(" · ", "\n• "))
+        + (f"\n• {metering_line}" if metering_line else "")
+        + desk_section,
         "internal", "daily_standup",
         {"team_items": len(team_actions), "high_priority": len(urgent),
          "occupancy_pct": occupancy_pct, "arrears": arrears,

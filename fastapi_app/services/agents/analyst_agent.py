@@ -14,7 +14,7 @@ from models.tenant import Tenant
 from models.unit import Unit
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -86,15 +86,15 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": utcnow().strftime("%Y-%m-%d"),
     }
 
-    report = await ai_text(
-        "You are a portfolio analyst for a Nigerian property owner. Using the numbers, write a short "
-        "weekly briefing (max 120 words) in plain English: 1) one-line summary of health, 2) the single "
-        "biggest risk right now, 3) the ONE next best action this week. Be specific and encouraging.",
+    report = await ai_analyze(
+        "a portfolio analyst",
         f"Estates: {len(estate_ids)}. Units: {total_units} ({occupied} occupied, {vacant} vacant, "
         f"{occupancy_pct}% occupancy). Active tenants: {active_tenants}. Monthly rent run-rate: "
         f"₦{monthly_rent:,.0f}. Arrears: ₦{arrears:,.0f} across {overdue_count} tenants. "
         f"Avg satisfaction (NPS): {avg_nps if avg_nps is not None else 'no responses yet'}.",
-        max_tokens=350)
+        "Write this week's portfolio briefing: health in one line, the single biggest risk right now, "
+        "and the ONE next best action this week. Specific and encouraging.",
+        max_tokens=460)
 
     priority = "high" if (overdue_count and arrears > 0) or occupancy_pct < 70 else "medium"
     return [make_action(

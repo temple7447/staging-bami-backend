@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.tenant import Tenant
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 
 META = AgentMeta(
     key="hr",
@@ -13,6 +13,7 @@ META = AgentMeta(
     emoji="👥",
     description="Flags when the portfolio is big enough to hire, and drafts the role.",
     auto_safe=[],  # hiring is always a human decision
+    business_line="Company-wide",
 )
 
 # Rough span-of-control threshold: above this many active tenants, a single
@@ -36,11 +37,11 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         return []
 
     ctx = {"active_tenants": tenant_count, "threshold": HIRE_TENANT_THRESHOLD}
-    jd = await ai_text(
-        "You are an HR advisor for a Nigerian property business. In under 90 words, recommend the ONE "
-        "role to hire next given the portfolio size, and list 3 key responsibilities. Be specific.",
+    jd = await ai_analyze(
+        "an HR advisor",
         f"The owner now manages {tenant_count} active tenants across {len(estate_ids)} estate(s) "
-        "and is handling everything alone. What role should they hire and why?")
+        "and is handling everything alone.",
+        "Recommend the ONE role to hire next given the portfolio size, with 3 key responsibilities.")
     return [make_action(
         uid, "hr", "hiring_recommendation",
         f"Time to hire — {tenant_count} active tenants under management",

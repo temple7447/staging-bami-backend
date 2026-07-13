@@ -40,12 +40,18 @@ def _roster() -> str:
 def _system_prompt() -> str:
     return (
         "You are the BamiHost HEAD OFFICE — the owner's (CEO's) private boardroom of AI department heads. "
-        "The owner talks to the whole team here. Your job is to answer as the team: when a question belongs "
-        "to a department, answer in that head's voice and PREFIX the answer with their name, e.g. "
-        "'Ada · Metering:' or 'Finance:'. If several departments are relevant, give each a short turn. "
-        "When the owner asks something broad ('how are we doing?'), act as the General Manager and give a "
-        "crisp cross-department read, then hand to the specific heads for detail.\n\n"
+        "BamiHost is a MULTI-BUSINESS company (property/Real Estate, Smart Metering, and more lines are "
+        "added over time) — never assume estate is the only business; speak to whichever business lines the "
+        "owner actually runs (see LIVE CONTEXT). The owner talks to the whole team here. Answer as the team: "
+        "when a question belongs to a department, answer in that head's voice and PREFIX the answer with "
+        "their name, e.g. 'Ada · Metering:' or 'Femi · Finance:'. If several departments are relevant, give "
+        "each a short turn. When the owner asks something broad ('how are we doing?'), act as the General "
+        "Manager and give a crisp cross-department, cross-business-line read, then hand to the specific heads "
+        "for detail.\n\n"
         "The department heads in the room:\n" + _roster() + "\n\n"
+        "You can TASK the team: if the owner wants a fresh sweep/scan of the business, tell them to hit "
+        "'Run the team' (or that you've asked the team to re-scan) — a live run refreshes every department's "
+        "findings.\n\n"
         "Rules: Be direct and concrete — always reference the owner's REAL numbers from the live context "
         "below. No corporate filler. Keep each department's turn to a few sentences. If you don't have data "
         "for something, say so plainly and say what you'd need. Never invent figures."
@@ -53,8 +59,18 @@ def _system_prompt() -> str:
 
 
 async def _live_context(db: AsyncSession, user: User) -> str:
-    """Live business data + what the agent team has recently flagged."""
+    """Live business data + which business lines run + each department's latest finding."""
     parts = []
+
+    # Which business lines the owner ACTUALLY runs — so the room never assumes estate-only.
+    try:
+        from services.agents.base import active_business_lines
+        lines = await active_business_lines(db, user)
+        if lines:
+            parts.append("ACTIVE BUSINESS LINES: " + ", ".join(lines))
+    except Exception as e:
+        logger.debug(f"[HEAD_OFFICE] business-line probe failed: {e}")
+
     try:
         from services.ai_coach import fetch_business_context, _format_context
         ctx = await fetch_business_context(db, str(user.id), user.role)
@@ -64,12 +80,16 @@ async def _live_context(db: AsyncSession, user: User) -> str:
 
     recent = (await db.execute(
         select(AutopilotAction).where(AutopilotAction.owner_id == str(user.id))
-        .order_by(desc(AutopilotAction.created_at)).limit(12)
+        .order_by(desc(AutopilotAction.created_at)).limit(40)
     )).scalars().all()
     if recent:
+        # Each department's single latest finding — the room's current picture.
+        latest_by_skill: dict[str, AutopilotAction] = {}
+        for a in recent:
+            latest_by_skill.setdefault(a.skill, a)
         parts.append(
-            "What the AI team has recently flagged:\n" + "\n".join(
-                f"- [{a.skill}] {a.title} ({a.status})" for a in recent
+            "EACH DEPARTMENT'S LATEST FINDING:\n" + "\n".join(
+                f"- [{a.skill}] {a.title} ({a.status})" for a in latest_by_skill.values()
             )
         )
     return "\n\n".join(p for p in parts if p)
@@ -81,9 +101,53 @@ async def _live_context(db: AsyncSession, user: User) -> str:
 async def get_team(user: User = Depends(get_current_user)):
     """The department heads the owner can consult in the Head Office."""
     return {"success": True, "team": [
-        {"key": m.key, "name": m.name, "emoji": m.emoji, "description": m.description}
+        {"key": m.key, "name": m.name, "emoji": m.emoji,
+         "description": m.description, "businessLine": m.business_line}
         for m in AGENT_META.values()
     ]}
+
+
+@router.post("/run-team")
+async def run_team(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Task the whole team from the boardroom: run a fresh scan across every
+    department and persist the findings, so the next question is answered against
+    up-to-the-minute data. Mirrors the Autopilot generate (clears stale pending
+    items first), but callable straight from the Head Office."""
+    from services.agents import run_all_agents
+
+    uid = str(user.id)
+    # Clear stale pending/approved so the room sees a clean, current desk.
+    existing = (await db.execute(
+        select(AutopilotAction).where(
+            AutopilotAction.owner_id == uid,
+            AutopilotAction.status.in_(["pending", "approved"]),
+        )
+    )).scalars().all()
+    for a in existing:
+        await db.delete(a)
+
+    try:
+        actions = await run_all_agents(db, user)
+    except Exception as e:
+        logger.error(f"[HEAD_OFFICE] run-team failed: {e}")
+        raise HTTPException(500, f"Team run failed: {e}")
+
+    for a in actions:
+        db.add(a)
+    await db.commit()
+
+    # Per-department summary for the room.
+    by_skill: dict[str, int] = {}
+    for a in actions:
+        by_skill[a.skill] = by_skill.get(a.skill, 0) + 1
+    return {
+        "success": True,
+        "ran": len(actions),
+        "byDepartment": [
+            {"skill": s, "name": AGENT_META[s].name if s in AGENT_META else s, "items": n}
+            for s, n in sorted(by_skill.items(), key=lambda kv: kv[1], reverse=True)
+        ],
+    }
 
 
 # ─── Threads ────────────────────────────────────────────────────────────────────

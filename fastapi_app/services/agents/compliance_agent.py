@@ -14,7 +14,7 @@ from models.tenant import Tenant
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -65,13 +65,12 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": now.strftime("%Y-%m-%d"),
     }
 
-    guidance = await ai_text(
-        "You are a compliance officer for a Nigerian property business. In under 110 words, explain the "
-        "legal risk of expired or missing tenancy agreements and give a 3-step checklist to regularise "
-        "them this week. Practical and calm, not alarmist.",
+    guidance = await ai_analyze(
+        "a compliance officer",
         f"Expired agreements: {len(expired)} tenant(s) — {ctx['expired'] or 'none'}. "
-        f"No agreement on file: {len(missing)} tenant(s) — {ctx['missing'] or 'none'}. "
-        "What should the owner do to bring the paperwork back into compliance?")
+        f"No agreement on file: {len(missing)} tenant(s) — {ctx['missing'] or 'none'}.",
+        "Explain the legal risk of expired/missing tenancy agreements and give a checklist to "
+        "regularise them this week. Calm, not alarmist.")
 
     total = len(expired) + len(missing)
     return [make_action(

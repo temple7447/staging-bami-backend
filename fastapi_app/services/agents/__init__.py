@@ -69,4 +69,15 @@ async def run_all_agents(db: AsyncSession, user: User) -> list[AutopilotAction]:
         actions.extend(await gm_agent.scan(db, user, team_actions=actions))
     except Exception as e:
         logger.error("[AGENTS] gm.scan failed: %s", e)
+
+    # Take a REAL action: push the owner-facing briefings (GM State of the Company,
+    # weekly report, etc.) straight to the owner on Telegram. Tenant-facing sends
+    # still wait for approval — see deliver_owner_actions.
+    try:
+        from services.agents.base import deliver_owner_actions
+        delivered = await deliver_owner_actions(db, user, actions)
+        if delivered:
+            logger.info("[AGENTS] delivered %d owner briefing(s) to Telegram", delivered)
+    except Exception as e:
+        logger.error("[AGENTS] owner delivery failed: %s", e)
     return actions

@@ -34,6 +34,7 @@ META = AgentMeta(
     # is safe to auto-execute. Fixing files and reconciling payments change
     # records, so they always wait for a human.
     auto_safe=["document_register"],
+    business_line="Company-wide",
 )
 
 # A payment still "pending" after this long has broken the audit trail — it

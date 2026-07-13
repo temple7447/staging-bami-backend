@@ -16,7 +16,7 @@ from models.tenant import Tenant
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -79,13 +79,13 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "as_of": now.strftime("%Y-%m-%d"),
     }
 
-    guidance = await ai_text(
-        "You are a customer-success lead for a Nigerian property business. In under 120 words, prioritise "
-        "who to contact first, draft ONE warm reply template for an unanswered enquiry, and give a one-line "
-        "save-the-relationship message for an unhappy tenant. Warm, human, specific — no corporate filler.",
+    guidance = await ai_analyze(
+        "a customer-success lead",
         f"Unanswered enquiries: {len(pending_enq)}. Open issues older than 2 days: {len(ageing_issues)}. "
-        f"Unhappy tenants (NPS ≤ {LOW_NPS}): {len(unhappy)} — {unhappy_names}. "
-        "What should support do today to keep everyone happy?")
+        f"Unhappy tenants (NPS ≤ {LOW_NPS}): {len(unhappy)} — {unhappy_names}.",
+        "Prioritise who to contact first, draft ONE warm reply template for an unanswered enquiry, "
+        "and give a one-line save-the-relationship message for an unhappy tenant.",
+        max_tokens=520)
 
     priority = "high" if (unhappy or len(pending_enq) >= 3) else "medium"
     bits = []
