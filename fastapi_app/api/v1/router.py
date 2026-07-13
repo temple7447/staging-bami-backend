@@ -12,6 +12,7 @@ from api.v1.endpoints import personal_finance
 from api.v1.endpoints import lead_capture
 from api.v1.endpoints import ops_manager
 from api.v1.endpoints import head_office
+from api.v1.endpoints import google
 from api.v1.endpoints import integrations
 
 api_router = APIRouter(prefix="/api")
@@ -52,4 +53,5 @@ api_router.include_router(lead_capture.router)
 api_router.include_router(lead_capture.public_router)
 api_router.include_router(ops_manager.router)
 api_router.include_router(head_office.router)
+api_router.include_router(google.router)
 api_router.include_router(integrations.router)

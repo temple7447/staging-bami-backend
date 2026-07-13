@@ -93,6 +93,21 @@ class Settings(BaseSettings):
     # Fernet key used to encrypt Integrations Hub auth secrets at rest
     INTEGRATION_ENCRYPTION_KEY: str = ""
 
+    # ── Google Workspace (Drive + Gmail) knowledge ────────────────────────────
+    # Server-side OAuth so the AI team can read the owner's Drive files and Gmail
+    # and answer against them (RAG). Create an OAuth 2.0 Client (Web application)
+    # in Google Cloud Console, enable the Drive + Gmail APIs, and set the redirect
+    # URI to  <BACKEND_URL>/api/google/callback.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    # Where Google sends the user back after consent (must match the console).
+    GOOGLE_REDIRECT_URI: str = ""
+    # Where to bounce the user's browser after we finish the exchange.
+    GOOGLE_POST_CONNECT_REDIRECT: str = ""   # e.g. https://app.bamihost.com/dashboard/head-office
+    # Gemini embedding model for the knowledge index (uses GEMINI_API_KEY).
+    EMBED_MODEL: str = "models/text-embedding-004"
+    EMBED_DIM: int = 768
+
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_WEBHOOK_SECRET: str = ""

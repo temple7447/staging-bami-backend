@@ -52,15 +52,29 @@ def _system_prompt() -> str:
         "You can TASK the team: if the owner wants a fresh sweep/scan of the business, tell them to hit "
         "'Run the team' (or that you've asked the team to re-scan) — a live run refreshes every department's "
         "findings.\n\n"
-        "Rules: Be direct and concrete — always reference the owner's REAL numbers from the live context "
-        "below. No corporate filler. Keep each department's turn to a few sentences. If you don't have data "
-        "for something, say so plainly and say what you'd need. Never invent figures."
+        "You also have the owner's own DOCUMENTS & EMAILS: when the LIVE CONTEXT includes a 'FROM YOUR "
+        "GOOGLE DRIVE & GMAIL' section, use those excerpts to answer and cite the document/email by its "
+        "title (e.g. 'per your lease agreement…', 'the vendor's email says…'). Only use what's shown.\n\n"
+        "Rules: Be direct and concrete — always reference the owner's REAL numbers, documents and emails "
+        "from the live context below. No corporate filler. Keep each department's turn to a few sentences. "
+        "If you don't have data for something, say so plainly and say what you'd need. Never invent figures."
     )
 
 
-async def _live_context(db: AsyncSession, user: User) -> str:
-    """Live business data + which business lines run + each department's latest finding."""
+async def _live_context(db: AsyncSession, user: User, query: str | None = None) -> str:
+    """Live business data + which business lines run + each department's latest
+    finding + the most relevant excerpts from the owner's Google Drive & Gmail."""
     parts = []
+
+    # RAG: pull the Drive/Gmail excerpts most relevant to what the owner just asked.
+    if query:
+        try:
+            from services.knowledge import context_block
+            kb = await context_block(db, str(user.id), query, k=6)
+            if kb:
+                parts.append(kb)
+        except Exception as e:
+            logger.debug(f"[HEAD_OFFICE] knowledge retrieval skipped: {e}")
 
     # Which business lines the owner ACTUALLY runs — so the room never assumes estate-only.
     try:
@@ -212,7 +226,7 @@ async def head_office_chat(
     messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": body.message})
 
-    context = await _live_context(db, current_user)
+    context = await _live_context(db, current_user, query=body.message)
     system_blocks = [
         {"type": "text", "text": _system_prompt(), "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": f"LIVE CONTEXT (the owner's real business):\n{context or 'No data yet.'}"},
