@@ -17,7 +17,8 @@ from models.unit import Unit
 from models.user import User
 from models.autopilot_action import AutopilotAction
 from services.agents.base import (
-    AgentMeta, ai_analyze, make_action, owner_estate_ids, active_business_lines, SONNET,
+    AgentMeta, ai_analyze, ai_refine, make_action, owner_estate_ids,
+    active_business_lines, SONNET,
 )
 from utils.time_utils import utcnow
 
@@ -122,6 +123,16 @@ async def scan(db: AsyncSession, user: User,
         "(never assume estate is the only one): overall health, the top 2-3 priorities across "
         "the WHOLE team and why, and exactly what needs the owner's decision today.",
         max_tokens=520)
+
+    # Self-refinement loop: the GM grades his own briefing and tightens it before
+    # it reaches the owner (this is the one briefing they read first).
+    briefing = await ai_refine(
+        "the General Manager", "a State of the Company briefing for the owner",
+        briefing,
+        "Covers every active business line (not just estate); leads with overall health; "
+        "names the top 2-3 priorities WITH the reason each matters; states exactly what "
+        "needs the owner's decision today; uses the real ₦ numbers; no filler; under ~140 words.",
+        max_rounds=2, target=8, max_tokens=560)
 
     desk_section = "\n\nTEAM DESK — THIS RUN\n" + ("\n".join(f"• {l}" for l in desk_lines)
                                                   or "• No agent raised anything this run.")

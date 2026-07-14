@@ -12,6 +12,7 @@ and on demand. Agents also react to live events via utils/event_hooks.py.
 from __future__ import annotations
 
 import logging
+import re as _re
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -85,6 +86,75 @@ async def ai_analyze(role: str, facts: str, ask: str,
     )
     prompt = f"DATA:\n{facts}\n\nTASK: {ask}"
     return await llm.text(system, prompt, tier=tier, max_tokens=max_tokens)
+
+
+def _parse_review(resp: str) -> tuple[int, str | None]:
+    """Pull (score, revised_text) out of a review response.
+
+    Expected shape:
+        SCORE: <1-10>
+        ISSUES: ...
+        REVISED:
+        <improved deliverable, or the single word SAME>
+    Missing/garbled parts degrade gracefully (score 0, no revision).
+    """
+    score = 0
+    m = _re.search(r"SCORE:\s*(\d+)", resp, _re.IGNORECASE)
+    if m:
+        score = max(0, min(10, int(m.group(1))))
+    revised = None
+    m = _re.search(r"REVISED:\s*(.*)$", resp, _re.IGNORECASE | _re.DOTALL)
+    if m:
+        body = m.group(1).strip()
+        if body and body.strip().upper() != "SAME":
+            revised = body
+    return score, revised
+
+
+async def ai_refine(role: str, task: str, draft: str, rubric: str,
+                    max_rounds: int = 2, target: int = 8,
+                    tier: str = SONNET, max_tokens: int = 520) -> str:
+    """Self-refinement loop: the model grades its own draft against a rubric and
+    rewrites it, repeating until the score clears `target`, it stops improving,
+    or `max_rounds` is hit — whichever comes first.
+
+    This is a generator→critic→revise (reflection) loop. It is deliberately
+    capped: quality plateaus after 2–3 rounds, so extra rounds only cost tokens.
+
+    `role`   — who is judging/writing ("a Nigerian property lawyer").
+    `task`   — what the deliverable is meant to achieve.
+    `draft`  — the first-pass output to improve.
+    `rubric` — the concrete bar to grade against (specific = better self-judging).
+    """
+    best = (draft or "").strip()
+    if not best:
+        return best
+    last_score = -1
+    for _ in range(max(1, max_rounds)):
+        system = (
+            f"You are {role}, reviewing a draft like a demanding editor. Grade it "
+            f"honestly against the rubric, then improve it. Respond EXACTLY as:\n"
+            "SCORE: <integer 1-10>\n"
+            "ISSUES: <one line, the biggest weaknesses, or 'none'>\n"
+            "REVISED:\n<the improved version in full — or the single word SAME if it "
+            "already fully meets the rubric>\n"
+            "Never invent facts or numbers not in the draft. Keep the length similar."
+        )
+        prompt = (f"TASK: {task}\n\nRUBRIC (grade against this):\n{rubric}\n\n"
+                  f"DRAFT:\n{best}")
+        try:
+            resp = await llm.text(system, prompt, tier=tier, max_tokens=max_tokens)
+        except Exception as e:
+            logger.warning("[REFINE] review call failed: %s", e)
+            break
+        score, revised = _parse_review(resp)
+        if revised:
+            best = revised.strip()
+        # Stop when good enough, or when it's no longer improving.
+        if score >= target or score <= last_score or not revised:
+            break
+        last_score = score
+    return best
 
 
 def make_action(owner_id: str, skill: str, action_type: str, title: str,

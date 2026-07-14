@@ -15,7 +15,7 @@ from models.tenant import Tenant
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_analyze, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_analyze, ai_refine, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -73,6 +73,16 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         "will be prepared and any rent-increase applies per the agreement), then list the exact "
         "documents/steps to get each renewal signed before the current lease lapses.",
         max_tokens=560)
+
+    # Self-refinement: a legal draft that goes near tenants must be tight, so the
+    # lawyer reviews and improves his own wording before it's surfaced.
+    guidance = await ai_refine(
+        "a Nigerian property lawyer", "a tenancy renewal notice + the steps to get it signed",
+        guidance,
+        "Warm and professional; clearly says the lease is ending and a renewed agreement will be "
+        "prepared; notes any rent increase applies per the agreement; lists the concrete documents/"
+        "steps to sign before expiry; Nigeria-appropriate; legally careful; no threats or invented terms.",
+        max_rounds=2, target=8, max_tokens=600)
 
     return [make_action(
         uid, "legal", "legal_draft",

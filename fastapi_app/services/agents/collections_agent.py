@@ -15,7 +15,7 @@ from models.tenant import Tenant
 from models.estate import Estate
 from models.user import User
 from models.autopilot_action import AutopilotAction
-from services.agents.base import AgentMeta, ai_text, make_action, owner_estate_ids
+from services.agents.base import AgentMeta, ai_text, ai_refine, make_action, owner_estate_ids
 from utils.time_utils import utcnow
 
 META = AgentMeta(
@@ -75,6 +75,17 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             "and invite them to settle. Never threaten or use abusive language.",
             f"Tenant: {tenant.tenant_name}, Unit: {unit_label} at {estate.name}, "
             f"Outstanding: ₦{outstanding:,.0f}, {days_overdue} days overdue.")
+
+        # One-pass self-refinement: this message goes to a real tenant, so the
+        # manager checks tone + completeness before it's queued. Capped at 1 round
+        # since this runs per overdue tenant.
+        notice = await ai_refine(
+            "a Nigerian property manager", f"a '{stage}' rent collections message to a tenant",
+            notice,
+            f"Tone is '{tone}'; addresses {tenant.tenant_name} by name; states ₦{outstanding:,.0f} "
+            f"and {days_overdue} days overdue; invites them to settle with a clear next step; "
+            "max 4 sentences; never threatening or abusive; no invented amounts.",
+            max_rounds=1, target=8, max_tokens=320)
 
         actions.append(make_action(
             uid, "collections", "collections_notice",
