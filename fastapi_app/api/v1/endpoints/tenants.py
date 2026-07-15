@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_, func
 from typing import Optional
+from pydantic import BaseModel
 from datetime import datetime, timedelta
 import cloudinary, cloudinary.uploader
 
@@ -14,7 +15,7 @@ from models.wallet import Wallet
 from models.transaction import Transaction
 from models.billing_item import BillingItem
 from schemas.tenant import TenantCreate, TenantUpdate, HistoryCreate, TransactionCreate, PayBillingItemsRequest
-from core.security import get_current_user, hash_password
+from core.security import get_current_user, hash_password, require_super_admin
 from core.database import get_db
 from core.authz import require_tenant_access, require_estate_access, accessible_estate_ids
 from core.db_helpers import find_one, find_all, save, count, sum_col
@@ -738,6 +739,70 @@ async def update_tenant(
     await save(db, tenant)
     return {"success": True, "message": "Tenant updated successfully",
             "data": {"id": tenant.id, "tenant_name": tenant.tenant_name}}
+
+
+class AdjustBalanceBody(BaseModel):
+    """One of these (or 'clear') is required. Absolute values, not deltas —
+    matches what the owner sees on screen so there's no mental math."""
+    rent_outstanding: Optional[float] = None
+    service_charge_outstanding: Optional[float] = None
+    clear: bool = False           # zero out both balances
+    reason: Optional[str] = None  # kept on the tenant's history for audit
+
+
+@router.post("/{tenant_id}/adjust-balance")
+async def adjust_tenant_balance(
+    tenant_id: str, body: AdjustBalanceBody,
+    db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin),
+):
+    """Directly set or clear a tenant's outstanding rent / service charge.
+
+    Restricted to super_admin — waiving or editing what a tenant owes is a
+    financial decision that a property manager should never make unilaterally.
+    Every change is written to the tenant's history for audit."""
+    tenant = await _get_tenant_or_404(db, tenant_id, actor)
+
+    before_rent = tenant.rent_outstanding or 0
+    before_service = tenant.service_charge_outstanding or 0
+
+    if body.clear:
+        tenant.rent_outstanding = 0
+        tenant.service_charge_outstanding = 0
+    else:
+        if body.rent_outstanding is None and body.service_charge_outstanding is None:
+            raise HTTPException(400, "Provide rent_outstanding, service_charge_outstanding, or clear=true")
+        if body.rent_outstanding is not None:
+            tenant.rent_outstanding = max(0, body.rent_outstanding)
+        if body.service_charge_outstanding is not None:
+            tenant.service_charge_outstanding = max(0, body.service_charge_outstanding)
+
+    history = tenant.history or []
+    history.append({
+        "event": "balance_adjusted",
+        "note": "Outstanding balance cleared by super admin" if body.clear
+                else "Outstanding balance adjusted by super admin",
+        "meta": {
+            "before": {"rent_outstanding": before_rent, "service_charge_outstanding": before_service},
+            "after": {"rent_outstanding": tenant.rent_outstanding, "service_charge_outstanding": tenant.service_charge_outstanding},
+            "reason": body.reason or None,
+        },
+        "created_by": actor.id, "created_at": utcnow().isoformat(),
+    })
+    tenant.history = history
+    tenant.updated_by = actor.id
+    tenant.updated_at = utcnow()
+    await save(db, tenant)
+
+    return {
+        "success": True,
+        "message": "Outstanding balance cleared" if body.clear else "Outstanding balance updated",
+        "data": {
+            "id": tenant.id,
+            "rent_outstanding": tenant.rent_outstanding,
+            "service_charge_outstanding": tenant.service_charge_outstanding,
+            "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+        },
+    }
 
 
 @router.post("/{tenant_id}/resend-credentials")
