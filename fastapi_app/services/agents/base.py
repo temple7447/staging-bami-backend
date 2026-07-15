@@ -80,9 +80,12 @@ async def ai_analyze(role: str, facts: str, ask: str,
         "2) WHY IT MATTERS — the business impact, quantified in ₦ or numbers when the data allows.\n"
         "3) DO THIS — a short numbered list (max 3) of specific, concrete next actions, "
         "most urgent first, each naming who/what.\n"
-        "Rules: use ONLY the numbers in the data — never invent figures. Be concrete "
-        "(name the tenant/meter/estate). No corporate filler. Nigeria-appropriate. "
-        f"Keep the whole thing tight (under ~{max(90, max_tokens // 3)} words)."
+        "Rules: use ONLY the numbers in the DATA below — never invent figures, dates, counts, or status "
+        "claims that aren't there. If something relevant isn't in the data (e.g. no social-media posting/"
+        "analytics integration exists, so post performance is never tracked), say plainly it isn't tracked "
+        "instead of guessing a plausible-sounding number — an honest 'we don't have that' beats any invented "
+        "figure. Be concrete (name the tenant/meter/estate) with what IS real. No corporate filler. "
+        f"Nigeria-appropriate. Keep the whole thing tight (under ~{max(90, max_tokens // 3)} words)."
     )
     prompt = f"DATA:\n{facts}\n\nTASK: {ask}"
     return await llm.text(system, prompt, tier=tier, max_tokens=max_tokens)
@@ -138,7 +141,13 @@ async def ai_refine(role: str, task: str, draft: str, rubric: str,
             "ISSUES: <one line, the biggest weaknesses, or 'none'>\n"
             "REVISED:\n<the improved version in full — or the single word SAME if it "
             "already fully meets the rubric>\n"
-            "Never invent facts or numbers not in the draft. Keep the length similar."
+            "FABRICATION CHECK (do this first, it overrides the score): scan the draft for any specific "
+            "number, date, status, or metric that could not plausibly be known or verified — especially "
+            "social-media view/save/impression/click counts or 'post is live/scheduled' claims, since "
+            "BamiHost has no integration that tracks or publishes to social platforms. If you find any, "
+            "score it no higher than 3 and rewrite that part as an honest statement that it isn't tracked, "
+            "instead of repeating or softening the invented number. Never invent facts or numbers of your "
+            "own either. Keep the length similar."
         )
         prompt = (f"TASK: {task}\n\nRUBRIC (grade against this):\n{rubric}\n\n"
                   f"DRAFT:\n{best}")

@@ -421,7 +421,12 @@ async def skill_trigger(
     event_label = EVENT_LABELS.get(body.event, body.event.replace("_", " "))
     context_str = "\n".join(f"{k}: {v}" for k, v in body.context.items()) if body.context else ""
 
-    system = SKILL_SYSTEM_PROMPTS.get(skill, SKILL_SYSTEM_PROMPTS["marketer"])
+    system = SKILL_SYSTEM_PROMPTS.get(skill, SKILL_SYSTEM_PROMPTS["marketer"]) + (
+        " Never invent numbers, dates, or status claims (e.g. social-media views/saves/impressions, "
+        "'post is live') that aren't in the event details or business snapshot below — BamiHost has no "
+        "social-platform integration, so post performance is never tracked. If you don't have a figure, "
+        "say so plainly instead of making one up."
+    )
 
     # Also fetch live business context so the AI has full visibility
     live_ctx = await fetch_business_context(db, current_user.id, current_user.role)
