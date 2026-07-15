@@ -63,6 +63,12 @@ class Tenant(Base):
 
     rent_outstanding: Mapped[float] = mapped_column(Money, default=0.0)
     service_charge_outstanding: Mapped[float] = mapped_column(Money, default=0.0)
+    # What period the current outstanding balance relates to, and when the
+    # remainder is due — set by the super admin alongside the balance itself
+    # (billing cycles here run 6 months, so this tracks a partial payment's gap).
+    outstanding_period_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    outstanding_period_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    outstanding_due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # NPS — Level 1 "Sell & Serve 10": 0–10 recommend score (9–10 = promoter)
     nps_score: Mapped[int | None] = mapped_column(Integer, nullable=True)

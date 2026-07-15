@@ -649,6 +649,9 @@ async def get_tenant(
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
         "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+        "outstanding_period_start": tenant.outstanding_period_start,
+        "outstanding_period_end": tenant.outstanding_period_end,
+        "outstanding_due_date": tenant.outstanding_due_date,
         "yearly_breakdown": {
             "year1": {"label": "Current Year", "billing_start": billing_start, "billing_end": renewal_start,
                       "annual_rent": y1_rent["total_amount"], "annual_service_charge": y1_svc["total_amount"],
@@ -742,12 +745,19 @@ async def update_tenant(
 
 
 class AdjustBalanceBody(BaseModel):
-    """One of these (or 'clear') is required. Absolute values, not deltas —
-    matches what the owner sees on screen so there's no mental math."""
+    """One of rent/service_charge (or 'clear') is required. Absolute values, not
+    deltas — matches what the owner sees on screen so there's no mental math.
+
+    The period/due-date fields let the admin record WHEN the remaining balance
+    covers up to and when it's due — billing cycles here run 6 months, so a
+    partial payment leaves a gap that's easy to lose track of otherwise."""
     rent_outstanding: Optional[float] = None
     service_charge_outstanding: Optional[float] = None
-    clear: bool = False           # zero out both balances
+    clear: bool = False           # zero out both balances (and the dates below)
     reason: Optional[str] = None  # kept on the tenant's history for audit
+    outstanding_period_start: Optional[str] = None  # flexible date string
+    outstanding_period_end: Optional[str] = None
+    outstanding_due_date: Optional[str] = None
 
 
 @router.post("/{tenant_id}/adjust-balance")
@@ -755,7 +765,8 @@ async def adjust_tenant_balance(
     tenant_id: str, body: AdjustBalanceBody,
     db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin),
 ):
-    """Directly set or clear a tenant's outstanding rent / service charge.
+    """Directly set or clear a tenant's outstanding rent / service charge, plus
+    the period it covers and when the remainder is due.
 
     Restricted to super_admin — waiving or editing what a tenant owes is a
     financial decision that a property manager should never make unilaterally.
@@ -768,6 +779,9 @@ async def adjust_tenant_balance(
     if body.clear:
         tenant.rent_outstanding = 0
         tenant.service_charge_outstanding = 0
+        tenant.outstanding_period_start = None
+        tenant.outstanding_period_end = None
+        tenant.outstanding_due_date = None
     else:
         if body.rent_outstanding is None and body.service_charge_outstanding is None:
             raise HTTPException(400, "Provide rent_outstanding, service_charge_outstanding, or clear=true")
@@ -775,6 +789,10 @@ async def adjust_tenant_balance(
             tenant.rent_outstanding = max(0, body.rent_outstanding)
         if body.service_charge_outstanding is not None:
             tenant.service_charge_outstanding = max(0, body.service_charge_outstanding)
+        # Dates are sent unconditionally by the form so clearing a field removes it.
+        tenant.outstanding_period_start = parse_flexible_date(body.outstanding_period_start)
+        tenant.outstanding_period_end = parse_flexible_date(body.outstanding_period_end)
+        tenant.outstanding_due_date = parse_flexible_date(body.outstanding_due_date)
 
     history = tenant.history or []
     history.append({
@@ -784,6 +802,7 @@ async def adjust_tenant_balance(
         "meta": {
             "before": {"rent_outstanding": before_rent, "service_charge_outstanding": before_service},
             "after": {"rent_outstanding": tenant.rent_outstanding, "service_charge_outstanding": tenant.service_charge_outstanding},
+            "outstanding_due_date": tenant.outstanding_due_date.isoformat() if tenant.outstanding_due_date else None,
             "reason": body.reason or None,
         },
         "created_by": actor.id, "created_at": utcnow().isoformat(),
@@ -801,6 +820,9 @@ async def adjust_tenant_balance(
             "rent_outstanding": tenant.rent_outstanding,
             "service_charge_outstanding": tenant.service_charge_outstanding,
             "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+            "outstanding_period_start": tenant.outstanding_period_start,
+            "outstanding_period_end": tenant.outstanding_period_end,
+            "outstanding_due_date": tenant.outstanding_due_date,
         },
     }
 
