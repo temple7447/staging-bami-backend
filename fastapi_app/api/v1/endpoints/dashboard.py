@@ -383,38 +383,24 @@ async def _vendor_overview(db: AsyncSession, user_id: str) -> dict:
 
 
 async def _super_admin_overview(db: AsyncSession) -> dict:
+    """BamiHost is a MULTI-BUSINESS platform — Real Estate is only ONE line, and
+    more will be added over time. This overview is deliberately structured as
+    company-wide numbers (apply to the whole business, whatever lines exist)
+    PLUS one section per ACTIVE business line — never a single estate-shaped
+    grid presented as if it were the whole system. A future business line adds
+    a new entry to `lines`; it does not require reshaping this response."""
     from models.issue import Issue
     from models.enquiry import Enquiry
     from models.meter_device import MeterDevice
     from models.autopilot_action import AutopilotAction
 
-    total_estates  = await count(db, Estate, Estate.is_active == True)
-    total_units    = await count(db, Unit, Unit.is_active == True)
-    occupied_units = await count(db, Unit, Unit.is_active == True, Unit.status == "occupied")
-    total_tenants  = await count(db, Tenant, Tenant.is_active == True)
-    total_users    = await count(db, User, User.is_active == True)
-    total_revenue  = await sum_col(db, Payment, Payment.amount, Payment.payment_status == "completed")
-    rent_out       = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.is_active == True)
-    svc_out        = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.is_active == True)
     now = utcnow()
     thirty_ago = now - timedelta(days=30)
-    overdue_tenants = await count(db, Tenant, Tenant.is_active == True, Tenant.next_due_date < now)
-    revenue_30d = await sum_col(db, Payment, Payment.amount,
-                                Payment.payment_status == "completed", Payment.created_at >= thirty_ago)
 
-    # Issues & enquiries — real operational signal, system-wide.
-    open_issues = await count(db, Issue, Issue.is_active == True, Issue.status.in_(["open", "pending", "in_progress"]))
-    high_priority_issues = await count(db, Issue, Issue.is_active == True,
-                                       Issue.status.in_(["open", "pending", "in_progress"]), Issue.priority == "high")
-    pending_enquiries = await count(db, Enquiry, Enquiry.status == "pending")
-
-    # Business lines actually running — BamiHost manages MANY businesses, not just estates.
-    business_lines = []
-    if total_estates:
-        business_lines.append("Real Estate")
-    meter_count = await count(db, MeterDevice, MeterDevice.is_active == True)
-    if meter_count:
-        business_lines.append("Smart Metering")
+    total_users   = await count(db, User, User.is_active == True)
+    total_revenue = await sum_col(db, Payment, Payment.amount, Payment.payment_status == "completed")
+    revenue_30d   = await sum_col(db, Payment, Payment.amount,
+                                  Payment.payment_status == "completed", Payment.created_at >= thirty_ago)
 
     # A real pulse of what the AI team has been doing — no placeholder content.
     recent = (await db.execute(
@@ -426,18 +412,57 @@ async def _super_admin_overview(db: AsyncSession) -> dict:
         for r in recent
     ]
 
+    company = {
+        "users": total_users,
+        "revenue": {"all_time": total_revenue, "last_30_days": revenue_30d, "currency": "NGN"},
+    }
+
+    lines: dict = {}
+
+    # ── Real Estate ──────────────────────────────────────────────────────────
+    total_estates = await count(db, Estate, Estate.is_active == True)
+    if total_estates:
+        total_units    = await count(db, Unit, Unit.is_active == True)
+        occupied_units = await count(db, Unit, Unit.is_active == True, Unit.status == "occupied")
+        total_tenants  = await count(db, Tenant, Tenant.is_active == True)
+        rent_out       = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.is_active == True)
+        svc_out        = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.is_active == True)
+        overdue_tenants = await count(db, Tenant, Tenant.is_active == True, Tenant.next_due_date < now)
+        open_issues = await count(db, Issue, Issue.is_active == True, Issue.status.in_(["open", "pending", "in_progress"]))
+        high_priority_issues = await count(db, Issue, Issue.is_active == True,
+                                           Issue.status.in_(["open", "pending", "in_progress"]), Issue.priority == "high")
+        pending_enquiries = await count(db, Enquiry, Enquiry.status == "pending")
+
+        lines["Real Estate"] = {
+            "estates": total_estates, "units": total_units, "occupied": occupied_units,
+            "vacant": total_units - occupied_units, "tenants": total_tenants,
+            "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
+            "outstanding": {"rent": rent_out, "service": svc_out, "total": rent_out + svc_out},
+            "overdue_tenants": overdue_tenants,
+            "open_issues": open_issues, "high_priority_issues": high_priority_issues,
+            "pending_enquiries": pending_enquiries,
+        }
+
+    # ── Smart Metering ───────────────────────────────────────────────────────
+    total_meters = await count(db, MeterDevice, MeterDevice.is_active == True)
+    if total_meters:
+        online_meters = await count(db, MeterDevice, MeterDevice.is_active == True, MeterDevice.is_online == True)
+        low_credit = (await db.execute(
+            select(func.count()).select_from(MeterDevice).where(
+                MeterDevice.is_active == True, MeterDevice.prepaid_mode == True,
+                MeterDevice.credit_balance <= MeterDevice.low_balance_threshold,
+            )
+        )).scalar() or 0
+        lines["Smart Metering"] = {
+            "meters": total_meters, "online": online_meters, "offline": total_meters - online_meters,
+            "low_credit": low_credit,
+        }
+
     return {
         "section": "SUPER_ADMIN_OVERVIEW",
-        "business_lines": business_lines,
-        "totals": {"estates": total_estates, "units": total_units, "occupied": occupied_units,
-                   "vacant": total_units - occupied_units, "tenants": total_tenants, "users": total_users,
-                   "meters": meter_count},
-        "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
-        "revenue": {"all_time": total_revenue, "last_30_days": revenue_30d, "currency": "NGN"},
-        "outstanding": {"rent": rent_out, "service": svc_out, "total": rent_out + svc_out},
-        "overdue_tenants": overdue_tenants,
-        "issues": {"open": open_issues, "high_priority": high_priority_issues},
-        "pending_enquiries": pending_enquiries,
+        "business_lines": list(lines.keys()),
+        "company": company,
+        "lines": lines,
         "recent_activity": recent_activity,
     }
 
