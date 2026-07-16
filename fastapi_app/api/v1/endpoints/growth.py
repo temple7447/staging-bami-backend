@@ -77,7 +77,15 @@ async def save_plan(
     if not plan:
         plan = GrowthPlan(id=gen_uuid(), owner_id=str(current_user.id))
         db.add(plan)
-    for k, v in body.model_dump(exclude_none=True).items():
+    update = body.model_dump(exclude_none=True)
+    # `data` is shared by several independent panels (Strategy, Focus, Time &
+    # Delegation, the Level 1-6 workbook), each owning its own top-level key
+    # (e.g. "big5_items", "time_entries", "endgame_data"). A full replace would
+    # let one panel's save silently wipe out another's — merge instead so each
+    # panel can save its own slice safely.
+    if "data" in update:
+        plan.data = {**(plan.data or {}), **update.pop("data")}
+    for k, v in update.items():
         setattr(plan, k, v)
     plan.updated_at = utcnow()
     await db.commit()
