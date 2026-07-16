@@ -383,6 +383,11 @@ async def _vendor_overview(db: AsyncSession, user_id: str) -> dict:
 
 
 async def _super_admin_overview(db: AsyncSession) -> dict:
+    from models.issue import Issue
+    from models.enquiry import Enquiry
+    from models.meter_device import MeterDevice
+    from models.autopilot_action import AutopilotAction
+
     total_estates  = await count(db, Estate, Estate.is_active == True)
     total_units    = await count(db, Unit, Unit.is_active == True)
     occupied_units = await count(db, Unit, Unit.is_active == True, Unit.status == "occupied")
@@ -392,16 +397,48 @@ async def _super_admin_overview(db: AsyncSession) -> dict:
     rent_out       = await sum_col(db, Tenant, Tenant.rent_outstanding, Tenant.is_active == True)
     svc_out        = await sum_col(db, Tenant, Tenant.service_charge_outstanding, Tenant.is_active == True)
     now = utcnow()
+    thirty_ago = now - timedelta(days=30)
     overdue_tenants = await count(db, Tenant, Tenant.is_active == True, Tenant.next_due_date < now)
+    revenue_30d = await sum_col(db, Payment, Payment.amount,
+                                Payment.payment_status == "completed", Payment.created_at >= thirty_ago)
+
+    # Issues & enquiries — real operational signal, system-wide.
+    open_issues = await count(db, Issue, Issue.is_active == True, Issue.status.in_(["open", "pending", "in_progress"]))
+    high_priority_issues = await count(db, Issue, Issue.is_active == True,
+                                       Issue.status.in_(["open", "pending", "in_progress"]), Issue.priority == "high")
+    pending_enquiries = await count(db, Enquiry, Enquiry.status == "pending")
+
+    # Business lines actually running — BamiHost manages MANY businesses, not just estates.
+    business_lines = []
+    if total_estates:
+        business_lines.append("Real Estate")
+    meter_count = await count(db, MeterDevice, MeterDevice.is_active == True)
+    if meter_count:
+        business_lines.append("Smart Metering")
+
+    # A real pulse of what the AI team has been doing — no placeholder content.
+    recent = (await db.execute(
+        select(AutopilotAction.skill, AutopilotAction.title, AutopilotAction.priority, AutopilotAction.created_at)
+        .order_by(AutopilotAction.created_at.desc()).limit(8)
+    )).all()
+    recent_activity = [
+        {"skill": r.skill, "title": r.title, "priority": r.priority, "created_at": r.created_at}
+        for r in recent
+    ]
 
     return {
         "section": "SUPER_ADMIN_OVERVIEW",
+        "business_lines": business_lines,
         "totals": {"estates": total_estates, "units": total_units, "occupied": occupied_units,
-                   "vacant": total_units - occupied_units, "tenants": total_tenants, "users": total_users},
+                   "vacant": total_units - occupied_units, "tenants": total_tenants, "users": total_users,
+                   "meters": meter_count},
         "occupancy_rate": round(occupied_units / total_units * 100, 1) if total_units else 0,
-        "revenue": {"all_time": total_revenue, "currency": "NGN"},
+        "revenue": {"all_time": total_revenue, "last_30_days": revenue_30d, "currency": "NGN"},
         "outstanding": {"rent": rent_out, "service": svc_out, "total": rent_out + svc_out},
         "overdue_tenants": overdue_tenants,
+        "issues": {"open": open_issues, "high_priority": high_priority_issues},
+        "pending_enquiries": pending_enquiries,
+        "recent_activity": recent_activity,
     }
 
 
