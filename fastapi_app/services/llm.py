@@ -106,6 +106,97 @@ class LLMResult:
     tool_input: dict | None = None
 
 
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    input: dict
+
+
+@dataclass
+class ToolTurn:
+    """One assistant turn in an agentic loop: its text (if any), the tool calls
+    it wants executed, and the provider-native assistant message (`raw`) that
+    must go back into the conversation history verbatim."""
+    text: str
+    tool_calls: list[ToolCall]
+    raw: object
+
+
+async def chat_with_tools(
+    system,
+    messages: list[dict],
+    tools: list[dict],
+    tier: str = DEEP,
+    max_tokens: int = 1200,
+) -> ToolTurn:
+    """One model turn where the model may call any number of tools (or none).
+
+    Unlike `complete()` (single forced tool), this powers a full agentic loop:
+    call → execute each returned ToolCall → append `tool_exchange(...)` to the
+    conversation → call again, until `tool_calls` comes back empty.
+    """
+    system_str = _normalize_system(system)
+    model = _model(tier)
+
+    if _provider() == "anthropic":
+        resp = await _anthropic_client().messages.create(
+            model=model, max_tokens=max_tokens, system=system_str,
+            messages=messages, tools=tools)
+        text, calls, blocks = "", [], []
+        for block in resp.content or []:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                text += block.text
+                blocks.append({"type": "text", "text": block.text})
+            elif btype == "tool_use":
+                calls.append(ToolCall(id=block.id, name=block.name, input=block.input or {}))
+                blocks.append({"type": "tool_use", "id": block.id,
+                               "name": block.name, "input": block.input or {}})
+        return ToolTurn(text=text.strip(), tool_calls=calls,
+                        raw={"role": "assistant", "content": blocks})
+
+    # DeepSeek / OpenAI-compatible
+    oai_messages = [{"role": "system", "content": system_str}] + messages if system_str else list(messages)
+    resp = await _openai_client().chat.completions.create(
+        model=model, max_tokens=max_tokens, messages=oai_messages,
+        tools=[_to_openai_tool(t) for t in tools])
+    msg = resp.choices[0].message
+    calls = []
+    raw_calls = []
+    for tc in (getattr(msg, "tool_calls", None) or []):
+        try:
+            args = json.loads(tc.function.arguments or "{}")
+        except (json.JSONDecodeError, TypeError):
+            args = {}
+        calls.append(ToolCall(id=tc.id, name=tc.function.name, input=args))
+        raw_calls.append({"id": tc.id, "type": "function",
+                          "function": {"name": tc.function.name,
+                                       "arguments": tc.function.arguments or "{}"}})
+    raw = {"role": "assistant", "content": msg.content or ""}
+    if raw_calls:
+        raw["tool_calls"] = raw_calls
+    return ToolTurn(text=(msg.content or "").strip(), tool_calls=calls, raw=raw)
+
+
+def tool_exchange(turn: ToolTurn, results: dict[str, str]) -> list[dict]:
+    """Messages to append to the conversation after executing a ToolTurn's
+    calls: the assistant turn itself + one result message per call, in the
+    current provider's wire format. `results` maps tool_call id → result text."""
+    if _provider() == "anthropic":
+        result_blocks = [
+            {"type": "tool_result", "tool_use_id": tc.id,
+             "content": results.get(tc.id, "")}
+            for tc in turn.tool_calls
+        ]
+        return [turn.raw, {"role": "user", "content": result_blocks}]
+    out: list[dict] = [turn.raw]
+    for tc in turn.tool_calls:
+        out.append({"role": "tool", "tool_call_id": tc.id,
+                    "content": results.get(tc.id, "")})
+    return out
+
+
 async def complete(
     system,
     messages: list[dict],

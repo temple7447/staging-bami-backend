@@ -21,6 +21,7 @@ from models.base import gen_uuid
 from core.security import get_current_user
 from core.database import get_db, AsyncSessionLocal
 from services.streaming import stream_claude
+from services import llm
 from services.agents import AGENT_META
 from utils.time_utils import utcnow
 
@@ -253,12 +254,14 @@ async def head_office_chat(
 
     owner_id = str(current_user.id)
 
-    async def generator():
+    def _frame(obj: dict) -> bytes:
+        return f"data: {json.dumps(obj)}\n\n".encode()
+
+    async def _stream_fallback():
+        """The original plain streaming path — used if the tool loop fails."""
         acc = ""
         async for chunk in stream_claude(system_blocks, messages, max_tokens=1200):
-            if chunk.startswith(b"data: [DONE]"):
-                continue
-            if not chunk.startswith(b"data: "):
+            if chunk.startswith(b"data: [DONE]") or not chunk.startswith(b"data: "):
                 continue
             try:
                 payload = json.loads(chunk[len(b"data: "):].decode())
@@ -266,7 +269,48 @@ async def head_office_chat(
                 continue
             if "delta" in payload:
                 acc += payload["delta"]
-            yield chunk  # forward delta and error frames to the client
+            yield chunk
+        yield ("", acc)  # sentinel: done, final text
+
+    async def generator():
+        # Agentic loop: the team may call Google tools (email/drive/calendar)
+        # before answering. Falls back to plain streaming on any loop failure
+        # so chat never breaks because of the tools.
+        from services import google_actions
+        acc = ""
+        try:
+            tool_system = list(system_blocks) + [
+                {"type": "text", "text": google_actions.TOOLS_PROMPT}]
+            convo = list(messages)
+            final_text = ""
+            for _round in range(5):
+                turn = await llm.chat_with_tools(
+                    tool_system, convo, tools=google_actions.GOOGLE_TOOLS,
+                    tier=llm.DEEP, max_tokens=1200)
+                if not turn.tool_calls:
+                    final_text = turn.text
+                    break
+                results: dict[str, str] = {}
+                for tc in turn.tool_calls:
+                    label = google_actions.PROGRESS_LABELS.get(tc.name, "Working on it")
+                    yield _frame({"status": f"{label}…"})
+                    results[tc.id] = await google_actions.execute(tc.name, tc.input, owner_id)
+                convo.extend(llm.tool_exchange(turn, results))
+            else:
+                final_text = turn.text or "I started acting on that but hit the tool-call limit — ask me to continue."
+
+            acc = final_text
+            # Send the answer as delta frames (chunked so the UI still "types").
+            for i in range(0, len(final_text), 60):
+                yield _frame({"delta": final_text[i:i + 60]})
+        except Exception as e:
+            logger.error("[HEAD_OFFICE] tool loop failed, falling back to stream: %s", e, exc_info=True)
+            async for item in _stream_fallback():
+                if isinstance(item, tuple):
+                    acc = item[1]
+                else:
+                    yield item
+
         yield b"data: [DONE]\n\n"
 
         async with AsyncSessionLocal() as save_db:
