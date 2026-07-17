@@ -73,13 +73,29 @@ async def _access_token(db, user: User, *, need_write: bool = False) -> str:
         raise HTTPException(502, "Couldn't refresh the Google session — try reconnecting Google.")
 
 
+def _google_error(r: httpx.Response) -> HTTPException:
+    """Surface Google's own explanation (e.g. 'Drive API has not been used in
+    project … or it is disabled') instead of a bare status code."""
+    reason = ""
+    try:
+        reason = (r.json().get("error") or {}).get("message") or ""
+    except Exception:
+        pass
+    detail = f"Google API error ({r.status_code})"
+    if reason:
+        detail += f": {reason[:400]}"
+        if "has not been used in project" in reason or "it is disabled" in reason:
+            detail += " — enable this API in Google Cloud Console (APIs & Services → Library), then retry."
+    return HTTPException(502, detail)
+
+
 async def _gget(token: str, url: str, params: dict | None = None) -> dict:
     async with httpx.AsyncClient(timeout=30) as client:
         r = await client.get(url, params=params,
                              headers={"Authorization": f"Bearer {token}"})
     if r.status_code >= 400:
         logger.warning("[GOOGLE-WS] GET %s -> %s %s", url, r.status_code, r.text[:300])
-        raise HTTPException(502, f"Google API error ({r.status_code})")
+        raise _google_error(r)
     return r.json()
 
 
@@ -90,7 +106,7 @@ async def _gpost(token: str, url: str, json: dict | None = None,
                               headers={"Authorization": f"Bearer {token}"})
     if r.status_code >= 400:
         logger.warning("[GOOGLE-WS] POST %s -> %s %s", url, r.status_code, r.text[:300])
-        raise HTTPException(502, f"Google API error ({r.status_code})")
+        raise _google_error(r)
     return r.json()
 
 
@@ -259,7 +275,7 @@ async def drive_download(file_id: str, db=Depends(get_db),
         r = await client.get(url, params=params,
                              headers={"Authorization": f"Bearer {token}"})
     if r.status_code >= 400:
-        raise HTTPException(502, f"Google API error ({r.status_code})")
+        raise _google_error(r)
     safe = name.replace('"', "")
     return Response(content=r.content, media_type=out_mime,
                     headers={"Content-Disposition": f'attachment; filename="{safe}"'})
@@ -291,7 +307,7 @@ async def drive_upload(file: UploadFile = File(...),
                      "Content-Type": f"multipart/related; boundary={boundary}"})
     if r.status_code >= 400:
         logger.warning("[GOOGLE-WS] upload -> %s %s", r.status_code, r.text[:300])
-        raise HTTPException(502, f"Google API error ({r.status_code})")
+        raise _google_error(r)
     return {"success": True, "file": r.json(), "message": f"Uploaded {meta['name']}."}
 
 
