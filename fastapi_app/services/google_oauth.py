@@ -1,4 +1,4 @@
-"""Server-side Google OAuth (Drive + Gmail, read-only).
+"""Server-side Google OAuth (Drive + Gmail + Calendar, read/write).
 
 The owner connects once via the browser consent screen; we keep only the
 refresh token (encrypted at rest) and mint short-lived access tokens on demand.
@@ -7,9 +7,13 @@ httpx so we don't need google-auth-oauthlib.
 
 Setup (one-time, by the owner):
   1. Google Cloud Console → create an OAuth 2.0 Client ID (type: Web application).
-  2. Enable the Google Drive API and Gmail API for the project.
+  2. Enable the Google Drive, Gmail and Google Calendar APIs for the project.
   3. Add redirect URI = settings.GOOGLE_REDIRECT_URI (…/api/google/callback).
   4. Set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI in env.
+
+Connections made before the read/write upgrade only carry read-only scopes;
+`has_write_scopes` lets callers detect that and prompt a reconnect (the consent
+screen re-issues a refresh token with the new scopes).
 """
 from __future__ import annotations
 
@@ -27,13 +31,30 @@ AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
 USERINFO_URI = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-# Read-only Drive + Gmail, plus identity so we can label the connection.
+# Read/write Drive + Gmail + Calendar, plus identity so we can label the
+# connection. Full `drive` (not drive.file) so the workspace UI can browse
+# everything the account owns, and doc/sheet creation works anywhere.
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]
+
+# The scopes the workspace UI needs beyond the original read-only connection.
+_WRITE_SCOPES = {
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar",
+}
+
+
+def has_write_scopes(granted: str | None) -> bool:
+    """True if a connection's granted scope string covers the read/write set."""
+    have = set((granted or "").split())
+    return _WRITE_SCOPES.issubset(have)
 
 
 def is_configured() -> bool:

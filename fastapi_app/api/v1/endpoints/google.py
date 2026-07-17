@@ -101,6 +101,9 @@ async def google_status(db=Depends(get_db), user: User = Depends(get_current_use
         "success": True,
         "configured": google_oauth.is_configured(),
         "connected": bool(conn and conn.status == "connected" and conn.refresh_token_enc),
+        # Old connections were read-only; the workspace UI uses this to prompt
+        # a reconnect that grants the new write scopes.
+        "hasWriteScopes": google_oauth.has_write_scopes(conn.scopes) if conn else False,
         "email": conn.google_email if conn else None,
         "status": conn.status if conn else None,
         "lastSyncAt": conn.last_sync_at if conn else None,
