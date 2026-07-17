@@ -177,6 +177,24 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         cy_proj_total = cy_rent_proj["total_amount"] + cy_svc_proj["total_amount"] + cy_other_proj
         ny_total      = ny_rent_proj["total_amount"] + ny_svc_proj["total_amount"]
 
+        # What the tenant still owes = the ADMIN-TRACKED arrears (payable in-app
+        # via the outstanding_rent / outstanding_service_charge billing items) —
+        # NOT "year total minus in-app payments". Most existing tenants paid
+        # offline before the platform, so they have no Payment rows and the old
+        # computation wrongly showed their whole year as outstanding. Only a
+        # new tenant who hasn't completed their first payment genuinely owes
+        # the year up front.
+        tracked_out = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
+        first_payment_pending = is_first_time and not await find_one(
+            db, Payment, Payment.tenant == tenant.id, Payment.payment_status == "completed",
+            Payment.payment_type.in_(["initial", "rent", "bundle"]))
+        if first_payment_pending:
+            cy_outstanding  = max(0, cy_proj_total - cy_paid_total)
+            cy_paid_display = cy_paid_total
+        else:
+            cy_outstanding  = tracked_out
+            cy_paid_display = min(cy_proj_total, max(cy_paid_total, cy_proj_total - tracked_out))
+
         overview["yearly_payment"] = {
             "current_year": {
                 "year": billing_start.year,
@@ -186,8 +204,8 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
                 **({"other": cy_other_proj, "other_breakdown": cy_other_breakdown} if cy_other_proj > 0 else {}),
                 "total": cy_proj_total,
                 "paid": {"rent": cy_rent, "service_charge": cy_svc,
-                         **({"other": cy_other} if cy_other > 0 else {}), "total": cy_paid_total},
-                "outstanding": max(0, cy_proj_total - cy_paid_total),
+                         **({"other": cy_other} if cy_other > 0 else {}), "total": cy_paid_display},
+                "outstanding": cy_outstanding,
             },
             "next_year": {
                 "year": renewal_start.year,
