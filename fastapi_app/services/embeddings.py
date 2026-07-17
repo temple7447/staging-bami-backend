@@ -1,7 +1,9 @@
-"""Text embeddings for the knowledge index — Gemini text-embedding-004 via REST.
+"""Text embeddings for the knowledge index — Gemini embeddings via REST.
 
 Matches the codebase's existing Gemini usage (utils/image_gen.py): direct REST
 calls with the API key, no SDK. Similarity is cosine, computed with numpy.
+The model is settings.EMBED_MODEL (gemini-embedding-001); every request pins
+outputDimensionality to settings.EMBED_DIM so vector sizes never drift.
 """
 from __future__ import annotations
 
@@ -42,7 +44,9 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
         for i in range(0, len(texts), _BATCH):
             batch = texts[i:i + _BATCH]
             payload = {"requests": [
-                {"model": model, "content": {"parts": [{"text": (t or " ")[:8000]}]}}
+                {"model": model,
+                 "content": {"parts": [{"text": (t or " ")[:8000]}]},
+                 "outputDimensionality": settings.EMBED_DIM}
                 for t in batch
             ]}
             try:

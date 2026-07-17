@@ -105,7 +105,10 @@ class Settings(BaseSettings):
     # Where to bounce the user's browser after we finish the exchange.
     GOOGLE_POST_CONNECT_REDIRECT: str = ""   # e.g. https://app.bamihost.com/dashboard/head-office
     # Gemini embedding model for the knowledge index (uses GEMINI_API_KEY).
-    EMBED_MODEL: str = "models/text-embedding-004"
+    # text-embedding-004 was retired by Google; gemini-embedding-001 is the
+    # successor. EMBED_DIM stays 768 (requested via outputDimensionality) so
+    # vectors remain comparable with anything indexed under the old model.
+    EMBED_MODEL: str = "models/gemini-embedding-001"
     EMBED_DIM: int = 768
 
     # Telegram Bot
