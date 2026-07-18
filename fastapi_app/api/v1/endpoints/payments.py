@@ -358,7 +358,7 @@ async def send_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User 
 
 @router.post("/tenant/{tid}/receipt")
 async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    from utils import whatsapp_service
+    from utils import sms_service
 
     tenant = await find_one(db, Tenant, Tenant.id == tid)
     if not tenant:
@@ -377,8 +377,10 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
         )
         channels.append("email")
 
-    if tenant.tenant_phone and whatsapp_service.is_configured():
-        res = await whatsapp_service.send_reminder(
+    # SMS is a fallback for tenants without Telegram — the scheduler's daily
+    # reminder job already covers Telegram; this manual-send endpoint adds SMS.
+    if tenant.tenant_phone and sms_service.is_configured():
+        res = await sms_service.send_reminder(
             phone=tenant.tenant_phone,
             name=tenant.tenant_name or "",
             amount=tenant.rent_amount or 0,
@@ -386,7 +388,7 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
             estate=getattr(tenant, "estate", "") or "",
         )
         if res.get("success"):
-            channels.append("whatsapp" if whatsapp_service.whatsapp_ready() else "sms")
+            channels.append("sms")
 
     if not channels:
         raise HTTPException(status_code=400, detail="Tenant has no email or phone to notify")
