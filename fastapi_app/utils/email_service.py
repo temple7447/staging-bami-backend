@@ -10,11 +10,21 @@ import os
 import logging
 from typing import Optional, Union, List
 
+from core.config import settings
+
 logger = logging.getLogger(__name__)
 
 MAILTRAP_TOKEN = os.getenv("MAILTRAP_TOKEN", "")
 FROM_EMAIL     = os.getenv("FROM_EMAIL", os.getenv("MAILTRAP_SENDER_EMAIL", ""))
 FROM_NAME      = os.getenv("FROM_NAME",  os.getenv("MAILTRAP_SENDER_NAME", "BamiHost"))
+
+
+def _footer_html() -> str:
+    return f"""
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0" />
+    <p style="color:#6b7280;font-size:12px">BamiHost — Property Management ·
+       <a href="{settings.FRONTEND_URL}" style="color:#2563eb">{settings.FRONTEND_URL}</a></p>
+    """
 
 _client = None
 
@@ -52,7 +62,7 @@ async def send_email(
     if not html and not message:
         raise ValueError("Either html or message must be provided")
 
-    body_html = html or f"<p>{message}</p>"
+    body_html = (html or f"<p>{message}</p>") + _footer_html()
 
     if not is_configured():
         logger.warning("[EMAIL] Mailtrap not configured. Would send to %s: %s", email, subject)
@@ -99,7 +109,6 @@ async def send_welcome_email(recipient_email: str, name: str, password: str, pho
          <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">{password}</code></p>
       {phone_line}
       <p>Please change your password after your first login.</p>
-      <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""
     return await send_email(recipient_email, "Welcome to BamiHost — Your Account Details", html=html)
 
@@ -115,7 +124,6 @@ async def send_rent_reminder(
          is due on <strong>{due_date}</strong>.</p>
       {"<p>Property: " + estate + "</p>" if estate else ""}
       <p>Please ensure timely payment to avoid any inconvenience.</p>
-      <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""
     return await send_email(recipient_email, "Rent Payment Reminder — BamiHost", html=html)
 
@@ -130,7 +138,6 @@ async def send_payment_confirmation(
       <p>Your {payment_type} payment of <strong>{format_currency(amount)}</strong> has been received.</p>
       <p><strong>Reference:</strong> {reference}</p>
       <p>Thank you for your payment.</p>
-      <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""
     return await send_email(recipient_email, f"Payment Confirmation — {format_currency(amount)}", html=html)
 
@@ -143,7 +150,6 @@ async def send_password_reset(recipient_email: str, name: str, reset_token: str)
       <p>Use the OTP below to reset your password:</p>
       <p style="font-size:32px;font-weight:bold;letter-spacing:8px;color:#2563eb">{reset_token}</p>
       <p>This code expires in 1 hour. If you did not request this, ignore this email.</p>
-      <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""
     return await send_email(recipient_email, "Password Reset — BamiHost", html=html)
 
@@ -158,6 +164,5 @@ async def send_overdue_notice(
       <p>Your rent payment of <strong>{format_currency(amount)}</strong> is
          <strong>{days_overdue} days overdue</strong>.</p>
       <p>Please make payment immediately to avoid further action.</p>
-      <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""
     return await send_email(recipient_email, f"Overdue Rent Notice — {days_overdue} Days Past Due", html=html)

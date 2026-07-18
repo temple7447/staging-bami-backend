@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Bcrypt
     BCRYPT_SALT_ROUNDS: int = 10
 
+    # Public site — linked at the bottom of every outbound email/SMS
+    FRONTEND_URL: str = "https://www.bamihost.com"
+
     # CORS
     ALLOWED_ORIGINS: str = (
         "http://localhost:3000,"

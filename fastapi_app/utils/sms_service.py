@@ -25,6 +25,8 @@ from typing import Optional
 
 import httpx
 
+from core.config import settings
+
 logger = logging.getLogger(__name__)
 
 API_TOKEN    = os.getenv("BULKSMS_NG_API_TOKEN", "")
@@ -32,6 +34,11 @@ SENDER       = os.getenv("BULKSMS_NG_SENDER", "BamiHost")[:11]
 COUNTRY_CODE = os.getenv("DEFAULT_COUNTRY_CODE", "234")
 
 _BASE = "https://www.bulksmsnigeria.com/api/v2"
+
+
+def _site_link() -> str:
+    """Bare domain (no scheme/www) — keeps every SMS's link short."""
+    return settings.FRONTEND_URL.replace("https://", "").replace("http://", "").replace("www.", "").rstrip("/")
 
 
 def is_configured() -> bool:
@@ -82,12 +89,15 @@ async def send_sms(phone: str, message: str) -> dict:
     if not to:
         return {"success": False, "error": "invalid phone"}
 
+    link = _site_link()
+    body = message if link in message else f"{message} {link}"
+
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(f"{_BASE}/sms", headers=_headers(), json={
                 "from": SENDER,
                 "to": to,
-                "body": message,
+                "body": body,
             })
             data = resp.json()
     except Exception as e:
