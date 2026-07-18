@@ -125,3 +125,13 @@ async def send_reminder(phone: str, name: str, amount: float, due_date: str, est
         f"{due_date}. Please pay on time to avoid disruption. — BamiHost"
     )
     return await send_sms(phone, msg)
+
+
+async def send_credentials(phone: str, name: str, email: str, password: str) -> dict:
+    """Send login credentials (email + temp password) by SMS — mirrors the welcome email."""
+    msg = (
+        f"Hi {name or 'there'}, your BamiHost account is ready. "
+        f"Login email: {email}  Temp password: {password}. "
+        f"Please change your password after first login. — BamiHost"
+    )
+    return await send_sms(phone, msg)

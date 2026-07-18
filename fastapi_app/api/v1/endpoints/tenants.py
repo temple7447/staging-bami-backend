@@ -23,6 +23,7 @@ from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start
 from utils.email_service import send_welcome_email
+from utils import sms_service
 from models.base import gen_uuid
 from utils.time_utils import utcnow
 
@@ -211,6 +212,8 @@ async def create_tenant(
 
     if email_addr and generated_password:
         await send_welcome_email(email_addr, full_name or "Tenant", generated_password)
+        if phone and sms_service.is_configured():
+            await sms_service.send_credentials(phone, full_name or "Tenant", email_addr, generated_password)
 
     return {"success": True, "message": "Tenant created successfully",
             "data": {"id": tenant.id, "temp_password": generated_password}}
@@ -885,7 +888,14 @@ async def resend_tenant_credentials(
         raise HTTPException(status_code=502,
                             detail="Credentials reset but the email could not be sent. Please try again.")
 
-    return {"success": True, "message": f"Login credentials sent to {email_addr}"}
+    channels = ["email"]
+    phone = (tenant.tenant_phone or "").strip()
+    if phone and sms_service.is_configured():
+        sms_result = await sms_service.send_credentials(phone, tenant.tenant_name or "Tenant", email_addr, generated_password)
+        if sms_result.get("success"):
+            channels.append("sms")
+
+    return {"success": True, "message": f"Login credentials sent via {', '.join(channels)}", "channels": channels}
 
 
 @router.delete("/{tenant_id}")
