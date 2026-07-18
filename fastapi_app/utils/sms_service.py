@@ -1,12 +1,19 @@
 """
-SMS service — Infobip HTTP API (https://www.infobip.com).
+SMS service — BulkSMS Nigeria (https://www.bulksmsnigeria.com/app/api/docs).
+
+Infobip was tried first but its shared trial UK sender is silently blocked
+by Nigerian carriers (accepted by Infobip, never delivered — no error, no
+delivery report). BulkSMS Nigeria has direct local carrier routes and was
+verified end-to-end (balance check, live send, delivery report) on
+2026-07-18 before adoption.
 
 Env vars:
-  INFOBIP_API_KEY   — API key from Infobip dashboard (Authorization: App <key>)
-  INFOBIP_BASE_URL  — per-account base URL, e.g. "k94qln.api.infobip.com" (no scheme)
-  INFOBIP_SENDER    — sender id/number (Infobip's shared test sender while on
-                      free trial; a real alphanumeric sender id once approved)
-  DEFAULT_COUNTRY_CODE — for phone normalization (default "234" Nigeria)
+  BULKSMS_NG_API_TOKEN  — Bearer token from Account > API (Laravel Sanctum
+                          personal access token, format "{id}|{secret}")
+  BULKSMS_NG_SENDER     — sender id shown to recipients, max 11 chars
+                          (default "BamiHost"; no sender id needs pre-
+                          registration to send via the direct-refund gateway)
+  DEFAULT_COUNTRY_CODE  — for phone normalization (default "234" Nigeria)
 
 Used as a fallback channel for tenants who haven't connected Telegram — see
 utils/telegram_service.py (primary) and utils/email_service.py.
@@ -20,26 +27,24 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-API_KEY      = os.getenv("INFOBIP_API_KEY", "")
-BASE_URL     = os.getenv("INFOBIP_BASE_URL", "").strip().rstrip("/")
-SENDER       = os.getenv("INFOBIP_SENDER", "")
+API_TOKEN    = os.getenv("BULKSMS_NG_API_TOKEN", "")
+SENDER       = os.getenv("BULKSMS_NG_SENDER", "BamiHost")[:11]
 COUNTRY_CODE = os.getenv("DEFAULT_COUNTRY_CODE", "234")
+
+_BASE = "https://www.bulksmsnigeria.com/api/v2"
 
 
 def is_configured() -> bool:
-    return bool(API_KEY and BASE_URL and SENDER)
+    return bool(API_TOKEN)
 
 
 def get_status() -> dict:
-    missing = []
-    if not API_KEY:  missing.append("INFOBIP_API_KEY")
-    if not BASE_URL: missing.append("INFOBIP_BASE_URL")
-    if not SENDER:   missing.append("INFOBIP_SENDER")
+    missing = [] if API_TOKEN else ["BULKSMS_NG_API_TOKEN"]
     return {"ok": len(missing) == 0, "missing": missing}
 
 
 def normalize_phone(raw: Optional[str]) -> Optional[str]:
-    """Return an international number without '+' (Infobip format), e.g. 2348012345678."""
+    """Return an international number without '+' (BulkSMS NG format), e.g. 2348012345678."""
     if not raw:
         return None
     digits = re.sub(r"\D", "", raw)
@@ -60,45 +65,56 @@ def format_currency(amount: float) -> str:
     return f"₦{amount:,.0f}"
 
 
+def _headers() -> dict:
+    return {
+        "Authorization": f"Bearer {API_TOKEN}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+
 async def send_sms(phone: str, message: str) -> dict:
-    """Send one SMS via Infobip. Returns {success, response|error}."""
+    """Send one SMS via BulkSMS Nigeria. Returns {success, response|error}."""
     if not is_configured():
-        logger.warning("[INFOBIP] Not configured. Would SMS %s: %s", phone, message)
-        return {"success": False, "error": "SMS not configured (INFOBIP_API_KEY/BASE_URL/SENDER)"}
+        logger.warning("[BULKSMS_NG] Not configured. Would SMS %s: %s", phone, message)
+        return {"success": False, "error": "SMS not configured (BULKSMS_NG_API_TOKEN)"}
     to = normalize_phone(phone)
     if not to:
         return {"success": False, "error": "invalid phone"}
 
-    url = f"https://{BASE_URL}/sms/3/messages"
-    payload = {"messages": [{
-        "destinations": [{"to": to}],
-        "sender": SENDER,
-        "content": {"text": message},
-    }]}
-    headers = {
-        "Authorization": f"App {API_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(f"{_BASE}/sms", headers=_headers(), json={
+                "from": SENDER,
+                "to": to,
+                "body": message,
+            })
             data = resp.json()
     except Exception as e:
-        logger.error("[INFOBIP] Request failed for %s: %s", to, e)
+        logger.error("[BULKSMS_NG] Request failed for %s: %s", to, e)
         return {"success": False, "error": str(e)}
 
-    # Success: every message in the batch has a status group "PENDING" or "DELIVERED" (groupId 1/3)
-    messages = data.get("messages", [])
-    ok = resp.status_code < 400 and bool(messages) and all(
-        (m.get("status") or {}).get("groupId") not in (5,)  # 5 = REJECTED
-        for m in messages
-    )
+    ok = resp.status_code == 200 and data.get("status") == "success"
     if ok:
-        logger.info("[INFOBIP] SMS sent to %s", to)
+        logger.info("[BULKSMS_NG] SMS sent to %s (message_id=%s, cost=%s)",
+                    to, (data.get("data") or {}).get("message_id"), (data.get("data") or {}).get("cost"))
     else:
-        logger.error("[INFOBIP] SMS failed to %s (%s): %s", to, resp.status_code, data)
+        logger.error("[BULKSMS_NG] SMS failed to %s (%s): %s", to, resp.status_code, data)
     return {"success": ok, "channel": "sms", "response": data}
+
+
+async def delivery_status(message_id: str) -> dict:
+    """Look up delivery status for a previously sent message."""
+    if not is_configured():
+        return {"success": False, "error": "SMS not configured (BULKSMS_NG_API_TOKEN)"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(f"{_BASE}/delivery-reports",
+                                    headers=_headers(), params={"message_id": message_id})
+            return {"success": resp.status_code == 200, "response": resp.json()}
+    except Exception as e:
+        logger.error("[BULKSMS_NG] delivery_status failed for %s: %s", message_id, e)
+        return {"success": False, "error": str(e)}
 
 
 async def send_reminder(phone: str, name: str, amount: float, due_date: str, estate: str = "") -> dict:
