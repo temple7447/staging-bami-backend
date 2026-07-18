@@ -28,14 +28,12 @@ async def _check_rent_reminders():
         from models.tenant import Tenant
         from core.db_helpers import find_all
         from utils.email_service import send_rent_reminder
-        from utils.telegram_service import send_to_tenant
 
         now = utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
 
             sent = 0
-            tg_sent = 0
             for t in tenants:
                 if not t.next_due_date:
                     continue
@@ -44,8 +42,6 @@ async def _check_rent_reminders():
                     continue
 
                 due = str(t.next_due_date.date())
-                outstanding = (t.rent_outstanding or 0) + (t.service_charge_outstanding or 0)
-                label = "overdue" if days < 0 else f"due in {days} day{'s' if days != 1 else ''}"
 
                 if t.tenant_email:
                     await send_rent_reminder(
@@ -56,24 +52,7 @@ async def _check_rent_reminders():
                     )
                     sent += 1
 
-                # Telegram reminder (if tenant has linked their Telegram)
-                if t.telegram_id:
-                    msg = (
-                        f"🏠 *Rent Reminder — BamiHost*\n\n"
-                        f"Hi {t.tenant_name or 'Tenant'}, your rent payment is *{label}*.\n\n"
-                        f"💰 Amount: *₦{(t.rent_amount or 0):,.0f}*"
-                        + (f"\n⚠️ Outstanding: *₦{outstanding:,.0f}*" if outstanding else "") +
-                        f"\n📅 Due: {due}\n\n"
-                        f"Use /balance to see your full account. Contact management if you have questions."
-                    )
-                    try:
-                        res = await send_to_tenant(db, t.id, msg)
-                        if res.get("success"):
-                            tg_sent += 1
-                    except Exception as te:
-                        logger.error("[SCHEDULER] Telegram reminder failed for %s: %s", t.id, te)
-
-        logger.info("[SCHEDULER] Rent reminders — email: %d, telegram: %d", sent, tg_sent)
+        logger.info("[SCHEDULER] Rent reminders — email: %d", sent)
     except Exception as e:
         logger.error("[SCHEDULER] Rent reminder check failed: %s", e)
 
@@ -354,7 +333,6 @@ async def _daily_autopilot_scan():
             # Auto-execute actions matching each owner's rules
             try:
                 from models.autopilot_settings import AutopilotSettings
-                from utils.telegram_service import send_to_tenant_by_phone as _tg_send
                 auto_executed = 0
                 for owner in owners:
                     settings_row = (await db.execute(
@@ -376,11 +354,6 @@ async def _daily_autopilot_scan():
                     )).scalars().all()
                     for action in pending:
                         try:
-                            if action.platform in ("telegram", "whatsapp") and action.content and action.recipients:
-                                for r in (action.recipients or []):
-                                    phone = r.get("phone", "")
-                                    if phone:
-                                        await _tg_send(db, phone, action.content)
                             action.status = "done"
                             action.executed_at = utcnow()
                             action.execution_result = {"auto_executed": True, "source": "daily_scan"}

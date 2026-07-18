@@ -111,10 +111,6 @@ class Settings(BaseSettings):
     EMBED_MODEL: str = "models/gemini-embedding-001"
     EMBED_DIM: int = 768
 
-    # Telegram Bot
-    TELEGRAM_BOT_TOKEN: str = ""
-    TELEGRAM_WEBHOOK_SECRET: str = ""
-
     # Environment
     NODE_ENV: str = "development"
 

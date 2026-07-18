@@ -49,6 +49,6 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             uid, "finance", "payment_reminder",
             f"Payment reminder — {tenant.tenant_name} ({unit_label})",
             f"{tenant.tenant_name} owes ₦{outstanding:,.0f}. Send a polite reminder now.",
-            reminder, "telegram", "tenant_overdue", ctx,
+            reminder, "sms", "tenant_overdue", ctx,
             priority="high", recipients=recipients))
     return actions

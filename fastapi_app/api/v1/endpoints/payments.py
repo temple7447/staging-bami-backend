@@ -365,6 +365,9 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
         raise HTTPException(status_code=404, detail="Tenant not found")
     await require_tenant_access(db, user, tenant, write=True)
 
+    estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    estate_name = estate.name if estate else ""
+
     due = str(tenant.next_due_date.date()) if tenant.next_due_date else "soon"
     channels = []
 
@@ -374,18 +377,19 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
             name=tenant.tenant_name or "",
             amount=tenant.rent_amount or 0,
             due_date=due,
+            estate=estate_name,
         )
         channels.append("email")
 
-    # SMS is a fallback for tenants without Telegram — the scheduler's daily
-    # reminder job already covers Telegram; this manual-send endpoint adds SMS.
+    # SMS is a fallback channel for tenants; this manual-send endpoint adds SMS
+    # alongside email.
     if tenant.tenant_phone and sms_service.is_configured():
         res = await sms_service.send_reminder(
             phone=tenant.tenant_phone,
             name=tenant.tenant_name or "",
             amount=tenant.rent_amount or 0,
             due_date=due,
-            estate=getattr(tenant, "estate", "") or "",
+            estate=estate_name,
         )
         if res.get("success"):
             channels.append("sms")

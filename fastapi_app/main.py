@@ -30,7 +30,6 @@ import models.enquiry, models.bank_deposit, models.withdrawal  # noqa: F401
 import models.business_type, models.visit, models.reminder_log, models.setting  # noqa: F401
 import models.meter_device, models.meter_reading, models.billionaire  # noqa: F401
 import models.coach  # noqa: F401
-import models.tenant_telegram  # noqa: F401
 import models.brand_asset, models.campaign, models.deal  # noqa: F401
 import models.vendor, models.candidate  # noqa: F401
 import models.autopilot_action, models.autopilot_settings  # noqa: F401

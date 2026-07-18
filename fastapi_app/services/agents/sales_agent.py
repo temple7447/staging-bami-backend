@@ -45,6 +45,6 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             f"Prospect: {enq.name}, interested in: {ctx['unit_interest'] or 'a property'}.")
         actions.append(make_action(
             uid, "sales", "follow_up", f"Follow up — {enq.name}",
-            f"Move {enq.name} closer to signing with a follow-up.", follow_up, "telegram",
+            f"Move {enq.name} closer to signing with a follow-up.", follow_up, "sms",
             "new_enquiry", ctx, priority="high", recipients=recipients))
     return actions

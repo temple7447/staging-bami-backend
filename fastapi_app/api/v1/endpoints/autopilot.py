@@ -1,7 +1,7 @@
 """
 BamiHost Business Autopilot
 Monitors the business 24/7, generates AI content, and executes actions
-(WhatsApp blasts, reminders, post captions, follow-ups, reports).
+(SMS reminders, post captions, follow-ups, reports).
 """
 import logging
 from datetime import datetime
@@ -23,7 +23,6 @@ from models.base import gen_uuid
 from core.security import get_current_user
 from core.database import get_db
 from core.config import settings
-from utils.telegram_service import send_to_tenant_by_phone, send_to_owner, is_configured
 from utils.time_utils import utcnow
 from services import llm
 
@@ -160,7 +159,7 @@ async def generate_actions(db: AsyncSession, user: User) -> list[AutopilotAction
     by_type: dict[str, int] = {}
     for a in actions:
         by_type[a.action_type] = by_type.get(a.action_type, 0) + 1
-    vacant    = by_type.get("telegram_blast", 0)
+    vacant    = by_type.get("tenant_blast", 0)
     overdue   = by_type.get("payment_reminder", 0)
     enquiries = by_type.get("follow_up", 0)
     has_issues = by_type.get("maintenance_plan", 0) > 0
@@ -294,11 +293,8 @@ async def execute_action(
 ):
     """
     Execute an autopilot action.
-    - telegram platform  → send via Telegram bot to tenant's linked chat
-    - social / internal  → mark done (content copied by frontend)
+    - social / internal / sms  → mark done (content copied by frontend)
     """
-    from utils.telegram_service import send_to_tenant_by_phone, send_to_owner, is_configured as tg_configured
-
     action = (await db.execute(
         select(AutopilotAction).where(
             AutopilotAction.id == action_id,
@@ -323,47 +319,10 @@ async def execute_action(
         await db.commit()
         return {"success": result.get("success", True), "result": result, "action": _serialize(action)}
 
-    recipients = body.recipients or action.recipients or []
     result: dict = {}
 
-    # Telegram send
-    if action.platform in ("telegram", "whatsapp") and action.content:
-        from utils.telegram_service import send_to_tenant
-        # Cross-business guard: recipients are client-supplied, so only allow
-        # messaging tenants that belong to THIS owner's estates. Otherwise an
-        # owner could push arbitrary content to another business's tenants.
-        allowed_estates = set(await _owner_estate_ids(db, current_user))
-
-        async def _recipient_tenant(r: dict):
-            tid = r.get("tenant_id", "")
-            phone = r.get("phone", "")
-            if tid:
-                return await db.get(Tenant, tid)
-            if phone:
-                return (await db.execute(
-                    select(Tenant).where(Tenant.tenant_phone == phone, Tenant.is_active == True)  # noqa: E712
-                )).scalars().first()
-            return None
-
-        sent = []
-        failed = []
-        for r in recipients:
-            name = r.get("name", "")
-            tenant = await _recipient_tenant(r)
-            if (r.get("tenant_id") or r.get("phone")):
-                if not tenant or tenant.estate not in allowed_estates:
-                    failed.append({**r, "result": {"success": False, "error": "Recipient not in your estates"}})
-                    continue
-                res = await send_to_tenant(db, tenant.id, action.content)
-            else:
-                # Fallback: notify the owner via Telegram with the message
-                res = await send_to_owner(db, str(current_user.id),
-                    f"📤 *Message for {name}* (no Telegram linked):\n\n{action.content}")
-            (sent if res.get("success") else failed).append({**r, "result": res})
-        result = {"sent": sent, "failed": failed, "success": len(sent) > 0}
-
     # Social / internal — just mark done, content is copied by frontend
-    elif action.platform in ("instagram", "facebook", "email", "internal"):
+    if action.platform in ("instagram", "facebook", "email", "internal", "sms"):
         result = {"success": True, "note": "Content ready — user posts manually"}
 
     else:
@@ -407,12 +366,11 @@ async def generate_custom_content(
     On-demand content generation.
     body: { platform, topic, context }
     """
-    platform = body.get("platform", "telegram")
+    platform = body.get("platform", "sms")
     topic = body.get("topic", "property listing")
     context = body.get("context", "")
 
     PLATFORM_PROMPTS = {
-        "telegram": "Write a Telegram broadcast message. Max 3 lines. Plain text. Conversational. Nigerian tone. Use *bold* for emphasis.",
         "instagram": "Write an Instagram caption. Use emojis. Add 5 hashtags. Max 100 words. Engaging CTA.",
         "facebook": "Write a Facebook post. Detailed (100-150 words). Include features, price, contact info.",
         "twitter": "Write a tweet (max 240 chars). Punchy. Include 2-3 hashtags. Nigerian property audience.",
@@ -420,7 +378,7 @@ async def generate_custom_content(
         "sms": "Write an SMS (max 160 chars). Direct. Include a phone number placeholder [PHONE].",
     }
 
-    system = PLATFORM_PROMPTS.get(platform, PLATFORM_PROMPTS["telegram"])
+    system = PLATFORM_PROMPTS.get(platform, PLATFORM_PROMPTS["sms"])
     content = await _ai(system, f"Topic: {topic}\nContext: {context}", model=SONNET, max_tokens=400)
 
     return {"platform": platform, "content": content}
@@ -635,8 +593,6 @@ async def run_auto_execute(
     current_user: User = Depends(get_current_user),
 ):
     """Execute all pending actions whose action_type is in the owner's auto-execute list."""
-    from utils.telegram_service import send_to_tenant_by_phone as _tg_send
-
     settings_row = (await db.execute(
         select(AutopilotSettings).where(AutopilotSettings.owner_id == str(current_user.id))
     )).scalars().first()
@@ -657,11 +613,6 @@ async def run_auto_execute(
     executed = 0
     for action in pending_actions:
         try:
-            if action.platform in ("telegram", "whatsapp") and action.content and action.recipients:
-                for r in (action.recipients or []):
-                    phone = r.get("phone", "")
-                    if phone:
-                        await _tg_send(db, phone, action.content)
             action.status = "done"
             action.executed_at = utcnow()
             action.execution_result = {"auto_executed": True}
@@ -673,128 +624,3 @@ async def run_auto_execute(
     return {"executed": executed, "total_eligible": len(pending_actions)}
 
 
-# ── Telegram Broadcast to all tenants ─────────────────────────────────────────
-
-class BroadcastRequest(BaseModel):
-    message: str
-    tenant_ids: Optional[list[str]] = None   # None = all tenants
-
-
-@router.post("/broadcast")
-async def telegram_broadcast(
-    body: BroadcastRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Send a Telegram message to all (or selected) tenants who have linked their bot."""
-    from utils.telegram_service import send_to_tenant
-    from models.tenant import Tenant as TenantModel
-
-    estate_ids = await _owner_estate_ids(db, current_user) or ["__none__"]
-    conds = [TenantModel.estate.in_(estate_ids), TenantModel.is_active == True,  # noqa: E712
-             TenantModel.telegram_id.isnot(None)]
-    if body.tenant_ids:
-        conds.append(TenantModel.id.in_(body.tenant_ids))
-
-    tenants = (await db.execute(select(TenantModel).where(*conds))).scalars().all()
-
-    sent, failed = 0, 0
-    for t in tenants:
-        res = await send_to_tenant(db, t.id, body.message)
-        if res.get("success"):
-            sent += 1
-        else:
-            failed += 1
-
-    return {
-        "sent": sent, "failed": failed,
-        "total_with_telegram": len(tenants),
-        "message": f"Broadcast sent to {sent} tenants via Telegram"
-    }
-
-
-# ── Paystack payment link auto-send ───────────────────────────────────────────
-
-@router.post("/payment-links")
-async def send_payment_links(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    For every overdue tenant who has Telegram linked:
-    - Generate a Paystack payment link (if PAYSTACK_SECRET_KEY is set)
-    - Send it via Telegram with their outstanding amount
-    """
-    import os, httpx
-    from models.tenant import Tenant as TenantModel
-    from utils.telegram_service import send_to_tenant
-
-    PAYSTACK_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
-    uid = str(current_user.id)
-
-    estate_ids = await _owner_estate_ids(db, current_user) or ["__none__"]
-    overdue = (await db.execute(
-        select(TenantModel).where(
-            TenantModel.estate.in_(estate_ids),
-            TenantModel.is_active == True,  # noqa: E712
-            TenantModel.rent_outstanding > 0,
-            TenantModel.telegram_id.isnot(None),
-        )
-    )).scalars().all()
-
-    results = []
-    for t in overdue:
-        outstanding = (t.rent_outstanding or 0) + (t.service_charge_outstanding or 0)
-        email = t.tenant_email or ""
-        payment_url = None
-
-        # Try to generate Paystack link
-        if PAYSTACK_KEY and email:
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(
-                        "https://api.paystack.co/transaction/initialize",
-                        headers={"Authorization": f"Bearer {PAYSTACK_KEY}"},
-                        json={
-                            "email": email,
-                            "amount": int(outstanding * 100),  # kobo
-                            "currency": "NGN",
-                            "metadata": {"tenant_id": t.id, "owner_id": uid},
-                        }
-                    )
-                    data = resp.json()
-                    if data.get("status"):
-                        payment_url = data["data"]["authorization_url"]
-            except Exception as e:
-                logger.warning("[PAYSTACK] Link gen failed for %s: %s", t.id, e)
-
-        # Build Telegram message
-        if payment_url:
-            msg = (
-                f"💳 *Payment Request — BamiHost*\n\n"
-                f"Hi {t.tenant_name or 'Tenant'},\n\n"
-                f"You have an outstanding balance of *₦{outstanding:,.0f}*.\n\n"
-                f"Click below to pay securely via Paystack:\n"
-                f"🔗 {payment_url}\n\n"
-                f"Thank you for your prompt payment."
-            )
-        else:
-            msg = (
-                f"⚠️ *Rent Reminder — BamiHost*\n\n"
-                f"Hi {t.tenant_name or 'Tenant'},\n\n"
-                f"Your outstanding balance is *₦{outstanding:,.0f}*.\n\n"
-                f"Please contact management to make payment. Thank you."
-            )
-
-        res = await send_to_tenant(db, t.id, msg)
-        results.append({
-            "tenant": t.tenant_name, "outstanding": outstanding,
-            "payment_url": payment_url, "telegram_sent": res.get("success"),
-        })
-
-    sent = sum(1 for r in results if r["telegram_sent"])
-    return {
-        "processed": len(results),
-        "telegram_sent": sent,
-        "results": results,
-    }

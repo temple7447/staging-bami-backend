@@ -101,4 +101,4 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
         uid, "analyst", "weekly_report",
         f"Weekly portfolio report — {occupancy_pct}% occupied · ₦{arrears:,.0f} arrears",
         "Your Analyst reviewed the whole portfolio and wrote this week's briefing.",
-        report, "telegram", "weekly_review", ctx, priority=priority, auto_execute=True)]
+        report, "sms", "weekly_review", ctx, priority=priority, auto_execute=True)]

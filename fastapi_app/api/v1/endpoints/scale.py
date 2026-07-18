@@ -197,44 +197,11 @@ async def get_nps(
         "target": LEVEL1_TARGET,
         "progress_pct": min(100, round(len(promoters) / LEVEL1_TARGET * 100)),
         "scores": [
-            {"id": t.id, "name": t.tenant_name, "unit": t.unit_label,
-             "score": t.nps_score, "connected": bool(t.telegram_id)}
+            {"id": t.id, "name": t.tenant_name, "unit": t.unit_label, "score": t.nps_score}
             for t in tenants
         ],
         "model_10": model_10,
     }
-
-
-@router.post("/nps/request")
-async def request_nps(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Send the 1-question NPS to every connected tenant via Telegram."""
-    from utils.telegram_service import send_to_tenant, is_configured
-    ids = (await owner_estate_ids(db, current_user)) or ["__none__"]
-    tenants = (await db.execute(
-        select(Tenant).where(
-            Tenant.estate.in_(ids), Tenant.is_active == True,  # noqa: E712
-            Tenant.telegram_id.isnot(None),
-        )
-    )).scalars().all()
-
-    if not is_configured():
-        raise HTTPException(503, "Telegram is not configured")
-
-    sent = 0
-    msg = ("⭐ *Quick favour* — on a scale of *0 to 10*, how likely are you to "
-           "recommend us to a friend or colleague?\n\nJust reply with a number (0–10). Thank you!")
-    for t in tenants:
-        res = await send_to_tenant(db, t.id, msg)
-        if res.get("success"):
-            t.nps_asked_at = utcnow()
-            # mark the tenant's bot session to capture the next numeric reply
-            sent += 1
-    await db.commit()
-    return {"sent": sent, "total_connected": len(tenants),
-            "message": f"NPS survey sent to {sent} tenants on Telegram"}
 
 
 # ─── L2: Growth scorecard ───────────────────────────────────────────────────────

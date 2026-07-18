@@ -50,7 +50,7 @@ NIGERIAN CONTEXT:
 - Email — subject line under 50 chars, benefit-driven
 
 OUTPUT STYLE:
-- Telegram-friendly: short paragraphs, bullet points
+- Chat-friendly: short paragraphs, bullet points
 - Always specific: use estate names, unit details, ₦ figures
 - Direct and action-oriented: end with ONE clear next action
 - Warm but professional — trusted advisor, not chatbot
@@ -86,8 +86,8 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             "to broadcast a property listing. Plain text, conversational, add urgency.",
             f"Property: {ctx['bedrooms']}bed {ctx['category']} at {ctx['estate']}, {ctx['price']}.")
         actions.append(make_action(
-            uid, "marketer", "telegram_blast", f"Telegram blast — {unit.label}, {estate.name}",
-            "Broadcast this vacant unit to your contact list.", wa, "telegram",
+            uid, "marketer", "tenant_blast", f"Tenant blast — {unit.label}, {estate.name}",
+            "Broadcast this vacant unit to your contact list.", wa, "sms",
             "vacancy_opened", ctx, priority="high", image_url=graphic))
 
         # Instagram — visual, emojis, hashtags, CTA

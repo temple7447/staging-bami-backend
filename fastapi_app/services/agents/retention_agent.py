@@ -78,7 +78,7 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             f"{'⚠️ At-risk renewal' if at_risk else 'Renewal'} — {tenant.tenant_name} ({days_left}d left)",
             f"{tenant.tenant_name}'s lease at {estate.name} ends in {days_left} days. "
             f"{'They are at risk of leaving. ' if at_risk else ''}Send a renewal offer now.",
-            offer, "telegram", "lease_expiring", ctx,
+            offer, "sms", "lease_expiring", ctx,
             priority="high" if at_risk or days_left <= 30 else "medium",
             recipients=recipients))
     return actions

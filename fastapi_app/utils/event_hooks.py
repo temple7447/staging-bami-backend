@@ -129,7 +129,7 @@ async def _on_new_tenant(owner_id: str, ctx: dict) -> list[AutopilotAction]:
         _make_action(owner_id, "sales", "welcome_message",
                      f"Welcome {name} to {unit}",
                      "Send a warm welcome message to your new tenant.",
-                     welcome_msg, "telegram", "new_tenant", ctx, "high",
+                     welcome_msg, "sms", "new_tenant", ctx, "high",
                      recipients=[{"name": name, "phone": ctx.get("phone", ""), "email": ctx.get("email", "")}]),
         _make_action(owner_id, "finance", "internal_note",
                      f"Finance: {name} move-in recorded",
@@ -170,7 +170,7 @@ async def _on_vacancy_opened(owner_id: str, ctx: dict, db: AsyncSession | None =
         _make_action(owner_id, "marketer", "whatsapp_blast",
                      f"Vacancy alert — {unit}, {estate}",
                      "Blast your contacts about this vacant unit immediately.",
-                     wa_blast, "telegram", "vacancy_opened", ctx, "high", image_url=graphic),
+                     wa_blast, "sms", "vacancy_opened", ctx, "high", image_url=graphic),
         _make_action(owner_id, "marketer", "instagram_post",
                      f"Instagram post — {unit}, {estate}",
                      "Post this caption on Instagram with the AI-designed graphic.",
@@ -223,7 +223,7 @@ async def _on_new_enquiry(owner_id: str, ctx: dict, db: AsyncSession | None = No
         _make_action(owner_id, "sales", "follow_up",
                      f"Follow up with {prospect}",
                      f"New enquiry from {prospect}. Send a follow-up within the hour to maximise conversion.",
-                     follow_up, "telegram", "new_enquiry", ctx, "high",
+                     follow_up, "sms", "new_enquiry", ctx, "high",
                      recipients=[{"name": prospect, "phone": phone, "email": ctx.get("email", "")}]),
         _make_action(owner_id, "sales", "lead_score",
                      f"Lead score — {prospect}",
@@ -299,7 +299,7 @@ async def _on_issue_reported(owner_id: str, ctx: dict, db: AsyncSession | None =
             owner_id, "operations", "vendor_notification",
             f"Notify Vendor: {vendor_name} — {title}",
             f"Urgent WhatsApp to {vendor_name} ({vendor_phone})",
-            msg, "telegram", "issue_reported", ctx, "high",
+            msg, "sms", "issue_reported", ctx, "high",
             recipients=[{"name": vendor_name, "phone": vendor_phone, "email": ""}]
         ))
 
@@ -319,7 +319,7 @@ async def _on_payment_received(owner_id: str, ctx: dict) -> list[AutopilotAction
         _make_action(owner_id, "finance", "payment_receipt",
                      f"Payment receipt — {tenant} ₦{amount:,.0f}",
                      "Send a payment confirmation to the tenant.",
-                     receipt_msg, "telegram", "payment_received", ctx, "medium",
+                     receipt_msg, "sms", "payment_received", ctx, "medium",
                      recipients=[{"name": tenant, "phone": ctx.get("phone", ""), "email": ctx.get("email", "")}]),
     ]
 
@@ -339,7 +339,7 @@ async def _on_tenant_overdue(owner_id: str, ctx: dict) -> list[AutopilotAction]:
         _make_action(owner_id, "finance", "payment_reminder",
                      f"Overdue reminder — {tenant} (₦{outstanding:,.0f})",
                      f"{tenant} is {days_late} days late on ₦{outstanding:,.0f}. Send reminder now.",
-                     reminder, "telegram", "tenant_overdue", ctx, "high",
+                     reminder, "sms", "tenant_overdue", ctx, "high",
                      recipients=[{"name": tenant, "phone": phone, "email": ctx.get("email", "")}]),
     ]
 
@@ -400,6 +400,6 @@ async def _on_lease_expiring(owner_id: str, ctx: dict) -> list[AutopilotAction]:
         _make_action(owner_id, "sales", "lease_renewal",
                      f"Lease renewal — {tenant} ({days} days left)",
                      f"{tenant}'s lease at {unit} expires in {days} days. Send renewal offer now.",
-                     renewal_msg, "telegram", "lease_expiring", ctx, priority,
+                     renewal_msg, "sms", "lease_expiring", ctx, priority,
                      recipients=[{"name": tenant, "phone": phone, "email": ctx.get("email", "")}]),
     ]

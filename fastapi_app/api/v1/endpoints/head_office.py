@@ -276,25 +276,30 @@ async def head_office_chat(
         # Agentic loop: the team may call Google tools (email/drive/calendar)
         # before answering. Falls back to plain streaming on any loop failure
         # so chat never breaks because of the tools.
-        from services import google_actions
+        from services import google_actions, sms_actions
         acc = ""
         try:
+            all_tools = google_actions.GOOGLE_TOOLS + sms_actions.SMS_TOOLS
+            progress_labels = {**google_actions.PROGRESS_LABELS, **sms_actions.PROGRESS_LABELS}
             tool_system = list(system_blocks) + [
-                {"type": "text", "text": google_actions.TOOLS_PROMPT}]
+                {"type": "text", "text": google_actions.TOOLS_PROMPT + sms_actions.TOOLS_PROMPT}]
             convo = list(messages)
             final_text = ""
             for _round in range(5):
                 turn = await llm.chat_with_tools(
-                    tool_system, convo, tools=google_actions.GOOGLE_TOOLS,
+                    tool_system, convo, tools=all_tools,
                     tier=llm.DEEP, max_tokens=1200)
                 if not turn.tool_calls:
                     final_text = turn.text
                     break
                 results: dict[str, str] = {}
                 for tc in turn.tool_calls:
-                    label = google_actions.PROGRESS_LABELS.get(tc.name, "Working on it")
+                    label = progress_labels.get(tc.name, "Working on it")
                     yield _frame({"status": f"{label}…"})
-                    results[tc.id] = await google_actions.execute(tc.name, tc.input, owner_id)
+                    if tc.name in sms_actions.TOOL_NAMES:
+                        results[tc.id] = await sms_actions.execute(tc.name, tc.input, owner_id)
+                    else:
+                        results[tc.id] = await google_actions.execute(tc.name, tc.input, owner_id)
                 convo.extend(llm.tool_exchange(turn, results))
             else:
                 final_text = turn.text or "I started acting on that but hit the tool-call limit — ask me to continue."

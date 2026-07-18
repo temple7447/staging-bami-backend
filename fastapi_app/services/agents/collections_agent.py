@@ -92,6 +92,6 @@ async def scan(db: AsyncSession, user: User) -> list[AutopilotAction]:
             f"{stage} — {tenant.tenant_name} ({days_overdue}d overdue, ₦{outstanding:,.0f})",
             f"{tenant.tenant_name} at {estate.name} is {days_overdue} days overdue for ₦{outstanding:,.0f}. "
             f"Send the {stage.lower()}.",
-            notice, "telegram", "rent_overdue", ctx,
+            notice, "sms", "rent_overdue", ctx,
             priority=priority, recipients=recipients))
     return actions

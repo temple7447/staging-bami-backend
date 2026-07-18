@@ -15,8 +15,8 @@ Env vars:
                           registration to send via the direct-refund gateway)
   DEFAULT_COUNTRY_CODE  — for phone normalization (default "234" Nigeria)
 
-Used as a fallback channel for tenants who haven't connected Telegram — see
-utils/telegram_service.py (primary) and utils/email_service.py.
+Used alongside utils/email_service.py as a second delivery channel for tenant
+reminders.
 """
 import os
 import re
@@ -118,9 +118,10 @@ async def delivery_status(message_id: str) -> dict:
 
 
 async def send_reminder(phone: str, name: str, amount: float, due_date: str, estate: str = "") -> dict:
-    """Send a rent-reminder SMS. Mirrors telegram_service's reminder copy."""
+    """Send a rent-reminder SMS, naming the estate/property it's for."""
+    property_line = f" for {estate}" if estate else ""
     msg = (
-        f"Hi {name or 'there'}, your rent of {format_currency(amount)} is due on "
+        f"Hi {name or 'there'}, your rent of {format_currency(amount)}{property_line} is due on "
         f"{due_date}. Please pay on time to avoid disruption. — BamiHost"
     )
     return await send_sms(phone, msg)
