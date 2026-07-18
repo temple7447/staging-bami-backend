@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime
-import hashlib, secrets, random
+import hashlib, secrets, random, re
 
 from models.user import User
 from models.wallet import Wallet
@@ -54,15 +54,40 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     wallet = Wallet(id=gen_uuid(), user_id=user.id, balance=0, currency="NGN")
     await save(db, wallet)
 
-    await send_welcome_email(user.email, user.name, body.password)
+    await send_welcome_email(user.email, user.name, body.password, phone=user.phone or "")
 
     token = create_access_token(user.id, user.role)
     return {"success": True, "token": token, "user": _user_dict(user)}
 
 
+def _phone_suffix(raw: str) -> str:
+    """Last 10 digits of a phone number — stable across '0803...', '+234803...',
+    and '234803...' formats so a login lookup doesn't need normalized storage."""
+    digits = re.sub(r"\D", "", raw or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+async def _find_user_by_identifier(db: AsyncSession, identifier: str) -> User | None:
+    """Resolve a login identifier to a User — an email address, or a phone
+    number matched against User.phone regardless of how it was formatted."""
+    ident = (identifier or "").strip()
+    if not ident:
+        return None
+    if "@" in ident:
+        return await find_one(db, User, func.lower(User.email) == ident.lower())
+
+    suffix = _phone_suffix(ident)
+    if len(suffix) < 7:  # too short to be a real phone number
+        return None
+    matches = (await db.execute(
+        select(User).where(User.phone.isnot(None), User.phone.like(f"%{suffix}"))
+    )).scalars().all()
+    return matches[0] if len(matches) == 1 else None
+
+
 @router.post("/login")
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await find_one(db, User, User.email == body.email)
+    user = await _find_user_by_identifier(db, body.email)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not verify_password(body.password, user.password):
@@ -224,7 +249,7 @@ async def onboard_business_owner(
     await _assign_owned_estates(db, owner.id, estate_ids, actor.id)
 
     if send_creds:
-        await send_welcome_email(email, name, password)
+        await send_welcome_email(email, name, password, phone=phone)
 
     return {"success": True, "message": "Business owner onboarded successfully",
             "data": await _serialize_business_owner(db, owner)}
@@ -308,7 +333,7 @@ async def resend_business_owner_credentials(
     owner.is_active = True
     owner.updated_at = utcnow()
     await save(db, owner)
-    result = await send_welcome_email(owner.email, owner.name or "Business Owner", password)
+    result = await send_welcome_email(owner.email, owner.name or "Business Owner", password, phone=owner.phone or "")
     if not result.get("success"):
         raise HTTPException(status_code=502, detail="Password reset but the email could not be sent. Please try again.")
     return {"success": True, "message": f"Login credentials sent to {owner.email}"}
@@ -384,7 +409,7 @@ async def onboard_manager(
     await save(db, Wallet(id=gen_uuid(), user_id=manager.id, balance=0, currency="NGN"))
 
     if send_creds:
-        await send_welcome_email(email, name, password)
+        await send_welcome_email(email, name, password, phone=phone)
 
     return {"success": True, "message": "Manager onboarded successfully",
             "data": await _serialize_manager(db, manager)}
@@ -465,7 +490,7 @@ async def resend_manager_credentials(
     manager.is_active = True
     manager.updated_at = utcnow()
     await save(db, manager)
-    result = await send_welcome_email(manager.email, manager.name or "Manager", password)
+    result = await send_welcome_email(manager.email, manager.name or "Manager", password, phone=manager.phone or "")
     if not result.get("success"):
         raise HTTPException(status_code=502, detail="Password reset but the email could not be sent. Please try again.")
     return {"success": True, "message": f"Login credentials sent to {manager.email}"}

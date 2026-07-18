@@ -84,7 +84,11 @@ async def send_email(
 
 # ── Template helpers ──────────────────────────────────────────────────────────
 
-async def send_welcome_email(recipient_email: str, name: str, password: str) -> dict:
+async def send_welcome_email(recipient_email: str, name: str, password: str, phone: str = "") -> dict:
+    phone_line = (
+        f"<p>You can log in with either your email above or your phone number "
+        f"(<strong>{phone}</strong>) plus this password.</p>" if phone else ""
+    )
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
       <h2 style="color:#2563eb">Welcome to BamiHost!</h2>
@@ -93,6 +97,7 @@ async def send_welcome_email(recipient_email: str, name: str, password: str) -> 
       <p><strong>Email:</strong> {recipient_email}</p>
       <p><strong>Temporary Password:</strong>
          <code style="background:#f3f4f6;padding:4px 8px;border-radius:4px">{password}</code></p>
+      {phone_line}
       <p>Please change your password after your first login.</p>
       <p style="color:#6b7280;font-size:12px">BamiHost — Property Management</p>
     </div>"""

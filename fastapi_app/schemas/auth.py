@@ -18,7 +18,7 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email:    EmailStr
+    email:    str   # accepts either an email address or a phone number
     password: str
 
 

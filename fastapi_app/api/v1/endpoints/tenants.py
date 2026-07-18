@@ -163,12 +163,13 @@ async def create_tenant(
             generated_password = generate_temp_password(6)
             existing_user.password = hash_password(generated_password)
             existing_user.is_active = True
+            existing_user.phone = phone or existing_user.phone
             await save(db, existing_user)
         else:
             generated_password = generate_temp_password(6)
             new_user = User(id=gen_uuid(), name=full_name or "Tenant", email=email_addr,
                             password=hash_password(generated_password), role="tenant",
-                            created_by=user.id, email_verified=True)
+                            phone=phone or None, created_by=user.id, email_verified=True)
             await save(db, new_user)
             wallet = Wallet(id=gen_uuid(), user_id=new_user.id, balance=0.0, currency="NGN")
             await save(db, wallet)
@@ -211,9 +212,10 @@ async def create_tenant(
     await save(db, unit)
 
     if email_addr and generated_password:
-        await send_welcome_email(email_addr, full_name or "Tenant", generated_password)
+        await send_welcome_email(email_addr, full_name or "Tenant", generated_password, phone=phone)
         if phone and sms_service.is_configured():
-            await sms_service.send_credentials(phone, full_name or "Tenant", email_addr, generated_password)
+            await sms_service.send_credentials(phone, full_name or "Tenant", email_addr, generated_password,
+                                               estate=estate.name)
 
     return {"success": True, "message": "Tenant created successfully",
             "data": {"id": tenant.id, "temp_password": generated_password}}
@@ -698,6 +700,11 @@ async def update_tenant(
         tenant.tenant_email = new_email or tenant.tenant_email
     if body.tenant_phone or body.whatsapp:
         tenant.tenant_phone = body.tenant_phone or body.whatsapp
+        if tenant.user:
+            account = await db.get(User, tenant.user)
+            if account:
+                account.phone = tenant.tenant_phone
+                await save(db, account)
     history_meta: dict = {}
     if body.rent_amount is not None:
         if body.rent_amount != tenant.rent_amount:
@@ -844,9 +851,11 @@ async def resend_tenant_credentials(
                             detail="This tenant has no email address. Add one first, then resend credentials.")
 
     generated_password = generate_temp_password(6)
+    phone = (tenant.tenant_phone or "").strip()
 
-    # Find (or create) the login account for this tenant, keeping its email in
-    # sync with the tenant's current email so the credentials we send are valid.
+    # Find (or create) the login account for this tenant, keeping its email
+    # (and phone) in sync with the tenant's current details so the credentials
+    # we send are valid — including phone-based login if the number changed.
     account = await db.get(User, tenant.user) if tenant.user else None
     if account is None:
         # Fall back to any existing user on this email before creating a new one.
@@ -862,11 +871,12 @@ async def resend_tenant_credentials(
             account.email = email_addr
         account.password = hash_password(generated_password)
         account.is_active = True
+        account.phone = phone or account.phone
         await save(db, account)
     else:
         account = User(id=gen_uuid(), name=tenant.tenant_name or "Tenant", email=email_addr,
                        password=hash_password(generated_password), role="tenant",
-                       created_by=user.id, email_verified=True)
+                       phone=phone or None, created_by=user.id, email_verified=True)
         await save(db, account)
         if not await find_one(db, Wallet, Wallet.user_id == account.id):
             await save(db, Wallet(id=gen_uuid(), user_id=account.id, balance=0.0, currency="NGN"))
@@ -883,15 +893,16 @@ async def resend_tenant_credentials(
     tenant.updated_at = utcnow()
     await save(db, tenant)
 
-    result = await send_welcome_email(email_addr, tenant.tenant_name or "Tenant", generated_password)
+    result = await send_welcome_email(email_addr, tenant.tenant_name or "Tenant", generated_password, phone=phone)
     if not result.get("success"):
         raise HTTPException(status_code=502,
                             detail="Credentials reset but the email could not be sent. Please try again.")
 
     channels = ["email"]
-    phone = (tenant.tenant_phone or "").strip()
     if phone and sms_service.is_configured():
-        sms_result = await sms_service.send_credentials(phone, tenant.tenant_name or "Tenant", email_addr, generated_password)
+        estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+        sms_result = await sms_service.send_credentials(phone, tenant.tenant_name or "Tenant", email_addr, generated_password,
+                                                         estate=estate.name if estate else "")
         if sms_result.get("success"):
             channels.append("sms")
 
