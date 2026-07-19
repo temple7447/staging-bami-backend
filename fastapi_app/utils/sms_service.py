@@ -141,15 +141,15 @@ async def send_credentials(phone: str, name: str, email: str, password: str, est
     """Send login credentials (email + temp password) by SMS — mirrors the welcome email."""
     ready_line = f"Your BamiHost Tenant Portal for {estate} is now ready." if estate \
         else "Your BamiHost account is now ready."
-    # Confirmed on-device: BulkSMS Nigeria's gateway mangles a literal "@"
-    # (GSM-7 encoding quirk) — it arrives as "¡". Spell it out instead.
-    email_spoken = email.replace("@", " at ")
+    # The email address is shown at all in the SMS — BulkSMS Nigeria's gateway
+    # mangles a literal "@" (GSM-7 encoding quirk, confirmed on-device: it
+    # arrives as "¡"). Show the phone number instead; login works with either.
     msg = (
         f"Welcome to BamiHost!\n\n"
         f"Hi {name or 'there'},\n\n"
         f"{ready_line}\n\n"
         f"Login Details\n"
-        f"- Email: {email_spoken}\n\n"
+        f"- Phone: {phone}\n\n"
         f"- Temporary Password: {password}\n\n"
         f"You can sign in using either your email address or your registered phone number.\n\n"
         f"Tenant Portal: {settings.FRONTEND_URL}\n\n"
