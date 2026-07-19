@@ -139,11 +139,18 @@ async def send_reminder(phone: str, name: str, amount: float, due_date: str, est
 
 async def send_credentials(phone: str, name: str, email: str, password: str, estate: str = "") -> dict:
     """Send login credentials (email + temp password) by SMS — mirrors the welcome email."""
-    property_line = f" for {estate}" if estate else ""
+    ready_line = f"Your BamiHost Tenant Portal for {estate} is now ready." if estate \
+        else "Your BamiHost account is now ready."
     msg = (
-        f"Hi {name or 'there'}, your BamiHost account{property_line} is ready. "
-        f"Login email: {email}  Temp password: {password}. "
-        f"You can log in with your email or this phone number. "
-        f"Please change your password after first login. — BamiHost"
+        f"Welcome to BamiHost!\n\n"
+        f"Hi {name or 'there'},\n\n"
+        f"{ready_line}\n\n"
+        f"Login Details\n"
+        f"- Email: {email}\n"
+        f"- Temporary Password: {password}\n\n"
+        f"You can sign in using either your email address or your registered phone number.\n\n"
+        f"Tenant Portal: {settings.FRONTEND_URL}\n\n"
+        f"For your security, please change your password immediately after your first login.\n\n"
+        f"Welcome to the BamiHost community! If you need any assistance, we're here to help."
     )
     return await send_sms(phone, msg)
