@@ -338,8 +338,19 @@ _A_TERM  = ParagraphStyle("at", fontName="Helvetica",      fontSize=9,  textColo
 _A_SIGN  = ParagraphStyle("as", fontName="Helvetica-Oblique", fontSize=11, textColor=INK)
 
 
+def _sig_image(data_uri: str | None, width=5.5 * cm, height=2.2 * cm):
+    if data_uri and "," in data_uri:
+        try:
+            return Image(io.BytesIO(base64.b64decode(data_uri.split(",", 1)[1])), width=width, height=height)
+        except Exception:
+            return None
+    return None
+
+
 def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
-                           signature_image: str | None, signed_at) -> bytes:
+                           signature_image: str | None, signed_at,
+                           registration: dict | None = None) -> bytes:
+    reg = registration or {}
     cw = content_width()
     story = brand_header(parties.get("estate_name"), parties.get("estate_address"),
                          doc_title="Tenancy Agreement", doc_date=signed_at)
@@ -350,24 +361,48 @@ def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
         ("Unit", parties.get("unit_label")),
         ("Estate", parties.get("estate_name")),
         ("Rent", parties.get("rent_display")),
+        ("Caution Fee", parties.get("caution_fee_display")),
+        ("Legal Fee", parties.get("legal_fee_display")),
         ("Tenancy Start", parties.get("start_date_display")),
     ], cw))
+
+    if reg:
+        story += [Spacer(1, 14), section_table("Tenant Particulars", [
+            ("Residential Address", reg.get("address")),
+            ("Occupation", reg.get("occupation")),
+            ("Employer", reg.get("employer") or "—"),
+            ("ID Type", reg.get("idType")),
+            ("ID Number", reg.get("idNumber")),
+        ], cw)]
+
+        story += [Spacer(1, 14), section_table("Next of Kin", [
+            ("Name", reg.get("kinName")),
+            ("Relationship", reg.get("kinRelationship")),
+            ("Phone", reg.get("kinPhone")),
+        ], cw)]
 
     story += [Spacer(1, 14), Paragraph("<font name='Helvetica-Bold'>Terms of Tenancy</font>", _A_LABEL), Spacer(1, 6)]
     for i, clause in enumerate(terms, start=1):
         story.append(Paragraph(f"{i}. {clause}", _A_TERM))
 
     story += [Spacer(1, 16), HRFlowable(width="100%", thickness=0.5, color=BORDER), Spacer(1, 10)]
-    story.append(Paragraph("<font name='Helvetica-Bold'>Signature</font>", _A_LABEL))
+    story.append(Paragraph("<font name='Helvetica-Bold'>Tenant's Signature</font>", _A_LABEL))
     story.append(Spacer(1, 6))
-    if signature_image and "," in signature_image:
-        try:
-            img_bytes = base64.b64decode(signature_image.split(",", 1)[1])
-            story.append(Image(io.BytesIO(img_bytes), width=5.5 * cm, height=2.2 * cm))
-        except Exception:
-            pass
+    img = _sig_image(signature_image)
+    if img:
+        story.append(img)
     story.append(Paragraph(f"Signed: {typed_name}", _A_SIGN))
     story.append(Paragraph(_fmt_date(signed_at), _A_VALUE))
+
+    if reg.get("witnessName"):
+        story += [Spacer(1, 14), Paragraph("<font name='Helvetica-Bold'>Witness</font>", _A_LABEL), Spacer(1, 6)]
+        wimg = _sig_image(reg.get("witnessSignatureImage"))
+        if wimg:
+            story.append(wimg)
+        story.append(Paragraph(f"Signed: {reg.get('witnessTypedName') or reg.get('witnessName')}", _A_SIGN))
+        story.append(Paragraph(
+            f"{reg.get('witnessName')} — {reg.get('witnessOccupation')}, {reg.get('witnessAddress')} "
+            f"({reg.get('witnessRelationship')} of the Tenant)", _A_VALUE))
 
     story += brand_footer()
     return build_document(story)

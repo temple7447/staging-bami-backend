@@ -22,6 +22,12 @@ class TenancyAgreement(Base):
     parties: Mapped[dict] = mapped_column(JSON, default=dict)   # landlord/tenant/premises/rent, frozen
     terms: Mapped[list] = mapped_column(JSON, default=list)     # clause text, frozen
 
+    # Registration particulars the tenant supplies when signing: residential
+    # address, occupation, ID verification, next-of-kin, and their witness.
+    # One JSON blob rather than a dozen columns — nothing here is queried on
+    # its own, it's read back as a unit for the signed record/PDF.
+    registration: Mapped[dict] = mapped_column(JSON, default=dict)
+
     typed_name: Mapped[str] = mapped_column(String(255))
     signature_image: Mapped[str | None] = mapped_column(Text, nullable=True)  # base64 PNG data URI
 

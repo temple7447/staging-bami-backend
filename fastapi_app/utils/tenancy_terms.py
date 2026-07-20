@@ -64,6 +64,8 @@ TERMS_TEMPLATE = [
 def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
     rent = float(tenant.rent_amount or 0)
+    caution = float(getattr(unit, "caution_fee", 0) or 0) if unit else 0
+    legal = float(getattr(unit, "legal_fee", 0) or 0) if unit else 0
     return {
         "landlord_name": (owner.name if owner else None) or estate.name or "The Landlord",
         "estate_name": estate.name or "",
@@ -74,6 +76,10 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
         "unit_label": tenant.unit_label or (unit.label if unit else ""),
         "rent_amount": rent,
         "rent_display": _naira(rent),
+        "caution_fee": caution,
+        "caution_fee_display": _naira(caution),
+        "legal_fee": legal,
+        "legal_fee_display": _naira(legal),
         "start_date": (tenant.entry_date.isoformat() if tenant.entry_date else None),
         "start_date_display": (tenant.entry_date.strftime("%d %b %Y") if tenant.entry_date else "the tenancy start date"),
     }
