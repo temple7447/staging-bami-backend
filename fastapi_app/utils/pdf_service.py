@@ -14,13 +14,14 @@ One visual language everywhere:
 Uses ReportLab platypus so content flows across pages.
 """
 import io
+import base64
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import HexColor, white
 from reportlab.lib.units import cm
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import (
-    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable,
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, HRFlowable, Image,
 )
 from utils.time_utils import utcnow
 
@@ -326,4 +327,47 @@ def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dic
         Paragraph(f"BamiHost Property Management System{' • Ref: ' + ref if ref else ''} • "
                   f"Generated {utcnow().strftime('%d %b %Y')}", _FOOT),
     ]
+    return build_document(story)
+
+
+# ── Tenancy agreement (parties + numbered terms + signature) ──────────────────
+
+_A_LABEL = ParagraphStyle("al", fontName="Helvetica-Bold", fontSize=9,  textColor=LABEL_BLUE)
+_A_VALUE = ParagraphStyle("av", fontName="Helvetica",      fontSize=9,  textColor=INK)
+_A_TERM  = ParagraphStyle("at", fontName="Helvetica",      fontSize=9,  textColor=INK, leading=13, spaceAfter=6)
+_A_SIGN  = ParagraphStyle("as", fontName="Helvetica-Oblique", fontSize=11, textColor=INK)
+
+
+def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
+                           signature_image: str | None, signed_at) -> bytes:
+    cw = content_width()
+    story = brand_header(parties.get("estate_name"), parties.get("estate_address"),
+                         doc_title="Tenancy Agreement", doc_date=signed_at)
+
+    story.append(section_table("Parties & Premises", [
+        ("Landlord", parties.get("landlord_name")),
+        ("Tenant", parties.get("tenant_name")),
+        ("Unit", parties.get("unit_label")),
+        ("Estate", parties.get("estate_name")),
+        ("Rent", parties.get("rent_display")),
+        ("Tenancy Start", parties.get("start_date_display")),
+    ], cw))
+
+    story += [Spacer(1, 14), Paragraph("<font name='Helvetica-Bold'>Terms of Tenancy</font>", _A_LABEL), Spacer(1, 6)]
+    for i, clause in enumerate(terms, start=1):
+        story.append(Paragraph(f"{i}. {clause}", _A_TERM))
+
+    story += [Spacer(1, 16), HRFlowable(width="100%", thickness=0.5, color=BORDER), Spacer(1, 10)]
+    story.append(Paragraph("<font name='Helvetica-Bold'>Signature</font>", _A_LABEL))
+    story.append(Spacer(1, 6))
+    if signature_image and "," in signature_image:
+        try:
+            img_bytes = base64.b64decode(signature_image.split(",", 1)[1])
+            story.append(Image(io.BytesIO(img_bytes), width=5.5 * cm, height=2.2 * cm))
+        except Exception:
+            pass
+    story.append(Paragraph(f"Signed: {typed_name}", _A_SIGN))
+    story.append(Paragraph(_fmt_date(signed_at), _A_VALUE))
+
+    story += brand_footer()
     return build_document(story)
