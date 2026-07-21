@@ -358,7 +358,7 @@ def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
     story.append(section_table("Parties & Premises", [
         ("Landlord", parties.get("landlord_name")),
         ("Tenant", parties.get("tenant_name")),
-        ("Unit", parties.get("unit_label")),
+        ("Unit", f"{parties.get('bedroom_count', '')} {parties.get('unit_label', '')}".strip()),
         ("Estate", parties.get("estate_name")),
         ("Rent", parties.get("rent_display")),
         ("Caution Fee", parties.get("caution_fee_display")),

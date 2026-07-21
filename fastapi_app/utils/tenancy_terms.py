@@ -77,6 +77,11 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
     rent = float(tenant.rent_amount or 0)
     caution = float(getattr(unit, "caution_fee", 0) or 0) if unit else 0
     legal = float(getattr(unit, "legal_fee", 0) or 0) if unit else 0
+    bedrooms = getattr(unit, "bedrooms", 0) or 0 if unit else 0
+    bedroom_count = (
+        f"{bedrooms}-Bedroom" if bedrooms
+        else (getattr(unit, "category", "") if unit else "") or "Apartment"
+    )
     return {
         "landlord_name": (owner.name if owner else None) or estate.name or "The Landlord",
         "estate_name": estate.name or "",
@@ -85,6 +90,7 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
         "tenant_email": tenant.tenant_email or "",
         "tenant_phone": tenant.tenant_phone or "",
         "unit_label": tenant.unit_label or (unit.label if unit else ""),
+        "bedroom_count": bedroom_count,
         "rent_amount": rent,
         "rent_display": _naira(rent),
         "caution_fee": caution,
