@@ -61,6 +61,17 @@ TERMS_TEMPLATE = [
 ]
 
 
+# BamiHost's retained solicitor — named on every tenancy agreement platform-
+# wide (confirmed with the owner: not one landlord's private counsel, but
+# BamiHost's counsel for every estate's agreements).
+PREPARED_BY = {
+    "name": "G. Anukun Esq., LL.M, AICMC",
+    "address": "No. 12 Deco Road, by Efejuku Street Junction, Warri, Delta State.",
+    "phone": "08050696537, 08068202655",
+    "email": "godfreyanukun@gmail.com",
+}
+
+
 def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
     rent = float(tenant.rent_amount or 0)
@@ -82,6 +93,10 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
         "legal_fee_display": _naira(legal),
         "start_date": (tenant.entry_date.isoformat() if tenant.entry_date else None),
         "start_date_display": (tenant.entry_date.strftime("%d %b %Y") if tenant.entry_date else "the tenancy start date"),
+        "prepared_by_name": PREPARED_BY["name"],
+        "prepared_by_address": PREPARED_BY["address"],
+        "prepared_by_phone": PREPARED_BY["phone"],
+        "prepared_by_email": PREPARED_BY["email"],
     }
 
 

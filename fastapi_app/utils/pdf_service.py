@@ -404,5 +404,14 @@ def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
             f"{reg.get('witnessName')} — {reg.get('witnessOccupation')}, {reg.get('witnessAddress')} "
             f"({reg.get('witnessRelationship')} of the Tenant)", _A_VALUE))
 
+    if parties.get("prepared_by_name"):
+        story += [Spacer(1, 18), HRFlowable(width="100%", thickness=0.5, color=BORDER), Spacer(1, 8)]
+        story.append(Paragraph("<font name='Helvetica-Bold'>Prepared By</font>", _A_LABEL))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(parties["prepared_by_name"], _A_VALUE))
+        for line in (parties.get("prepared_by_address"), parties.get("prepared_by_phone"), parties.get("prepared_by_email")):
+            if line:
+                story.append(Paragraph(line, _A_VALUE))
+
     story += brand_footer()
     return build_document(story)
