@@ -74,7 +74,10 @@ PREPARED_BY = {
 
 def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
-    rent = float(tenant.rent_amount or 0)
+    # The tenant's actual periodic obligation is rent + service charge, not
+    # rent alone — matches what's shown everywhere else (billing, dashboard
+    # revenue rollups) as their real payment total.
+    rent = float(tenant.rent_amount or 0) + float(getattr(tenant, "service_charge_amount", 0) or 0)
     caution = float(getattr(unit, "caution_fee", 0) or 0) if unit else 0
     legal = float(getattr(unit, "legal_fee", 0) or 0) if unit else 0
     bedrooms = getattr(unit, "bedrooms", 0) or 0 if unit else 0
