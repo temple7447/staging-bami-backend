@@ -214,3 +214,23 @@ async def get_tenant_agreement(
     if not existing:
         return {"success": True, "signed": False, "data": None}
     return {"success": True, "signed": True, "data": _serialize(existing)}
+
+
+@router.get("/{tenant_id}/agreement/pdf")
+async def download_tenant_agreement(
+    tenant_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Admin/manager download of a tenant's signed agreement PDF — read-only."""
+    tenant = await find_one(db, Tenant, Tenant.id == tenant_id, Tenant.is_active == True)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    await require_tenant_access(db, user, tenant, write=False)
+
+    agreement = await find_one(db, TenancyAgreement, TenancyAgreement.tenant_id == tenant.id)
+    if not agreement:
+        raise HTTPException(status_code=404, detail="This tenant hasn't signed a tenancy agreement yet")
+    pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
+                                       agreement.signature_image, agreement.signed_at,
+                                       registration=agreement.registration)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=tenancy-agreement-{tenant.id}.pdf"})
