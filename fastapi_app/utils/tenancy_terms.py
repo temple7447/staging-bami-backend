@@ -8,6 +8,8 @@ dashboard. Estate owners who need bespoke clauses should treat this as a
 starting point today (a per-estate editor is a natural follow-up, not built
 here)."""
 from utils.sms_service import format_currency as _naira
+from utils.rent_calculator import get_current_rent, resolve_increase_start
+from utils.time_utils import utcnow
 
 
 TERMS_TEMPLATE = [
@@ -72,12 +74,21 @@ PREPARED_BY = {
 }
 
 
-def build_parties(tenant, estate, unit, owner, next_due_date=None) -> dict:
+def build_parties(tenant, estate, unit, owner, next_due_date=None, estate_config=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
-    # The tenant's actual periodic obligation is rent + service charge, not
-    # rent alone — matches what's shown everywhere else (billing, dashboard
-    # revenue rollups) as their real payment total.
-    rent = float(tenant.rent_amount or 0) + float(getattr(tenant, "service_charge_amount", 0) or 0)
+    # The tenant's actual periodic obligation is THIS YEAR's rent + service
+    # charge — not next year's projected renewal total, and not rent alone.
+    # Escalate from base_* (same as process_tenant/dashboard's "this year"
+    # figure) rather than trust rent_amount/service_charge_amount directly,
+    # since those are only refreshed when the rent-increase scheduler runs.
+    _rate, _cycle, _start = estate_config or (None, None, None)
+    _start = resolve_increase_start(tenant, _start)
+    origin = getattr(tenant, "entry_date", None) or getattr(tenant, "created_at", None) or utcnow()
+    rent_base = getattr(tenant, "base_rent", None) or getattr(tenant, "rent_amount", 0) or 0
+    svc_base = getattr(tenant, "base_service_charge", None) or getattr(tenant, "service_charge_amount", 0) or 0
+    current_rent = get_current_rent(rent_base, origin, False, _rate, _cycle, _start)
+    current_service = get_current_rent(svc_base, origin, False, _rate, _cycle, _start) if svc_base else 0
+    rent = float(current_rent) + float(current_service)
     caution = float(getattr(unit, "caution_fee", 0) or 0) if unit else 0
     legal = float(getattr(unit, "legal_fee", 0) or 0) if unit else 0
     bedrooms = getattr(unit, "bedrooms", 0) or 0 if unit else 0

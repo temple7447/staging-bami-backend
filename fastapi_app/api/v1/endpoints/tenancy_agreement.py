@@ -28,6 +28,7 @@ from core.config import settings
 from core.db_helpers import find_one, save
 from core.authz import require_tenant_access
 from utils.tenancy_terms import build_parties, build_terms
+from utils.tenant_helpers import estate_config_for
 from utils.pdf_service import generate_agreement_pdf
 from utils.time_utils import utcnow
 
@@ -67,7 +68,8 @@ async def get_my_agreement(db: AsyncSession = Depends(get_db), user: User = Depe
     estate, unit, owner = await _context_for(db, tenant)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found for this tenancy")
-    parties = build_parties(tenant, estate, unit, owner)
+    estate_config = await estate_config_for(db, estate.id)
+    parties = build_parties(tenant, estate, unit, owner, estate_config=estate_config)
     return {"success": True, "signed": False, "data": {
         "parties": parties, "terms": build_terms(parties), "registration": {},
         "typedName": None, "signatureImage": None, "signedAt": None,
@@ -148,7 +150,8 @@ async def sign_my_agreement(
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found for this tenancy")
 
-    parties = build_parties(tenant, estate, unit, owner)
+    estate_config = await estate_config_for(db, estate.id)
+    parties = build_parties(tenant, estate, unit, owner, estate_config=estate_config)
     registration = {
         "address": body.address.strip(),
         "occupation": body.occupation.strip(),
