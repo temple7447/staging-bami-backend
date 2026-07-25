@@ -21,7 +21,7 @@ from core.authz import require_tenant_access, require_estate_access, accessible_
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
-from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start
+from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start, current_lease_year_start
 from utils.email_service import send_welcome_email
 from utils import sms_service
 from models.base import gen_uuid
@@ -614,11 +614,19 @@ async def get_tenant(
     if corrected:
         tenant.next_due_date = corrected
     renewal_start = project_next_due_date(tenant) or tenant.next_due_date or utcnow()
-    billing_start = renewal_start.replace(year=renewal_start.year - 1)
-    y1_rent = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _rate, _cycle, _start)
-    y1_svc  = calculate_effective_rent(svc_base, billing_start, 12, False, origin, _rate, _cycle, _start)
-    y2_rent = calculate_effective_rent(rent_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
-    y2_svc  = calculate_effective_rent(svc_base, renewal_start, 12, False, origin, _rate, _cycle, _start)
+
+    # The Year 1/Year 2 breakdown cards track the real calendar lease-year —
+    # not the arrears-frozen renewal_start above (kept as-is for next_due /
+    # lease_months, since that deliberately freezes to preserve overdue
+    # tracking). A tenant who hasn't paid up yet should still see themselves
+    # in the correct current year, with arrears surfaced separately.
+    yb_billing_start = current_lease_year_start(origin, utcnow())
+    yb_renewal_start = yb_billing_start.replace(year=yb_billing_start.year + 1)
+    yb_year_number = yb_billing_start.year - origin.year + 1
+    y1_rent = calculate_effective_rent(rent_base, yb_billing_start, 12, False, origin, _rate, _cycle, _start)
+    y1_svc  = calculate_effective_rent(svc_base, yb_billing_start, 12, False, origin, _rate, _cycle, _start)
+    y2_rent = calculate_effective_rent(rent_base, yb_renewal_start, 12, False, origin, _rate, _cycle, _start)
+    y2_svc  = calculate_effective_rent(svc_base, yb_renewal_start, 12, False, origin, _rate, _cycle, _start)
     ref_date = tenant.entry_date or tenant.created_at
     if ref_date:
         # next-due is the last day of the paid period, so count months to the day after
@@ -655,13 +663,15 @@ async def get_tenant(
         "outstanding_period_end": tenant.outstanding_period_end,
         "outstanding_due_date": tenant.outstanding_due_date,
         "yearly_breakdown": {
-            "year1": {"label": "Current Year", "billing_start": billing_start, "billing_end": renewal_start,
+            "year1": {"label": "Current Year", "year_number": yb_year_number,
+                      "billing_start": yb_billing_start, "billing_end": yb_renewal_start,
                       "annual_rent": y1_rent["total_amount"], "annual_service_charge": y1_svc["total_amount"],
                       "monthly_rent": y1_rent["final_rent"], "monthly_service": y1_svc["final_rent"],
                       "one_time_fees": final_caution + final_legal,
                       "total": y1_rent["total_amount"] + y1_svc["total_amount"] + final_caution + final_legal},
-            "year2": {"label": "Renewal Year", "billing_start": renewal_start,
-                      "billing_end": renewal_start.replace(year=renewal_start.year + 1),
+            "year2": {"label": "Renewal Year", "year_number": yb_year_number + 1,
+                      "billing_start": yb_renewal_start,
+                      "billing_end": yb_renewal_start.replace(year=yb_renewal_start.year + 1),
                       "annual_rent": y2_rent["total_amount"], "annual_service_charge": y2_svc["total_amount"],
                       "monthly_rent": y2_rent["final_rent"], "monthly_service": y2_svc["final_rent"],
                       "total": y2_rent["total_amount"] + y2_svc["total_amount"],

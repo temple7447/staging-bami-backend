@@ -106,3 +106,32 @@ def get_current_rent(
     now    = datetime.now(timezone.utc).replace(tzinfo=None)
     anchor = _to_dt(increase_start) if increase_start else _to_dt(origin_date)
     return round(base_amount * (r ** _cycles_at(now, anchor, cy)))
+
+
+def current_lease_year_start(entry_date: datetime, now: datetime = None) -> datetime:
+    """The most recent annual anniversary of `entry_date` that has already
+    passed (i.e. the start of the 12-month window the tenancy is actually
+    living in right now), regardless of payment/arrears status.
+
+    Deliberately distinct from project_next_due_date, which freezes on an
+    overdue date on purpose to preserve arrears tracking for billing. This
+    is purely "which calendar year of the tenancy are we in" — for display
+    of the current/upcoming rent-year windows (annual payment summaries,
+    tenancy-agreement rent figures), which should track real time even for
+    a tenant who hasn't paid up yet."""
+    if now is None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+    entry = _to_dt(entry_date)
+
+    def _shift(years: int) -> datetime:
+        try:
+            return entry.replace(year=entry.year + years)
+        except ValueError:
+            # entry was Feb 29 and the target year isn't a leap year
+            return entry.replace(year=entry.year + years, day=28)
+
+    years_diff = now.year - entry.year
+    candidate = _shift(years_diff)
+    if candidate > now:
+        candidate = _shift(years_diff - 1)
+    return candidate

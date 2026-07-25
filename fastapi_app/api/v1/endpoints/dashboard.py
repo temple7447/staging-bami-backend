@@ -14,7 +14,7 @@ from core.security import get_current_user
 from core.database import get_db
 from core.db_helpers import find_one, find_all, count, sum_col
 from utils.tenant_helpers import project_next_due_date, estate_config_for
-from utils.rent_calculator import calculate_effective_rent, get_current_rent, resolve_increase_start
+from utils.rent_calculator import calculate_effective_rent, get_current_rent, resolve_increase_start, current_lease_year_start
 from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -119,8 +119,12 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         origin = tenant.entry_date
         rent_base = tenant.base_rent or tenant.rent_amount
         svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
-        renewal_start = projected_due
-        billing_start = renewal_start.replace(year=renewal_start.year - 1)
+        # The "this year / next year renewal" window tracks the real calendar
+        # lease-year, not the arrears-frozen next_due_date — a tenant who
+        # hasn't paid up yet should still see themselves in the correct
+        # current year, with arrears surfaced separately via outstanding_*.
+        billing_start = current_lease_year_start(origin, now)
+        renewal_start = billing_start.replace(year=billing_start.year + 1)
         _r, _c, _s = await estate_config_for(db, tenant.estate)
         _s = resolve_increase_start(tenant, _s)          # tenant override wins over estate
         cy_rent_proj = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
