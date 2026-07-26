@@ -155,13 +155,13 @@ async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depend
 
 @router.post("/reset-password")
 async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    user = await find_one(db, User, User.password_reset_token == body.token)
+    user = await find_one(db, User, User.password_reset_token == body.otp)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     if user.password_reset_expire and user.password_reset_expire < utcnow():
         raise HTTPException(status_code=400, detail="Reset token has expired")
 
-    user.password = hash_password(body.new_password)
+    user.password = hash_password(body.password)
     user.password_reset_token = None
     user.password_reset_expire = None
     user.updated_at = utcnow()
