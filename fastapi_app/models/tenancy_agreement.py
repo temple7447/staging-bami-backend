@@ -31,5 +31,13 @@ class TenancyAgreement(Base):
     typed_name: Mapped[str] = mapped_column(String(255))
     signature_image: Mapped[str | None] = mapped_column(Text, nullable=True)  # base64 PNG data URI
 
+    # Admin review: pending until an admin/manager acts on it. A rejection is
+    # not final — the tenant may fix and resubmit, which updates this same
+    # row in place (see sign_my_agreement) and resets status to "pending".
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     signed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
