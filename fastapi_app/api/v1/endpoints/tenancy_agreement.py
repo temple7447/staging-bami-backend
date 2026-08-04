@@ -66,6 +66,8 @@ def _serialize(a: TenancyAgreement) -> dict:
         "rejectionReason": a.rejection_reason,
         "reviewedBy": a.reviewed_by,
         "reviewedAt": a.reviewed_at.isoformat() if a.reviewed_at else None,
+        "lawyerTypedName": a.lawyer_typed_name,
+        "lawyerSignatureImage": a.lawyer_signature_image,
     }
 
 
@@ -353,6 +355,8 @@ async def list_agreements(
 class ReviewAgreementBody(BaseModel):
     status: str  # "approved" | "rejected"
     reason: Optional[str] = None
+    lawyerTypedName: Optional[str] = None
+    lawyerSignatureImage: Optional[str] = None
 
 
 @list_router.patch("/{agreement_id}/status")
@@ -376,6 +380,10 @@ async def review_agreement(
     if new_status == "rejected" and not reason:
         raise HTTPException(status_code=400, detail="A reason is required to reject an agreement")
 
+    lawyer_name = (body.lawyerTypedName or "").strip()
+    if new_status == "approved" and not lawyer_name:
+        raise HTTPException(status_code=400, detail="A signature is required to approve an agreement")
+
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
@@ -388,6 +396,9 @@ async def review_agreement(
     agreement.rejection_reason = reason if new_status == "rejected" else None
     agreement.reviewed_by = user.id
     agreement.reviewed_at = utcnow()
+    if new_status == "approved":
+        agreement.lawyer_typed_name = lawyer_name
+        agreement.lawyer_signature_image = body.lawyerSignatureImage
     await save(db, agreement)
 
     return {"success": True, "data": _serialize(agreement)}

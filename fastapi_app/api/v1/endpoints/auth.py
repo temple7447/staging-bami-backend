@@ -32,6 +32,7 @@ def _user_dict(user: User) -> dict:
         "is_active":        user.is_active,
         "email_verified":   user.email_verified,
         "profile_image_url": user.profile_image_url,
+        "agreement_signed_at": user.agreement_signed_at,
     }
 
 
@@ -134,6 +135,32 @@ async def update_password(
     current_user.updated_at = utcnow()
     await save(db, current_user)
     return {"success": True, "message": "Password updated successfully"}
+
+
+_SIGN_REQUIRED_ROLES = {"business_owner", "manager", "super_manager", "vendor", "super_vendor"}
+
+
+@router.post("/me/sign-agreement", status_code=status.HTTP_201_CREATED)
+async def sign_my_agreement(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role not in _SIGN_REQUIRED_ROLES:
+        raise HTTPException(status_code=400, detail="Not applicable to your account type")
+    if current_user.agreement_signed_at:
+        raise HTTPException(status_code=400, detail="You have already signed")
+
+    typed_name = (body.get("typedName") or "").strip()
+    if not typed_name:
+        raise HTTPException(status_code=400, detail="Type your full name to sign")
+
+    current_user.agreement_signed_at = utcnow()
+    current_user.agreement_typed_name = typed_name
+    current_user.agreement_signature_image = body.get("signatureImage")
+    current_user.updated_at = utcnow()
+    await save(db, current_user)
+    return {"success": True, "user": _user_dict(current_user)}
 
 
 @router.post("/forgot-password")
@@ -494,3 +521,187 @@ async def resend_manager_credentials(
     if not result.get("success"):
         raise HTTPException(status_code=502, detail="Password reset but the email could not be sent. Please try again.")
     return {"success": True, "message": f"Login credentials sent to {manager.email}"}
+
+
+# ── Vendor management (super_admin only) ──────────────────────────────────────
+# A vendor reports to a manager (user.manager); their business-profile columns
+# already exist on User (added for the earlier CRM-style vendor concept).
+
+async def _serialize_vendor(db: AsyncSession, u: User) -> dict:
+    creator = None
+    if u.created_by:
+        c = await db.get(User, u.created_by)
+        if c:
+            creator = {"_id": c.id, "name": c.name, "email": c.email}
+    return {
+        "_id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "role": u.role, "position": u.position, "managerId": u.manager,
+        "businessTypeId": u.business_type_id, "businessName": u.business_name,
+        "specialization": u.specialization, "bio": u.bio,
+        "cacNumber": u.cac_number, "govId": u.gov_id, "certification": u.certification,
+        "businessAddress": u.business_address, "portfolio": u.portfolio or [],
+        "isVerifiedPro": u.is_verified_pro,
+        "isActive": u.is_active, "emailVerified": u.email_verified,
+        "lastLogin": u.last_login, "createdBy": creator,
+        "createdAt": u.created_at, "updatedAt": u.updated_at,
+    }
+
+
+async def _get_vendor_or_404(db: AsyncSession, vendor_id: str) -> User:
+    u = await find_one(db, User, User.id == vendor_id, User.role == "vendor")
+    if not u:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return u
+
+
+@router.post("/onboard-vendor", status_code=status.HTTP_201_CREATED)
+async def onboard_vendor(
+    body: dict, db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    name  = (body.get("name") or "").strip()
+    email = (body.get("email") or "").strip().lower()
+    phone = (body.get("phone") or "").strip()
+    position = (body.get("position") or "").strip() or None
+    manager_id = body.get("managerId") or None
+    business_type_id = body.get("businessTypeId") or None
+    send_creds = body.get("sendCredentials", True)
+
+    if not name or not email:
+        raise HTTPException(status_code=400, detail="Name and email are required")
+    if await find_one(db, User, func.lower(User.email) == email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+    if manager_id and not await find_one(db, User, User.id == manager_id, User.role == "manager"):
+        raise HTTPException(status_code=400, detail="Selected manager was not found")
+
+    password = generate_temp_password(8)
+    vendor = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
+                  position=position, manager=manager_id, business_type_id=business_type_id,
+                  password=hash_password(password), role="vendor",
+                  created_by=actor.id, email_verified=True)
+    await save(db, vendor)
+    await save(db, Wallet(id=gen_uuid(), user_id=vendor.id, balance=0, currency="NGN"))
+
+    if send_creds:
+        await send_welcome_email(email, name, password, phone=phone)
+
+    return {"success": True, "message": "Vendor onboarded successfully",
+            "data": await _serialize_vendor(db, vendor)}
+
+
+@router.get("/vendors")
+async def list_vendors(
+    db: AsyncSession = Depends(get_db), actor: User = Depends(require_super_admin),
+):
+    vendors = await find_all(db, User, User.role == "vendor",
+                             order_by=User.created_at.desc())
+    data = [await _serialize_vendor(db, u) for u in vendors]
+    return {"success": True, "count": len(data), "data": data}
+
+
+@router.put("/vendor/{vendor_id}")
+async def update_vendor(
+    vendor_id: str, body: dict, db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    if body.get("name"):
+        vendor.name = body["name"].strip()
+    if body.get("phone") is not None:
+        vendor.phone = (body["phone"] or "").strip() or None
+    if body.get("email"):
+        new_email = body["email"].strip().lower()
+        if new_email != (vendor.email or "").lower():
+            if await find_one(db, User, func.lower(User.email) == new_email, User.id != vendor.id):
+                raise HTTPException(status_code=409, detail="Another account already uses this email")
+            vendor.email = new_email
+    if body.get("managerId") is not None:
+        manager_id = body["managerId"] or None
+        if manager_id and not await find_one(db, User, User.id == manager_id, User.role == "manager"):
+            raise HTTPException(status_code=400, detail="Selected manager was not found")
+        vendor.manager = manager_id
+    for key, col in (
+        ("businessTypeId", "business_type_id"), ("businessName", "business_name"),
+        ("specialization", "specialization"), ("bio", "bio"),
+        ("cacNumber", "cac_number"), ("govId", "gov_id"),
+        ("certification", "certification"), ("businessAddress", "business_address"),
+    ):
+        if body.get(key) is not None:
+            setattr(vendor, col, (body[key] or "").strip() or None)
+    if body.get("isVerifiedPro") is not None:
+        vendor.is_verified_pro = bool(body["isVerifiedPro"])
+    if body.get("portfolio") is not None:
+        vendor.portfolio = body["portfolio"] or []
+    vendor.updated_at = utcnow()
+    await save(db, vendor)
+    return {"success": True, "message": "Vendor updated successfully",
+            "data": await _serialize_vendor(db, vendor)}
+
+
+@router.put("/vendor/{vendor_id}/status")
+async def set_vendor_status(
+    vendor_id: str, body: dict, db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    vendor.is_active = bool(body.get("isActive"))
+    vendor.updated_at = utcnow()
+    await save(db, vendor)
+    return {"success": True,
+            "message": f"Vendor {'activated' if vendor.is_active else 'deactivated'} successfully",
+            "data": await _serialize_vendor(db, vendor)}
+
+
+@router.delete("/vendor/{vendor_id}")
+async def delete_vendor(
+    vendor_id: str, db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    wallet = await find_one(db, Wallet, Wallet.user_id == vendor.id)
+    if wallet:
+        await db.delete(wallet)
+    await db.delete(vendor)
+    await db.commit()
+    return {"success": True, "message": "Vendor removed successfully"}
+
+
+@router.post("/vendor/{vendor_id}/resend-credentials")
+async def resend_vendor_credentials(
+    vendor_id: str, db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+):
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    password = generate_temp_password(8)
+    vendor.password = hash_password(password)
+    vendor.is_active = True
+    vendor.updated_at = utcnow()
+    await save(db, vendor)
+    result = await send_welcome_email(vendor.email, vendor.name or "Vendor", password, phone=vendor.phone or "")
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail="Password reset but the email could not be sent. Please try again.")
+    return {"success": True, "message": f"Login credentials sent to {vendor.email}"}
+
+
+@router.get("/public/vendors")
+async def list_public_vendors(search: str | None = None, db: AsyncSession = Depends(get_db)):
+    conds = [User.role == "vendor", User.is_active == True]
+    vendors = await find_all(db, User, *conds, order_by=User.created_at.desc())
+    if search:
+        needle = search.strip().lower()
+        vendors = [
+            v for v in vendors
+            if needle in (v.name or "").lower()
+            or needle in (v.business_name or "").lower()
+            or needle in (v.specialization or "").lower()
+        ]
+    data = [await _serialize_vendor(db, v) for v in vendors]
+    return {"success": True, "count": len(data), "data": data}
+
+
+@router.get("/public/vendors/{vendor_id}")
+async def get_public_vendor(vendor_id: str, db: AsyncSession = Depends(get_db)):
+    vendor = await find_one(db, User, User.id == vendor_id, User.role == "vendor", User.is_active == True)
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"success": True, "data": await _serialize_vendor(db, vendor)}

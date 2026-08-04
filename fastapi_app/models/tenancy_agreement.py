@@ -39,5 +39,9 @@ class TenancyAgreement(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Captured at the moment an admin/lawyer approves the agreement.
+    lawyer_typed_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lawyer_signature_image: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     signed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
