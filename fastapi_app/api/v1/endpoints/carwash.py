@@ -104,6 +104,11 @@ def _status_event(e: CarWashStatusEvent) -> dict:
             "note": e.note, "actor_id": e.actor_id, "at": e.at}
 
 
+def _order_item(i: CarWashOrderItem) -> dict:
+    return {"id": i.id, "order_id": i.order_id, "addon_id": i.addon_id,
+            "name": i.name, "price": i.price, "created_at": i.created_at}
+
+
 def _qr(q: CarWashQrPayment) -> dict:
     return {
         "id": q.id, "order_id": q.order_id, "amount": q.amount,
@@ -820,7 +825,9 @@ async def get_order(
     await _require_order_access(db, user, order)
     events = await find_all(db, CarWashStatusEvent, CarWashStatusEvent.order_id == order_id,
                             order_by=CarWashStatusEvent.at.asc())
-    return {"success": True, "data": {**_order(order), "timeline": [_status_event(e) for e in events]}}
+    items = await find_all(db, CarWashOrderItem, CarWashOrderItem.order_id == order_id)
+    return {"success": True, "data": {**_order(order), "timeline": [_status_event(e) for e in events],
+                                      "items": [_order_item(i) for i in items]}}
 
 
 class OrderStatusUpdate(BaseModel):
