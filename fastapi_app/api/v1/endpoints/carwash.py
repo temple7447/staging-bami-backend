@@ -806,7 +806,21 @@ async def list_station_orders(
     skip = (page - 1) * limit
     total = await count(db, CarWashOrder, *conditions)
     items = await find_all(db, CarWashOrder, *conditions, order_by=CarWashOrder.created_at.asc(), skip=skip, limit=limit)
-    return {"success": True, "count": len(items), "total": total, "data": [_order(o) for o in items]}
+
+    # Denormalized display fields for the staff queue screen (mobile + web) —
+    # small enough scale for a single station that per-row lookups are fine.
+    data = []
+    for o in items:
+        customer = await db.get(User, o.user_id)
+        vehicle = await db.get(CarWashVehicle, o.vehicle_id)
+        service = await db.get(CarWashService, o.service_id)
+        data.append({
+            **_order(o),
+            "customer_name": customer.name if customer else None,
+            "vehicle_label": f"{vehicle.make} {vehicle.model} · {vehicle.plate}" if vehicle else None,
+            "service_name": service.name if service else None,
+        })
+    return {"success": True, "count": len(items), "total": total, "data": data}
 
 
 async def _require_order_access(db: AsyncSession, user: User, order: CarWashOrder, min_role: str = "staff"):
@@ -929,9 +943,11 @@ async def issue_order_qr(
                           expires_at=expires_at, status="issued", staff_id=user.id)
     await save(db, qr)
 
+    # order ref + staff name are embedded so the customer's app can show
+    # "Pay ₦X to Bami-Wash" straight off the decoded token, no extra round trip.
     token = jwt.encode(
-        {"typ": _QR_TYP, "order_id": order_id, "qr_id": qr.id, "amount": order.total,
-         "jti": nonce, "exp": expires_at},
+        {"typ": _QR_TYP, "order_id": order_id, "order_ref": order.ref, "qr_id": qr.id,
+         "amount": order.total, "staff_name": user.name, "jti": nonce, "exp": expires_at},
         settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM,
     )
     return {"success": True, "data": {"qrToken": token, "qrId": qr.id, "amount": order.total,

@@ -196,6 +196,13 @@ async def record_bank_deposit(
                      "submittedAt": dep.created_at}}
 
 
+# Bank-deposit review is also delegated to car-wash staff (role="wash_staff")
+# — unlike the rest of this file's admin-only endpoints, confirming a wallet
+# top-up landed is a normal day-to-day task for whoever's running the floor,
+# not a platform-admin action. Scoped to just these three endpoints.
+_DEPOSIT_REVIEW_ROLES = ADMIN_ROLES | {"wash_staff"}
+
+
 @router.get("/bank-deposits")
 async def list_bank_deposits(
     status: Optional[str] = None,
@@ -203,7 +210,7 @@ async def list_bank_deposits(
     limit: int = 20,
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
+    if user.role not in _DEPOSIT_REVIEW_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
     conditions = [BankDeposit.is_active == True]
     if status:
@@ -236,7 +243,7 @@ async def approve_bank_deposit(
     dep_id: str, body: dict = {},
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
+    if user.role not in _DEPOSIT_REVIEW_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
     dep = await find_one(db, BankDeposit, BankDeposit.id == dep_id)
     if not dep:
@@ -277,7 +284,7 @@ async def reject_bank_deposit(
     dep_id: str, body: dict = {},
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    if user.role not in ADMIN_ROLES:
+    if user.role not in _DEPOSIT_REVIEW_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
     dep = await find_one(db, BankDeposit, BankDeposit.id == dep_id)
     if not dep:
@@ -305,7 +312,7 @@ def _dep(i: BankDeposit, submitter: Optional[User] = None) -> dict:
             "proof_image_url": proof_url,
             "submitted_by": i.submitted_by, "approved_by": i.approved_by,
             "user": ({"_id": submitter.id, "id": submitter.id,
-                      "name": submitter.name, "email": submitter.email}
+                      "name": submitter.name, "email": submitter.email, "phone": submitter.phone}
                      if submitter else None),
             "created_at": i.created_at, "updated_at": i.updated_at}
 
