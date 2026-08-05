@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib, secrets, random, re
 
 from models.user import User
 from models.wallet import Wallet
 from models.estate import Estate
+from models.phone_otp import PhoneOtp
+from utils import sms_service
 from schemas.auth import (
     RegisterRequest, LoginRequest, TokenResponse,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
@@ -161,6 +163,84 @@ async def sign_my_agreement(
     current_user.updated_at = utcnow()
     await save(db, current_user)
     return {"success": True, "user": _user_dict(current_user)}
+
+
+# ── Phone OTP (Bami-Wash) ──────────────────────────────────────────────────────
+# Customer-facing phone sign-in/sign-up for the car-wash app. Distinct from the
+# email/password flow above — a phone-only account gets a synthetic unique
+# email (User.email is NOT NULL UNIQUE) that's never used for contact/login.
+
+_STAFF_ROLE_HINTS = {"wash_staff", "business_owner", "manager", "super_manager", "admin", "super_admin"}
+
+
+def _phone_user_dict(user: User) -> dict:
+    return {
+        "id": user.id,
+        "phone": user.phone,
+        "name": user.name,
+        "role": "staff" if user.role in _STAFF_ROLE_HINTS else "customer",
+        "created_at": user.created_at,
+    }
+
+
+@router.post("/phone/send-otp", status_code=status.HTTP_201_CREATED)
+async def send_phone_otp(body: dict, db: AsyncSession = Depends(get_db)):
+    phone = (body.get("phone") or "").strip()
+    if not re.match(r"^\+?\d{10,15}$", phone):
+        raise HTTPException(status_code=400, detail="Enter a valid phone number")
+
+    code = f"{random.randint(0, 999999):06d}"
+    request_id = gen_uuid()
+    expires_at = utcnow() + timedelta(minutes=10)
+    otp = PhoneOtp(id=gen_uuid(), request_id=request_id, phone=phone,
+                   code_hash=hash_password(code), expires_at=expires_at)
+    await save(db, otp)
+
+    message = f"Your Bami-Wash verification code is {code}. It expires in 10 minutes."
+    result = await sms_service.send_sms(phone, message)
+    if not result.get("success"):
+        raise HTTPException(status_code=502, detail="Couldn't send the verification code. Please try again.")
+
+    return {"success": True, "requestId": request_id, "expiresAt": expires_at}
+
+
+@router.post("/phone/verify-otp", status_code=status.HTTP_201_CREATED)
+async def verify_phone_otp(body: dict, db: AsyncSession = Depends(get_db)):
+    request_id = (body.get("requestId") or "").strip()
+    code = (body.get("code") or "").strip()
+    name = (body.get("name") or "").strip() or None
+
+    otp = await find_one(db, PhoneOtp, PhoneOtp.request_id == request_id, PhoneOtp.consumed == False)
+    if not otp:
+        raise HTTPException(status_code=400, detail="This code has expired. Request a new one.")
+    if otp.expires_at < utcnow():
+        raise HTTPException(status_code=400, detail="This code has expired. Request a new one.")
+    if not verify_password(code, otp.code_hash):
+        raise HTTPException(status_code=400, detail="That code does not match. Please try again.")
+
+    # Only mark the code consumed once every other precondition is satisfied —
+    # a new-signup request missing `name` must NOT burn the code, or the
+    # customer's next (correct) retry finds nothing left to verify against.
+    user = await find_one(db, User, User.phone == otp.phone)
+    if not user and not name:
+        raise HTTPException(status_code=400, detail="Tell us your name to finish setting up.")
+
+    otp.consumed = True
+    await save(db, otp)
+
+    if not user:
+        placeholder_email = f"{re.sub(r'[^0-9]', '', otp.phone)}@phone.bamiwash.internal"
+        user = User(id=gen_uuid(), name=name, phone=otp.phone, email=placeholder_email,
+                    password=hash_password(secrets.token_urlsafe(24)),
+                    role="wash_customer", email_verified=True)
+        await save(db, user)
+        await save(db, Wallet(id=gen_uuid(), user_id=user.id, balance=0, currency="NGN"))
+
+    user.last_login = utcnow()
+    await save(db, user)
+
+    token = create_access_token(user.id, user.role)
+    return {"success": True, "token": token, "user": _phone_user_dict(user)}
 
 
 @router.post("/forgot-password")

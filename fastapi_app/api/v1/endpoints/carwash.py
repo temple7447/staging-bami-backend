@@ -66,7 +66,7 @@ def _station(s: CarWashStation, user: Optional[User] = None) -> dict:
 def _vehicle(v: CarWashVehicle) -> dict:
     return {
         "id": v.id, "user_id": v.user_id, "make": v.make, "model": v.model,
-        "year": v.year, "color": v.color, "plate": v.plate,
+        "year": v.year, "color": v.color, "plate": v.plate, "is_default": v.is_default,
         "is_active": v.is_active, "created_at": v.created_at, "updated_at": v.updated_at,
     }
 
@@ -90,10 +90,10 @@ def _addon(a: CarWashAddon) -> dict:
 
 def _order(o: CarWashOrder) -> dict:
     return {
-        "id": o.id, "station_id": o.station_id, "user_id": o.user_id,
+        "id": o.id, "ref": o.ref, "station_id": o.station_id, "user_id": o.user_id,
         "vehicle_id": o.vehicle_id, "service_id": o.service_id, "status": o.status,
         "total": o.total, "scheduled_at": o.scheduled_at, "queued_at": o.queued_at,
-        "slot_start": o.slot_start, "staff_id": o.staff_id,
+        "slot_start": o.slot_start, "paid_at": o.paid_at, "staff_id": o.staff_id,
         "cancelled_reason": o.cancelled_reason,
         "created_at": o.created_at, "updated_at": o.updated_at,
     }
@@ -611,6 +611,7 @@ class VehicleCreate(BaseModel):
     year: Optional[int] = None
     color: Optional[str] = None
     plate: str
+    is_default: Optional[bool] = None
 
 
 class VehicleUpdate(BaseModel):
@@ -619,6 +620,16 @@ class VehicleUpdate(BaseModel):
     year: Optional[int] = None
     color: Optional[str] = None
     plate: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+async def _clear_other_defaults(db: AsyncSession, user_id: str, except_id: str) -> None:
+    others = await find_all(db, CarWashVehicle, CarWashVehicle.user_id == user_id,
+                            CarWashVehicle.is_active == True, CarWashVehicle.id != except_id,
+                            CarWashVehicle.is_default == True)
+    for v in others:
+        v.is_default = False
+        await save(db, v)
 
 
 @router.get("/vehicles/my")
@@ -637,8 +648,15 @@ async def create_vehicle(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    vehicle = CarWashVehicle(id=gen_uuid(), user_id=user.id, **body.model_dump())
+    existing_count = await count(db, CarWashVehicle, CarWashVehicle.user_id == user.id,
+                                 CarWashVehicle.is_active == True)
+    data = body.model_dump()
+    is_default = data.pop("is_default", None)
+    is_default = True if existing_count == 0 else bool(is_default)
+    vehicle = CarWashVehicle(id=gen_uuid(), user_id=user.id, is_default=is_default, **data)
     await save(db, vehicle)
+    if is_default:
+        await _clear_other_defaults(db, user.id, vehicle.id)
     return {"success": True, "data": _vehicle(vehicle)}
 
 
@@ -675,6 +693,8 @@ async def update_vehicle(
         setattr(vehicle, k, v)
     vehicle.updated_at = utcnow()
     await save(db, vehicle)
+    if body.is_default:
+        await _clear_other_defaults(db, user.id, vehicle.id)
     return {"success": True, "data": _vehicle(vehicle)}
 
 
@@ -728,8 +748,9 @@ async def create_order(
     total = service.base_price + sum(a.price for a in addons)
     now = utcnow()
     status = "scheduled" if body.scheduled_at else "queued"
+    order_id = gen_uuid()
     order = CarWashOrder(
-        id=gen_uuid(), station_id=body.station_id, user_id=user.id,
+        id=order_id, ref=f"BW-{order_id[:8].upper()}", station_id=body.station_id, user_id=user.id,
         vehicle_id=body.vehicle_id, service_id=body.service_id, status=status,
         total=total, scheduled_at=body.scheduled_at,
         queued_at=(None if body.scheduled_at else now),
@@ -992,6 +1013,10 @@ async def scan_qr(
     qr.status = "paid"
     qr.paid_at = utcnow()
     await save(db, qr)
+
+    order.paid_at = qr.paid_at
+    order.updated_at = utcnow()
+    await save(db, order)
 
     return {"success": True, "message": "Payment successful",
             "data": {"amountPaid": qr.amount, "newWalletBalance": wallet.balance, "transactionId": tx.id}}

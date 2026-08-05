@@ -40,6 +40,7 @@ class CarWashVehicle(Base):
     year: Mapped[int | None] = mapped_column(Integer, nullable=True)
     color: Mapped[str | None] = mapped_column(String(50), nullable=True)
     plate: Mapped[str] = mapped_column(String(20), index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -83,6 +84,7 @@ class CarWashOrder(Base):
     __tablename__ = "car_wash_orders"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
+    ref: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     station_id: Mapped[str] = mapped_column(String(36), index=True)
     user_id: Mapped[str] = mapped_column(String(36), index=True)
     vehicle_id: Mapped[str] = mapped_column(String(36), index=True)
@@ -92,6 +94,7 @@ class CarWashOrder(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     queued_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     slot_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     staff_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     cancelled_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
