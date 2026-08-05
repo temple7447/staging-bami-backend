@@ -137,7 +137,7 @@ async def update_password(
     return {"success": True, "message": "Password updated successfully"}
 
 
-_SIGN_REQUIRED_ROLES = {"business_owner", "manager", "super_manager", "vendor", "super_vendor"}
+_SIGN_REQUIRED_ROLES = {"business_owner", "manager", "super_manager", "vendor", "super_vendor", "super_admin", "admin"}
 
 
 @router.post("/me/sign-agreement", status_code=status.HTTP_201_CREATED)
