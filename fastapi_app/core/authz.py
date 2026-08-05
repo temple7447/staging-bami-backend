@@ -18,6 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from models.estate import Estate
+from models.carwash import CarWashStation
 
 
 # ── Per-property roles ────────────────────────────────────────────────────────
@@ -126,3 +127,71 @@ async def require_tenant_access(db, user, tenant, write: bool = False):
     if not write and tenant.user and tenant.user == user.id:
         return
     await require_estate_access(db, user, tenant.estate, "manager" if write else "viewer")
+
+
+# ── Car-wash station roles ────────────────────────────────────────────────────
+# Each station has a team (CarWashStation.members) of {user_id, email, role}.
+# The station owner is the implicit "admin". Only two ranks — car wash has no
+# read-only "viewer" concept (unlike Estate's external accountants/viewers):
+#   admin → station settings, services/pricing, staff, delete
+#   staff → day-to-day ops (orders, QR issue, support tickets)
+STATION_ROLES = ("staff", "admin")
+_STATION_RANK = {r: i for i, r in enumerate(STATION_ROLES)}  # staff=0 < admin=1
+
+
+def station_role(station, user) -> str | None:
+    """The caller's effective role on THIS station, or None if they have no access."""
+    if is_platform_admin(user):
+        return "admin"
+    if station.owner and station.owner == user.id:
+        return "admin"
+    for m in (station.members or []):
+        if isinstance(m, dict) and m.get("user_id") == user.id:
+            role = m.get("role")
+            return role if role in _STATION_RANK else "staff"
+    return None
+
+
+def has_station_role(station, user, min_role: str) -> bool:
+    role = station_role(station, user)
+    return role is not None and _STATION_RANK[role] >= _STATION_RANK[min_role]
+
+
+async def require_station_role(db, user, station_id, min_role: str = "staff"):
+    """Gate a station-scoped action by the caller's role on that station.
+    Out-of-scope / insufficient-role both surface as 404 so ids can't be probed."""
+    station = await db.get(CarWashStation, station_id)
+    if not station or not station.is_active:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not has_station_role(station, user, min_role):
+        if station_role(station, user) is not None:
+            raise HTTPException(status_code=403, detail="You do not have permission to do this")
+        raise HTTPException(status_code=404, detail="Not found")
+    return station
+
+
+async def accessible_station_ids(db, user) -> set | None:
+    """Station ids the user may act on; None means unrestricted (platform admin)."""
+    if is_platform_admin(user):
+        return None
+
+    ids: set = set()
+    owned = await db.execute(
+        select(CarWashStation.id).where(CarWashStation.is_active == True, CarWashStation.owner == user.id)
+    )
+    ids.update(r[0] for r in owned.all())
+
+    member_rows = await db.execute(
+        select(CarWashStation.id, CarWashStation.members).where(CarWashStation.is_active == True)
+    )
+    for sid, members in member_rows.all():
+        if any(isinstance(m, dict) and m.get("user_id") == user.id for m in (members or [])):
+            ids.add(sid)
+
+    return ids
+
+
+async def require_station_access(db, user, station_id, min_role: str = "staff"):
+    """Gate station-scoped access by the caller's role. Default `staff` = any
+    team member may read/operate; pass `admin` for settings/staff/delete."""
+    await require_station_role(db, user, station_id, min_role)
