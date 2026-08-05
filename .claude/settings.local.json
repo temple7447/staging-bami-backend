@@ -62,5 +62,20 @@
     "additionalDirectories": [
       "/Users/temple/Documents/Bami/BamiHustle-frontend/src/components/dashboard/business/tenant-detail"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/temple/Documents/Bami/BamiHustle-backend/.claude/hooks/notify-push.py",
+            "if": "Bash(git push*)",
+            "timeout": 25
+          }
+        ]
+      }
+    ]
   }
 }
