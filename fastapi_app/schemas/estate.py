@@ -30,3 +30,11 @@ class EstateUpdate(BaseModel):
     rent_increase_percent:     Optional[float] = None
     rent_increase_cycle_years: Optional[int] = None
     rent_increase_start:       Optional[datetime] = None
+
+
+class EstateTenancyTermsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    # Full replacement of this estate's tenancy-agreement clauses. An empty
+    # list resets the estate back to the platform default template.
+    terms: list[str]

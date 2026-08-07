@@ -91,7 +91,7 @@ async def get_my_agreement(db: AsyncSession = Depends(get_db), user: User = Depe
     estate_config = await estate_config_for(db, estate.id)
     parties = build_parties(tenant, estate, unit, owner, estate_config=estate_config)
     return {"success": True, "signed": False, "status": None, "data": {
-        "parties": parties, "terms": build_terms(parties), "registration": {},
+        "parties": parties, "terms": build_terms(parties, estate.tenancy_terms), "registration": {},
         "typedName": None, "signatureImage": None, "signedAt": None,
     }}
 
@@ -201,7 +201,7 @@ async def sign_my_agreement(
         # unique tenant_id constraint means there's never more than one row
         # per tenant) and put it back in the review queue.
         existing.parties = parties
-        existing.terms = build_terms(parties)
+        existing.terms = build_terms(parties, estate.tenancy_terms)
         existing.registration = registration
         existing.typed_name = typed_name
         existing.signature_image = body.signatureImage
@@ -214,7 +214,7 @@ async def sign_my_agreement(
     else:
         agreement = TenancyAgreement(
             id=gen_uuid(), tenant_id=tenant.id, estate_id=estate.id, owner_id=estate.owner or "",
-            parties=parties, terms=build_terms(parties), registration=registration,
+            parties=parties, terms=build_terms(parties, estate.tenancy_terms), registration=registration,
             typed_name=typed_name, signature_image=body.signatureImage,
             signed_at=utcnow(),
         )

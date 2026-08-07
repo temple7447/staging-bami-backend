@@ -11,7 +11,7 @@ from models.unit import Unit
 from models.transaction import Transaction
 from models.payment import Payment
 from models.user import User
-from schemas.estate import EstateCreate, EstateUpdate
+from schemas.estate import EstateCreate, EstateUpdate, EstateTenancyTermsUpdate
 from schemas.tenant import TenantCreate, TenantUpdate
 from schemas.unit import UnitCreate, UnitUpdate
 from core.security import get_current_user, hash_password, require_super_admin
@@ -26,6 +26,7 @@ from core.config import settings
 from models.base import gen_uuid
 from utils.date_range import resolve_date_range
 from utils.time_utils import utcnow
+from utils.tenancy_terms import TERMS_TEMPLATE
 
 router = APIRouter(prefix="/estates", tags=["Estates"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -344,6 +345,45 @@ async def update_estate(
     estate.updated_at = utcnow()
     await save(db, estate)
     return {"success": True, "data": _e(estate, user)}
+
+
+@router.get("/{estate_id}/tenancy-terms")
+async def get_estate_tenancy_terms(
+    estate_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The clauses new tenants of this estate will read and sign. Falls back
+    to the platform default template until the property admin customizes it."""
+    estate = await require_estate_role(db, user, estate_id, "admin")
+    is_custom = bool(estate.tenancy_terms)
+    return {"success": True, "data": {
+        "terms": estate.tenancy_terms if is_custom else list(TERMS_TEMPLATE),
+        "isCustom": is_custom,
+    }}
+
+
+@router.put("/{estate_id}/tenancy-terms")
+async def update_estate_tenancy_terms(
+    estate_id: str,
+    body: EstateTenancyTermsUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Only the property admin/owner may change what tenants of this estate
+    sign. Takes effect for the next tenant who opens or signs the agreement —
+    never rewrites an agreement someone already signed."""
+    estate = await require_estate_role(db, user, estate_id, "admin")
+    cleaned = [t.strip() for t in body.terms if t.strip()]
+    estate.tenancy_terms = cleaned or None
+    estate.updated_by = user.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+    is_custom = bool(estate.tenancy_terms)
+    return {"success": True, "data": {
+        "terms": estate.tenancy_terms if is_custom else list(TERMS_TEMPLATE),
+        "isCustom": is_custom,
+    }}
 
 
 @router.delete("/{estate_id}")

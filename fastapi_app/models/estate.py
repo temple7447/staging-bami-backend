@@ -33,6 +33,12 @@ class Estate(Base):
     rent_increase_cycle_years: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     rent_increase_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # This estate's own tenancy-agreement terms, overriding the platform default
+    # (utils/tenancy_terms.TERMS_TEMPLATE) for every tenant who signs here from
+    # now on. Null/empty means "use the platform default" — never retroactively
+    # applied to an agreement someone already signed (that's a frozen snapshot).
+    tenancy_terms: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

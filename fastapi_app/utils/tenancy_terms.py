@@ -120,6 +120,21 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None, estate_config
     }
 
 
-def build_terms(parties: dict) -> list[str]:
-    """Interpolate the template with the frozen party details."""
-    return [clause.format(**parties) for clause in TERMS_TEMPLATE]
+def build_terms(parties: dict, custom_terms: list[str] | None = None) -> list[str]:
+    """Interpolate the template with the frozen party details.
+
+    An estate with its own custom_terms (Estate.tenancy_terms, set by the
+    property admin/owner) fully replaces the platform default below — this
+    estate's whole term set, not a merge. Clauses are still run through
+    .format(**parties) so an admin can reuse the same {rent_display} /
+    {unit_label} placeholders if they want, but a clause is never dropped
+    over a stray "{" a non-technical editor typed — it just falls back to
+    the raw text unformatted."""
+    template = custom_terms if custom_terms else TERMS_TEMPLATE
+    resolved = []
+    for clause in template:
+        try:
+            resolved.append(clause.format(**parties))
+        except (KeyError, IndexError, ValueError):
+            resolved.append(clause)
+    return resolved
