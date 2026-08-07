@@ -163,6 +163,10 @@ async def sign_my_agreement(
     typed_name = (body.typedName or "").strip()
     if not typed_name:
         raise HTTPException(status_code=400, detail="Type your full name to sign")
+    if not (body.signatureImage or "").strip():
+        raise HTTPException(status_code=400, detail="Your signature is required")
+    if not (body.witnessSignatureImage or "").strip():
+        raise HTTPException(status_code=400, detail="Your witness's signature is required")
 
     for field in _REQUIRED_FIELDS:
         if not (getattr(body, field) or "").strip():
@@ -234,6 +238,8 @@ async def download_my_agreement(db: AsyncSession = Depends(get_db), user: User =
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.tenant_id == tenant.id)
     if not agreement:
         raise HTTPException(status_code=404, detail="You haven't signed a tenancy agreement yet")
+    if agreement.status != "approved":
+        raise HTTPException(status_code=403, detail="Your copy will be available once the estate office approves your registration")
     pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
                                        agreement.signature_image, agreement.signed_at,
                                        registration=agreement.registration)
