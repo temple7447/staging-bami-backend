@@ -66,6 +66,84 @@ def _e(e: Estate, user: User | None = None) -> dict:
     }
 
 
+def _public_unit(u: Unit, estate: Estate | None) -> dict:
+    return {
+        "id": u.id, "label": u.label,
+        "monthly_price": u.monthly_price, "service_charge_monthly": u.service_charge_monthly,
+        "caution_fee": u.caution_fee, "legal_fee": u.legal_fee,
+        "category": u.category, "listing_type": u.listing_type,
+        "description": u.description, "available_date": u.available_date,
+        "bedrooms": u.bedrooms, "bathrooms": u.bathrooms, "area": u.area,
+        "street_address": u.street_address, "amenities": u.amenities or {},
+        "meter_number": u.meter_number, "images": u.images or [],
+        "status": u.status, "features": u.features or [],
+        "estate": {
+            "_id": estate.id, "id": estate.id, "name": estate.name,
+            "description": estate.description, "images": estate.images or [],
+        } if estate else None,
+    }
+
+
+# ── Public marketplace (no auth — anyone can browse vacant listings) ──────────
+# Registered ahead of every /{estate_id}-shaped route below so "public" is
+# never swallowed as an estate id, same convention as the unit sub-routes.
+
+@router.get("/public/listings")
+async def list_public_listings(
+    page: int = 1,
+    limit: int = 20,
+    search: Optional[str] = None,
+    estate_id: Optional[str] = Query(None, alias="estateId"),
+    db: AsyncSession = Depends(get_db),
+):
+    conditions = [Unit.is_active == True, Unit.status == "vacant"]
+    if estate_id:
+        conditions.append(Unit.estate == estate_id)
+    if search:
+        conditions.append(or_(
+            Unit.label.ilike(f"%{search}%"),
+            Unit.street_address.ilike(f"%{search}%"),
+            Unit.description.ilike(f"%{search}%"),
+        ))
+    skip = (page - 1) * limit
+    total = await count(db, Unit, *conditions)
+    units = await find_all(db, Unit, *conditions, order_by=Unit.created_at.desc(), skip=skip, limit=limit)
+
+    estate_ids = {u.estate for u in units}
+    estates = {}
+    if estate_ids:
+        rows = await find_all(db, Estate, Estate.id.in_(estate_ids), Estate.is_active == True)
+        estates = {e.id: e for e in rows}
+
+    data = [_public_unit(u, estates[u.estate]) for u in units if u.estate in estates]
+    return {"success": True, "data": data, "page": page, "limit": limit, "total": total}
+
+
+@router.get("/public/listings/{unit_id}")
+async def get_public_listing(unit_id: str, db: AsyncSession = Depends(get_db)):
+    unit = await find_one(db, Unit, Unit.id == unit_id, Unit.is_active == True, Unit.status == "vacant")
+    if not unit:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    estate = await find_one(db, Estate, Estate.id == unit.estate, Estate.is_active == True)
+    if not estate:
+        raise HTTPException(status_code=404, detail="Listing not found")
+    return {"success": True, "data": _public_unit(unit, estate)}
+
+
+@router.get("/public/estates")
+async def list_public_estates(db: AsyncSession = Depends(get_db)):
+    estates = await find_all(db, Estate, Estate.is_active == True, order_by=Estate.created_at.desc())
+    data = []
+    for e in estates:
+        vacant = await count(db, Unit, Unit.estate == e.id, Unit.is_active == True, Unit.status == "vacant")
+        if vacant > 0:
+            data.append({
+                "_id": e.id, "id": e.id, "name": e.name, "description": e.description,
+                "images": e.images or [], "vacant_units": vacant,
+            })
+    return {"success": True, "count": len(data), "data": data}
+
+
 # ── Overview (all estates) ────────────────────────────────────────────────────
 
 @router.get("/overview/all")
