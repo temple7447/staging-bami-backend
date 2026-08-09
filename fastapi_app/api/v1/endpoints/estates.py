@@ -27,6 +27,7 @@ from models.base import gen_uuid
 from utils.date_range import resolve_date_range
 from utils.time_utils import utcnow
 from utils.tenancy_terms import TERMS_TEMPLATE
+from utils.delete_otp import verify_delete_otp
 
 router = APIRouter(prefix="/estates", tags=["Estates"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -298,11 +299,13 @@ async def update_estate_unit(
 @router.delete("/unit/{unit_id}")
 async def delete_estate_unit(
     unit_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     from api.v1.endpoints.units import delete_unit as _delete_unit
-    return await _delete_unit(unit_id=unit_id, db=db, user=user)
+    return await _delete_unit(unit_id=unit_id, otp_id=otp_id, otp_code=otp_code, db=db, user=user)
 
 
 @router.post("/unit/{unit_id}/media/images")
@@ -467,6 +470,8 @@ async def update_estate_tenancy_terms(
 @router.delete("/{estate_id}")
 async def delete_estate(
     estate_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -474,6 +479,7 @@ async def delete_estate(
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
     _check_estate_access(estate, user, "admin")  # only the property admin may delete
+    await verify_delete_otp(db, otp_id, otp_code, "estate", estate_id)
     estate.is_active = False
     estate.updated_by = user.id
     estate.updated_at = utcnow()

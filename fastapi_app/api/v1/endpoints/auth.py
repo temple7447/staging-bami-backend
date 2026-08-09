@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
+from typing import Optional
 import hashlib, secrets, random, re
 
 from models.user import User
@@ -20,6 +21,7 @@ from utils.email_service import send_welcome_email, send_password_reset
 from utils.tenant_helpers import generate_temp_password
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from utils.delete_otp import verify_delete_otp
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -412,10 +414,14 @@ async def set_business_owner_status(
 
 @router.delete("/business-owner/{owner_id}")
 async def delete_business_owner(
-    owner_id: str, db: AsyncSession = Depends(get_db),
+    owner_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
+    db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_super_admin),
 ):
     owner = await _get_business_owner_or_404(db, owner_id)
+    await verify_delete_otp(db, otp_id, otp_code, "business_owner", owner_id)
     # Release their estates so no record points at a deleted owner.
     for e in await _owned_estates(db, owner.id, active_only=False):
         e.owner = None
@@ -574,10 +580,14 @@ async def set_manager_status(
 
 @router.delete("/manager/{manager_id}")
 async def delete_manager(
-    manager_id: str, db: AsyncSession = Depends(get_db),
+    manager_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
+    db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_super_admin),
 ):
     manager = await _get_manager_or_404(db, manager_id)
+    await verify_delete_otp(db, otp_id, otp_code, "manager", manager_id)
     wallet = await find_one(db, Wallet, Wallet.user_id == manager.id)
     if wallet:
         await db.delete(wallet)
@@ -734,10 +744,14 @@ async def set_vendor_status(
 
 @router.delete("/vendor/{vendor_id}")
 async def delete_vendor(
-    vendor_id: str, db: AsyncSession = Depends(get_db),
+    vendor_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
+    db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_super_admin),
 ):
     vendor = await _get_vendor_or_404(db, vendor_id)
+    await verify_delete_otp(db, otp_id, otp_code, "vendor", vendor_id)
     wallet = await find_one(db, Wallet, Wallet.user_id == vendor.id)
     if wallet:
         await db.delete(wallet)

@@ -26,6 +26,7 @@ from utils.email_service import send_welcome_email
 from utils import sms_service
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from utils.delete_otp import verify_delete_otp
 
 router = APIRouter(prefix="/tenants", tags=["Tenants"])
 
@@ -922,9 +923,12 @@ async def resend_tenant_credentials(
 @router.delete("/{tenant_id}")
 async def delete_tenant(
     tenant_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)  # manager+ per property
+    await verify_delete_otp(db, otp_id, otp_code, "tenant", tenant_id)
     if tenant.user:
         u = await db.get(User, tenant.user)
         if u:

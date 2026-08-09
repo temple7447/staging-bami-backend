@@ -17,6 +17,7 @@ from core.db_helpers import find_all, find_one, save, count
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+from utils.delete_otp import verify_delete_otp
 
 router = APIRouter(prefix="/units", tags=["Units"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner", "manager"}
@@ -127,6 +128,8 @@ async def update_unit(
 @router.delete("/{unit_id}")
 async def delete_unit(
     unit_id: str,
+    otp_id: Optional[str] = Query(None, alias="otpId"),
+    otp_code: Optional[str] = Query(None, alias="otpCode"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -135,6 +138,7 @@ async def delete_unit(
     has_tenant = await find_one(db, Tenant, Tenant.unit == unit_id, Tenant.is_active == True)
     if has_tenant:
         raise HTTPException(status_code=400, detail="Cannot delete unit with active tenant")
+    await verify_delete_otp(db, otp_id, otp_code, "unit", unit_id)
     unit.is_active = False
     unit.updated_by = user.id
     unit.updated_at = utcnow()

@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     EMBED_MODEL: str = "models/gemini-embedding-001"
     EMBED_DIM: int = 768
 
+    # ── Delete confirmation OTP ────────────────────────────────────────────────
+    # Deleting a business-critical record (estate, unit, tenant, staff/vendor
+    # account) requires a one-time code sent to the owner, regardless of which
+    # admin/manager triggers the delete — an oversight gate, not self-verification.
+    ADMIN_OTP_PHONE: str = ""
+    ADMIN_OTP_EMAIL: str = ""
+
     # Environment
     NODE_ENV: str = "development"
 
