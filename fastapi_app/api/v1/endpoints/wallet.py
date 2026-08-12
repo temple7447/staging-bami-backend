@@ -22,7 +22,6 @@ from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
-from utils.paystack import verify_transaction, PaystackError
 
 router = APIRouter(prefix="/wallet", tags=["Wallet"])
 ADMIN_ROLES = {"admin", "super_admin", "super_manager", "business_owner"}
@@ -76,33 +75,15 @@ async def create_wallet(
     return {"success": True, "data": {"id": wallet.id}}
 
 
-async def _credit_from_verified_reference(db, user, reference: str, description: str) -> Wallet:
-    """Credit the caller's wallet by the amount Paystack confirms for `reference`.
-
-    Never trusts a client-supplied amount, and a reference can only ever be
-    applied once (idempotency), so a top-up cannot be replayed for free money.
-    """
-    existing = await find_one(db, Transaction, Transaction.reference == reference)
-    if existing:
-        raise HTTPException(status_code=409, detail="This payment has already been applied")
-    try:
-        result = await verify_transaction(reference)
-    except PaystackError as e:
-        raise HTTPException(status_code=402, detail=f"Payment could not be verified: {e}")
-    if not result["success"]:
-        raise HTTPException(status_code=402, detail="Payment was not successful")
-    amount = result["amount"]
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Verified payment amount is zero")
-    wallet = await _get_or_create_wallet(db, user.id)
-    wallet.balance += amount
-    wallet.total_earnings += amount
-    wallet.updated_at = utcnow()
-    await save(db, wallet)
-    await _record_transaction(db, user.id, wallet.id, amount, "credit",
-                              method="paystack", reference=reference,
-                              description=description, created_by=user.id)
-    return wallet
+# Retired with the Paystack integration (2026-08-12). A wallet is now only ever
+# credited by (a) a reviewer approving a bank deposit against its transfer
+# proof, (b) an admin credit, or (c) an incoming wallet transfer — every one of
+# them backed by a human confirming money actually moved.
+_NO_GATEWAY = (
+    "Self-service top-ups by card are no longer available. Transfer to the "
+    "company account and submit the deposit with your proof of payment — your "
+    "wallet is credited as soon as it's confirmed."
+)
 
 
 @router.post("/add-funds")
@@ -111,13 +92,7 @@ async def add_funds(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Self-service top-up must correspond to a real payment. Admins crediting
-    # another user without payment use the dedicated /admin/credit route.
-    if not body.reference:
-        raise HTTPException(status_code=400, detail="A Paystack payment reference is required to add funds")
-    wallet = await _credit_from_verified_reference(
-        db, user, body.reference, body.description or "Wallet top-up")
-    return {"success": True, "message": "Funds added", "data": {"balance": wallet.balance}}
+    raise HTTPException(status_code=410, detail=_NO_GATEWAY)
 
 
 @router.post("/transaction")
@@ -139,11 +114,8 @@ async def wallet_transaction(
     wallet = await _get_or_create_wallet(db, user.id)
 
     if tx_type == "deposit":
-        # A deposit is real money in — verify it against Paystack, same as add-funds.
-        if not ref:
-            raise HTTPException(status_code=400, detail="A Paystack payment reference is required for a deposit")
-        wallet = await _credit_from_verified_reference(db, user, ref, desc or "Deposit")
-        return {"success": True, "message": "Deposit recorded", "data": {"balance": wallet.balance}}
+        # Money IN never originates from a client call — see _NO_GATEWAY above.
+        raise HTTPException(status_code=410, detail=_NO_GATEWAY)
 
     elif tx_type == "withdrawal":
         if wallet.balance < amount:

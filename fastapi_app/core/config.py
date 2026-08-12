@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str
     JWT_EXPIRE: str = "30d"
+    # Refresh tokens outlive the access token by a wide margin — a tenant who
+    # opens the app at least once every 6 months is never sent back to login.
+    JWT_REFRESH_EXPIRE: str = "180d"
     JWT_ALGORITHM: str = "HS256"
 
     # Bcrypt
@@ -56,10 +59,6 @@ class Settings(BaseSettings):
 
     # Google Gemini — "Nano Banana" (gemini-2.5-flash-image) for logo/image generation
     GEMINI_API_KEY: str = ""
-
-    # Paystack
-    PAYSTACK_SECRET_KEY: str = ""
-    PAYSTACK_PUBLIC_KEY: str = ""
 
     # Slack
     SLACK_WEBHOOK_URL: str = ""

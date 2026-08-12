@@ -14,7 +14,10 @@ from schemas.auth import (
     RegisterRequest, LoginRequest, TokenResponse,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
 )
-from core.security import hash_password, verify_password, create_access_token, get_current_user, require_super_admin
+from core.security import (
+    hash_password, verify_password, create_access_token, create_refresh_token,
+    decode_refresh_token, password_fingerprint, get_current_user, require_super_admin,
+)
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save
 from utils.email_service import send_welcome_email, send_password_reset
@@ -40,6 +43,15 @@ def _user_dict(user: User) -> dict:
     }
 
 
+def _session_tokens(user: User) -> dict:
+    """Both halves of a session: the short-lived bearer token every request
+    carries, plus the refresh token the client keeps to mint new ones."""
+    return {
+        "token":         create_access_token(user.id, user.role),
+        "refresh_token": create_refresh_token(user.id, user.role, user.password),
+    }
+
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing = await find_one(db, User, User.email == body.email)
@@ -61,8 +73,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
     await send_welcome_email(user.email, user.name, body.password, phone=user.phone or "")
 
-    token = create_access_token(user.id, user.role)
-    return {"success": True, "token": token, "user": _user_dict(user)}
+    return {"success": True, **_session_tokens(user), "user": _user_dict(user)}
 
 
 def _phone_suffix(raw: str) -> str:
@@ -103,8 +114,37 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     user.last_login = utcnow()
     await save(db, user)
 
-    token = create_access_token(user.id, user.role)
-    return {"success": True, "token": token, "user": _user_dict(user)}
+    return {"success": True, **_session_tokens(user), "user": _user_dict(user)}
+
+
+@router.post("/refresh")
+async def refresh_session(body: dict, db: AsyncSession = Depends(get_db)):
+    """Exchange a refresh token for a fresh access token (and a rotated refresh
+    token), so a returning user is never bounced back to the login screen while
+    their refresh token is still good."""
+    raw = (body or {}).get("refresh_token") or (body or {}).get("refreshToken")
+    if not raw:
+        raise HTTPException(status_code=400, detail="refresh_token is required")
+
+    payload = decode_refresh_token(raw)
+    user = await find_one(db, User, User.id == payload.get("id"))
+    if not user:
+        raise HTTPException(status_code=401, detail="No user found with this token")
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="Account has been deactivated")
+    # A password change/reset rotates the fingerprint, retiring older sessions.
+    if payload.get("pwd") != password_fingerprint(user.password):
+        raise HTTPException(status_code=401, detail="Session expired — please sign in again")
+
+    return {"success": True, **_session_tokens(user), "user": _user_dict(user)}
+
+
+@router.post("/session/upgrade")
+async def upgrade_session(current_user: User = Depends(get_current_user)):
+    """Hand a refresh token to a client that only has a (still-valid) access
+    token — apps installed before refresh tokens existed. Costs the caller a
+    valid bearer token, so it grants nothing they don't already hold."""
+    return {"success": True, **_session_tokens(current_user), "user": _user_dict(current_user)}
 
 
 @router.get("/me")
@@ -138,7 +178,10 @@ async def update_password(
     current_user.password = hash_password(body.new_password)
     current_user.updated_at = utcnow()
     await save(db, current_user)
-    return {"success": True, "message": "Password updated successfully"}
+    # Changing the password retires every refresh token minted under the old
+    # one — hand this client a replacement pair so the person who *made* the
+    # change isn't the one who gets signed out.
+    return {"success": True, "message": "Password updated successfully", **_session_tokens(current_user)}
 
 
 _SIGN_REQUIRED_ROLES = {"business_owner", "manager", "super_manager", "vendor", "super_vendor", "super_admin", "admin"}
@@ -241,8 +284,7 @@ async def verify_phone_otp(body: dict, db: AsyncSession = Depends(get_db)):
     user.last_login = utcnow()
     await save(db, user)
 
-    token = create_access_token(user.id, user.role)
-    return {"success": True, "token": token, "user": _phone_user_dict(user)}
+    return {"success": True, **_session_tokens(user), "user": _phone_user_dict(user)}
 
 
 @router.post("/forgot-password")

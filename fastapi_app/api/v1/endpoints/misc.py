@@ -1,4 +1,5 @@
 import cloudinary, cloudinary.uploader
+import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,8 @@ from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 from utils.time_utils import utcnow
+
+logger = logging.getLogger("bamihost")
 
 router = APIRouter(tags=["Misc"])
 ADMIN_ROLES = {"super_admin", "admin", "super_manager", "business_owner"}
@@ -183,7 +186,16 @@ async def record_bank_deposit(
             api_secret=settings.CLOUDINARY_API_SECRET,
         )
         buf = await proof_image.read()
-        result = cloudinary.uploader.upload(buf, folder="bamihost/deposits")
+        if not buf:
+            raise HTTPException(status_code=400, detail="The proof image is empty — please attach the transfer receipt again.")
+        try:
+            result = cloudinary.uploader.upload(buf, folder="bamihost/deposits")
+        except Exception as e:
+            # Cloudinary being down must not surface as a 500 with a traceback.
+            # The proof IS the evidence for approval, so refuse rather than
+            # filing a deposit nobody can verify.
+            logger.error("[DEPOSIT] proof upload failed for %s: %s", user.id, e)
+            raise HTTPException(status_code=502, detail="Couldn't upload your proof image just now. Please try again in a moment.")
         proof_url = result.get("secure_url")
     dep = BankDeposit(
         id=gen_uuid(), amount=amount or 0, bank_name=bank_name,

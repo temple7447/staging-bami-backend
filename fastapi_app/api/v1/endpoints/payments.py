@@ -3,7 +3,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
 from typing import Optional
-import hashlib, hmac, os
 from pydantic import BaseModel
 
 from models.user import User
@@ -400,55 +399,12 @@ async def send_rent_reminder_email(tid: str, db: AsyncSession = Depends(get_db),
 
 
 @router.post("/callback")
-async def payment_callback(request: Request, db: AsyncSession = Depends(get_db)):
-    secret = os.getenv("PAYSTACK_SECRET_KEY", "")
-    if not secret:
-        # Never accept unsigned payment confirmations: a missing key must
-        # disable the webhook, not the verification.
-        raise HTTPException(status_code=503, detail="Payment webhook not configured")
-    raw_body = await request.body()
-    sig = request.headers.get("x-paystack-signature", "")
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha512).hexdigest()
-    if not hmac.compare_digest(expected, sig):
-        raise HTTPException(status_code=400, detail="Invalid Paystack signature")
-
-    import json
-    try:
-        payload = json.loads(raw_body)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid payload")
-
-    event = payload.get("event")
-    data  = payload.get("data", {})
-
-    if event == "charge.success":
-        ref = data.get("reference")
-        payment = await find_one(db, Payment, Payment.reference == ref)
-        if payment and payment.payment_status == "pending":
-            payment.payment_status = "completed"
-            payment.paystack_response = data
-            payment.updated_at = utcnow()
-            await save(db, payment)
-            tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
-            if tenant:
-                wallet_account = await find_one(db, WalletAccount, WalletAccount.estate == payment.estate)
-                if not wallet_account:
-                    wallet_account = WalletAccount(id=gen_uuid(), estate=payment.estate)
-                wallet_account.distribute_amount(payment.amount, payment.id, payment.payment_type)
-                await save(db, wallet_account)
-                # 🎯 Level 1 automation: ask for NPS after their (first) payment
-                from utils.nps import maybe_request_first_payment_nps
-                await maybe_request_first_payment_nps(db, tenant.id)
-
-    elif event in ("transfer.success", "transfer.failed"):
-        ref = data.get("reference")
-        payment = await find_one(db, Payment, Payment.reference == ref)
-        if payment:
-            payment.payment_status = "completed" if event == "transfer.success" else "failed"
-            payment.updated_at = utcnow()
-            await save(db, payment)
-
-    return {"status": "ok"}
+async def payment_callback():
+    """Retired with the Paystack integration (2026-08-12). Payments now reach
+    the platform as bank transfers confirmed by a reviewer, so there is no
+    gateway webhook to accept — and accepting one would be a way to mark
+    payments completed without money having moved."""
+    raise HTTPException(status_code=410, detail="Payment gateway callbacks are no longer accepted. Payments are confirmed from bank-transfer proof.")
 
 
 def _p(p: Payment) -> dict:
