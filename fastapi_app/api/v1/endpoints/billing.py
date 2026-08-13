@@ -166,6 +166,20 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
                 "total_6_months": rent_r6["total_amount"] + svc_r6["total_amount"] + fees,
             }
 
+    onboarding_outstanding = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
+    # A first-time tenant who hasn't paid anything owes the FULL initial
+    # payment right now — the recurring rent/service-charge portion of it
+    # doesn't individually show as "overdue" yet (their next due date is a
+    # year out), so the naive sum below undercounted it, showing e.g.
+    # ₦251,200 here while the initial-payment card on the same screen (and
+    # /api/dashboard/overview's currentYear.outstanding) correctly said
+    # ₦780,400. Once requires_initial_payment is set, that total IS the
+    # outstanding amount — it already includes the one-time fees.
+    if requires_initial and initial_payment:
+        total_outstanding = initial_payment["total"] + unpaid_utility + onboarding_outstanding
+    else:
+        total_outstanding = unpaid_one_time + unpaid_utility + overdue_recurring + onboarding_outstanding
+
     return {
         "tenant": {
             "id": tenant.id, "name": tenant.tenant_name, "email": tenant.tenant_email,
@@ -179,9 +193,8 @@ async def _build_tenant_detail(db: AsyncSession, tenant: Tenant) -> dict:
         "summary": {
             "recurring_monthly": recurring_monthly,
             "one_time_unpaid": unpaid_one_time, "utility_unpaid": unpaid_utility,
-            "onboarding_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
-            "total_outstanding": unpaid_one_time + unpaid_utility + overdue_recurring +
-                                 (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+            "onboarding_outstanding": onboarding_outstanding,
+            "total_outstanding": total_outstanding,
             "overdue_amount": overdue_utility + overdue_recurring, "is_overdue": overdue,
             "days_until_due": due_in,
             "requires_initial_payment": requires_initial, "initial_payment": initial_payment,

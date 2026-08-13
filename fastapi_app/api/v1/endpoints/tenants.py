@@ -530,6 +530,18 @@ async def pay_billing_items(
     if body.duration_months not in (6, 12):
         raise HTTPException(status_code=400, detail="Payment duration must be 6 or 12 months")
     tenant = await find_one(db, Tenant, Tenant.user == user.id, Tenant.is_active == True)
+    if tenant and tenant.tenant_type == "new" and body.duration_months == 6:
+        # Same "requires initial payment" condition billing.py uses to decide
+        # whether to show the 6-month option at all — a new tenant who has
+        # already completed their initial payment is no longer subject to
+        # this, so only block it while it'd actually be their first payment.
+        has_completed = await find_one(
+            db, Payment, Payment.tenant == tenant.id,
+            Payment.payment_status == "completed",
+            Payment.payment_type.in_(["initial", "rent", "bundle"]),
+        )
+        if not has_completed:
+            raise HTTPException(status_code=400, detail="New tenants must pay 12 months upfront — 6-month initial payment is not allowed")
     wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
     if not wallet:
         raise HTTPException(status_code=404, detail="Wallet not found")
