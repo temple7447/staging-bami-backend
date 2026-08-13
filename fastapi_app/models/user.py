@@ -55,3 +55,9 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    # Set by self-service account deletion (Apple/Play requirement). The row
+    # is kept and anonymized rather than removed — financial/legal records
+    # elsewhere (transactions, signed tenancy agreements) reference this id
+    # and must survive the account's deletion for accounting/dispute purposes.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -325,6 +325,71 @@ async def logout(current_user: User = Depends(get_current_user)):
     return {"success": True, "message": "Logged out successfully"}
 
 
+@router.post("/delete-account")
+async def delete_my_account(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Self-service account deletion (Apple App Store Guideline 5.1.1(v) /
+    Google Play User Data policy — both require this to be reachable from
+    inside the app, not just a support-email request).
+
+    Anonymizes rather than removes the row: financial records (transactions,
+    withdrawals, bank deposits) and signed tenancy agreements reference this
+    user and are retained for accounting/legal reasons regardless of the
+    account itself being deleted. What's cleared is personally-identifying
+    profile data — name, email, phone, photos. The account is immediately
+    unusable: is_active flips off (which get_current_user already checks on
+    every request) and the password is replaced with an unusable random
+    value, which also retires every refresh token via the fingerprint check
+    in decode/create_refresh_token.
+    """
+    if not verify_password((body or {}).get("password") or "", current_user.password):
+        raise HTTPException(status_code=400, detail="Your password is incorrect")
+
+    wallet = await find_one(db, Wallet, Wallet.user_id == current_user.id)
+    if wallet and wallet.balance > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Please withdraw your wallet balance before deleting your account.",
+        )
+
+    anon_email = f"deleted-{current_user.id}@bamihost.deleted"
+    current_user.name = "Deleted User"
+    current_user.email = anon_email
+    current_user.phone = None
+    current_user.profile_image_url = None
+    current_user.profile_image_public_id = None
+    current_user.business_address = None
+    current_user.gov_id = None
+    current_user.bio = None
+    current_user.location_city = None
+    current_user.location_state = None
+    current_user.password = hash_password(secrets.token_urlsafe(32))
+    current_user.is_active = False
+    current_user.deleted_at = utcnow()
+    current_user.updated_at = utcnow()
+    await save(db, current_user)
+
+    # A tenant's lease/billing history (unit, rent, dates) is a legitimate
+    # business record and stays — only the contact-info fields duplicated
+    # onto the Tenant row (denormalized so admins can onboard a tenant before
+    # they have an account) are cleared here.
+    from models.tenant import Tenant
+    tenants = await find_all(db, Tenant, Tenant.user == current_user.id)
+    for t in tenants:
+        t.tenant_name = "Deleted User"
+        t.tenant_email = None
+        t.tenant_phone = None
+        t.profile_image_url = None
+        t.profile_image_public_id = None
+        t.updated_at = utcnow()
+        await save(db, t)
+
+    return {"success": True, "message": "Your account has been deleted."}
+
+
 # ── Business Owner management (super_admin only) ──────────────────────────────
 # A business owner "owns" estates via Estate.owner == user.id (see core/authz).
 
