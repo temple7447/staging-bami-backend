@@ -189,15 +189,28 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         # new tenant who hasn't completed their first payment genuinely owes
         # the year up front.
         tracked_out = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
+        # The admin can date-stamp which lease-year a tracked balance actually
+        # covers (outstanding_period_start) — e.g. a tenant who's fully paid
+        # for the year in progress but owes against next year's renewal.
+        # Undated balances default to "current year" (the historical
+        # behavior, correct for the common case of arrears on the year
+        # already in progress).
+        out_for_next_year = bool(tenant.outstanding_period_start and tenant.outstanding_period_start >= renewal_start)
         first_payment_pending = is_first_time and not await find_one(
             db, Payment, Payment.tenant == tenant.id, Payment.payment_status == "completed",
             Payment.payment_type.in_(["initial", "rent", "bundle"]))
         if first_payment_pending:
             cy_outstanding  = max(0, cy_proj_total - cy_paid_total)
             cy_paid_display = cy_paid_total
+        elif out_for_next_year:
+            cy_outstanding  = 0
+            cy_paid_display = cy_proj_total
         else:
             cy_outstanding  = tracked_out
             cy_paid_display = min(cy_proj_total, max(cy_paid_total, cy_proj_total - tracked_out))
+
+        ny_outstanding  = tracked_out if out_for_next_year else 0
+        ny_paid_display = max(0, ny_total - ny_outstanding) if out_for_next_year else 0
 
         overview["yearly_payment"] = {
             "current_year": {
@@ -220,6 +233,8 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
                 "projected_rent": ny_rent_proj["total_amount"],
                 "projected_service_charge": ny_svc_proj["total_amount"],
                 "projected_total": ny_total,
+                "paid": ny_paid_display,
+                "outstanding": ny_outstanding,
                 "rent_increased": ny_rent_proj["final_rent"] > cy_rent_proj["final_rent"],
             }
         }
