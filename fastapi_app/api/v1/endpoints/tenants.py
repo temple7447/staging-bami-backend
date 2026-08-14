@@ -672,6 +672,7 @@ async def get_tenant(
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
         "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
+        "has_outstanding": ((tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)) > 0,
         "outstanding_period_start": tenant.outstanding_period_start,
         "outstanding_period_end": tenant.outstanding_period_end,
         "outstanding_due_date": tenant.outstanding_due_date,
