@@ -64,13 +64,13 @@ TERMS_TEMPLATE = [
 
 
 # BamiHost's retained solicitor — named on every tenancy agreement platform-
-# wide (confirmed with the owner: not one landlord's private counsel, but
-# BamiHost's counsel for every estate's agreements).
+# wide, when set (build_terms/pdf_service skip the whole "Prepared By" block
+# on an empty name, so leaving this blank removes it from every agreement).
 PREPARED_BY = {
-    "name": "G. Anukun Esq., LL.M, AICMC",
-    "address": "No. 12 Deco Road, by Efejuku Street Junction, Warri, Delta State.",
-    "phone": "08050696537, 08068202655",
-    "email": "godfreyanukun@gmail.com",
+    "name": "",
+    "address": "",
+    "phone": "",
+    "email": "",
 }
 
 
