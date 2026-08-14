@@ -92,6 +92,21 @@ async def create_unit(
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
     await require_estate_access(db, user, eid, "manager")
+
+    label = (body.label or "").strip()
+    if label:
+        dupe = await find_one(
+            db, Unit, Unit.estate == eid, Unit.is_active == True,
+            func.lower(Unit.label) == label.lower(),
+        )
+        if dupe:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A unit named \"{dupe.label}\" already exists in this estate. "
+                       "If the previous tenant hasn't actually moved out, vacate that "
+                       "record instead of creating a new unit with the same name.",
+            )
+
     data = body.model_dump()
     data["estate"] = eid
     unit = Unit(id=gen_uuid(), **data, created_by=user.id)

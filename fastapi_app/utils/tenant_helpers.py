@@ -4,6 +4,7 @@ and processTenant helpers used across tenantController.js and dashboardControlle
 """
 from datetime import datetime, timezone, timedelta
 from math import floor
+from calendar import monthrange
 from utils.rent_calculator import get_current_rent, estate_rent_config, resolve_increase_start
 from utils.time_utils import utcnow
 
@@ -14,6 +15,16 @@ async def estate_config_for(db, estate_id):
     from models.estate import Estate
     est = await db.get(Estate, estate_id) if estate_id else None
     return estate_rent_config(est)
+
+
+def add_months(dt: datetime, months: int) -> datetime:
+    """Shift `dt` forward by `months`, clamping the day to whatever the
+    target month actually has (e.g. Jan 31 + 1 month -> Feb 28/29)."""
+    total = dt.month - 1 + months
+    year = dt.year + total // 12
+    month = total % 12 + 1
+    day = min(dt.day, monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
 
 
 def project_next_due_date(tenant) -> datetime | None:

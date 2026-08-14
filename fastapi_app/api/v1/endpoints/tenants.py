@@ -20,7 +20,7 @@ from core.database import get_db
 from core.authz import require_tenant_access, require_estate_access, accessible_estate_ids
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.config import settings
-from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for
+from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for, add_months
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start, current_lease_year_start
 from utils.email_service import send_welcome_email
 from utils import sms_service
@@ -220,6 +220,65 @@ async def create_tenant(
 
     return {"success": True, "message": "Tenant created successfully",
             "data": {"id": tenant.id, "temp_password": generated_password}}
+
+
+class RenewTenantBody(BaseModel):
+    duration_months: int = 12
+    reason: Optional[str] = None
+
+
+@router.post("/{tenant_id}/renew")
+async def renew_tenant(
+    tenant_id: str, body: RenewTenantBody,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Extend an existing tenant's lease IN PLACE — advances next_due_date and
+    lease_end_date, and flips a first-time tenant to "existing" once they've
+    renewed. Deliberately does NOT create a new Tenant or Unit row: re-onboarding
+    a returning tenant through "Add Tenant" instead of this endpoint is what
+    produced a duplicate "Flat 24" unit in Aug 2026 — the old unit still looked
+    occupied so it didn't appear in the vacant-units picker, and the admin
+    created a fresh one rather than renewing the tenant already on it.
+
+    Rent/service-charge escalation is left to the scheduler (_check_rent_increases),
+    which keeps rent_amount/service_charge_amount current from base_* — this
+    endpoint only moves the due date forward."""
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
+    if body.duration_months not in (6, 12):
+        raise HTTPException(status_code=400, detail="Duration must be 6 or 12 months")
+
+    corrected = await _reconcile_next_due_date(db, tenant)
+    current_due = corrected or tenant.next_due_date or tenant.entry_date or utcnow()
+    new_due = add_months(current_due, body.duration_months)
+
+    was_first_time = tenant.tenant_type == "new"
+    before = {"next_due_date": (tenant.next_due_date or None) and tenant.next_due_date.isoformat(),
+              "lease_end_date": (tenant.lease_end_date or None) and tenant.lease_end_date.isoformat(),
+              "tenant_type": tenant.tenant_type}
+
+    tenant.next_due_date = new_due
+    tenant.lease_end_date = new_due
+    tenant.lease_duration_months = body.duration_months
+    tenant.status = "occupied"
+    if was_first_time:
+        tenant.tenant_type = "existing"
+
+    history = tenant.history or []
+    history.append({
+        "event": "renewed",
+        "note": f"Lease renewed for {body.duration_months} months",
+        "meta": {"before": before, "duration_months": body.duration_months,
+                 "new_next_due_date": new_due.isoformat(), "reason": body.reason or None},
+        "created_by": user.id, "created_at": utcnow().isoformat(),
+    })
+    tenant.history = history
+    tenant.updated_by = user.id
+    tenant.updated_at = utcnow()
+    await save(db, tenant)
+
+    return {"success": True, "message": "Lease renewed",
+            "data": {"id": tenant.id, "next_due_date": tenant.next_due_date,
+                     "lease_end_date": tenant.lease_end_date, "tenant_type": tenant.tenant_type}}
 
 
 # ── List ──────────────────────────────────────────────────────────────────────
@@ -820,6 +879,20 @@ async def adjust_tenant_balance(
             tenant.rent_outstanding = max(0, body.rent_outstanding)
         if body.service_charge_outstanding is not None:
             tenant.service_charge_outstanding = max(0, body.service_charge_outstanding)
+
+        # A nonzero balance with no period is exactly what let a fully-paid
+        # current year get silently charged with a renewal-year balance
+        # (dashboard.py has no way to tell which year an undated balance
+        # belongs to, so it always guessed "current year"). Require the
+        # admin to say which period it covers whenever there's money owed.
+        total_after = (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0)
+        if total_after > 0 and not (body.outstanding_period_start and body.outstanding_period_end):
+            raise HTTPException(
+                400,
+                "Set which period this balance covers (Covers from / Covers to) — "
+                "this determines whether it shows against this year or next year's renewal.",
+            )
+
         # Dates are sent unconditionally by the form so clearing a field removes it.
         tenant.outstanding_period_start = parse_flexible_date(body.outstanding_period_start)
         tenant.outstanding_period_end = parse_flexible_date(body.outstanding_period_end)
