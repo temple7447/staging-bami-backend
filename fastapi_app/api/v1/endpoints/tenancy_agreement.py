@@ -89,7 +89,7 @@ async def get_my_agreement(db: AsyncSession = Depends(get_db), user: User = Depe
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found for this tenancy")
     estate_config = await estate_config_for(db, estate.id)
-    parties = build_parties(tenant, estate, unit, owner, estate_config=estate_config)
+    parties = await build_parties(db, tenant, estate, unit, owner, estate_config=estate_config)
     return {"success": True, "signed": False, "status": None, "data": {
         "parties": parties, "terms": build_terms(parties, estate.tenancy_terms), "registration": {},
         "typedName": None, "signatureImage": None, "signedAt": None,
@@ -177,7 +177,7 @@ async def sign_my_agreement(
         raise HTTPException(status_code=404, detail="Estate not found for this tenancy")
 
     estate_config = await estate_config_for(db, estate.id)
-    parties = build_parties(tenant, estate, unit, owner, estate_config=estate_config)
+    parties = await build_parties(db, tenant, estate, unit, owner, estate_config=estate_config)
     registration = {
         "address": body.address.strip(),
         "occupation": body.occupation.strip(),

@@ -63,9 +63,10 @@ TERMS_TEMPLATE = [
 ]
 
 
-# BamiHost's retained solicitor — named on every tenancy agreement platform-
-# wide, when set (build_terms/pdf_service skip the whole "Prepared By" block
-# on an empty name, so leaving this blank removes it from every agreement).
+# Fallback when no admin-configured solicitor exists yet (Setting.data.prepared_by,
+# editable from Settings > Platform in the dashboard). pdf_service.py skips the
+# whole "Prepared By" block on an empty name, so blank here + unset in Settings
+# means no solicitor is named on the agreement.
 PREPARED_BY = {
     "name": "",
     "address": "",
@@ -74,8 +75,12 @@ PREPARED_BY = {
 }
 
 
-def build_parties(tenant, estate, unit, owner, next_due_date=None, estate_config=None) -> dict:
+async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, estate_config=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
+    from models.setting import Setting
+    from core.db_helpers import find_one
+    setting = await find_one(db, Setting)
+    prepared_by = {**PREPARED_BY, **((setting.data or {}).get("prepared_by") or {})} if setting else PREPARED_BY
     # The tenant's actual periodic obligation is THIS YEAR's rent + service
     # charge — not next year's projected renewal total, and not rent alone.
     # Escalate from base_* (same as process_tenant/dashboard's "this year"
@@ -113,10 +118,10 @@ def build_parties(tenant, estate, unit, owner, next_due_date=None, estate_config
         "legal_fee_display": _naira(legal),
         "start_date": (tenant.entry_date.isoformat() if tenant.entry_date else None),
         "start_date_display": (tenant.entry_date.strftime("%d %b %Y") if tenant.entry_date else "the tenancy start date"),
-        "prepared_by_name": PREPARED_BY["name"],
-        "prepared_by_address": PREPARED_BY["address"],
-        "prepared_by_phone": PREPARED_BY["phone"],
-        "prepared_by_email": PREPARED_BY["email"],
+        "prepared_by_name": prepared_by["name"],
+        "prepared_by_address": prepared_by["address"],
+        "prepared_by_phone": prepared_by["phone"],
+        "prepared_by_email": prepared_by["email"],
     }
 
 

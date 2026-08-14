@@ -18,6 +18,7 @@ from api.v1.endpoints import google_workspace
 from api.v1.endpoints import integrations
 from api.v1.endpoints import tenancy_agreement
 from api.v1.endpoints import admin_delete
+from api.v1.endpoints import settings as platform_settings
 
 api_router = APIRouter(prefix="/api")
 
@@ -64,3 +65,4 @@ api_router.include_router(integrations.router)
 api_router.include_router(tenancy_agreement.router)
 api_router.include_router(tenancy_agreement.list_router)
 api_router.include_router(admin_delete.router)
+api_router.include_router(platform_settings.router)
