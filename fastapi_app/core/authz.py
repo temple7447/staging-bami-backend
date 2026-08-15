@@ -123,8 +123,12 @@ async def require_estate_access(db, user, estate_id, min_role: str = "viewer"):
 
 async def require_tenant_access(db, user, tenant, write: bool = False):
     """Staff of the tenant's estate pass (managers+ for writes, any member for
-    reads); the tenant themself passes for read-only access to their own record."""
+    reads); the tenant themself passes for read-only access to their own record;
+    the platform's counsel (role="lawyer") passes for read-only access to any
+    tenant — they're not scoped to any one estate, unlike estate staff."""
     if not write and tenant.user and tenant.user == user.id:
+        return
+    if not write and user.role == "lawyer":
         return
     await require_estate_access(db, user, tenant.estate, "manager" if write else "viewer")
 

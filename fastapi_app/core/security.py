@@ -136,3 +136,4 @@ def require_roles(*roles: str):
 require_super_admin    = require_roles("super_admin")
 require_admin_or_above = require_roles("super_admin", "admin", "super_manager")
 require_business_owner = require_roles("super_admin", "business_owner")
+require_lawyer          = require_roles("lawyer")

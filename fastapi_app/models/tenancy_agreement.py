@@ -39,9 +39,13 @@ class TenancyAgreement(Base):
     reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # Captured at the moment an admin/lawyer approves the agreement.
+    # Counsel's own countersignature — independent of the admin review above,
+    # captured via the lawyer's own login (POST /tenancy-agreements/{id}/lawyer-sign).
+    # Only settable once the tenant has already signed (this row only exists then).
+    lawyer_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lawyer_typed_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     lawyer_signature_image: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lawyer_signed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     signed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

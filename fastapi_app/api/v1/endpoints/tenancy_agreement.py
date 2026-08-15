@@ -23,7 +23,7 @@ from models.unit import Unit
 from models.user import User
 from models.tenancy_agreement import TenancyAgreement
 from models.base import gen_uuid
-from core.security import get_current_user
+from core.security import get_current_user, require_lawyer
 from core.database import get_db
 from core.config import settings
 from core.db_helpers import find_one, find_all, save
@@ -68,6 +68,8 @@ def _serialize(a: TenancyAgreement) -> dict:
         "reviewedAt": a.reviewed_at.isoformat() if a.reviewed_at else None,
         "lawyerTypedName": a.lawyer_typed_name,
         "lawyerSignatureImage": a.lawyer_signature_image,
+        "lawyerId": a.lawyer_id,
+        "lawyerSignedAt": a.lawyer_signed_at.isoformat() if a.lawyer_signed_at else None,
     }
 
 
@@ -242,7 +244,10 @@ async def download_my_agreement(db: AsyncSession = Depends(get_db), user: User =
         raise HTTPException(status_code=403, detail="Your copy will be available once the estate office approves your registration")
     pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
                                        agreement.signature_image, agreement.signed_at,
-                                       registration=agreement.registration)
+                                       registration=agreement.registration,
+                                       lawyer_typed_name=agreement.lawyer_typed_name,
+                                       lawyer_signature_image=agreement.lawyer_signature_image,
+                                       lawyer_signed_at=agreement.lawyer_signed_at)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=tenancy-agreement-{tenant.id}.pdf"})
 
@@ -278,7 +283,10 @@ async def download_tenant_agreement(
         raise HTTPException(status_code=404, detail="This tenant hasn't signed a tenancy agreement yet")
     pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
                                        agreement.signature_image, agreement.signed_at,
-                                       registration=agreement.registration)
+                                       registration=agreement.registration,
+                                       lawyer_typed_name=agreement.lawyer_typed_name,
+                                       lawyer_signature_image=agreement.lawyer_signature_image,
+                                       lawyer_signed_at=agreement.lawyer_signed_at)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=tenancy-agreement-{tenant.id}.pdf"})
 
@@ -361,8 +369,6 @@ async def list_agreements(
 class ReviewAgreementBody(BaseModel):
     status: str  # "approved" | "rejected"
     reason: Optional[str] = None
-    lawyerTypedName: Optional[str] = None
-    lawyerSignatureImage: Optional[str] = None
 
 
 @list_router.patch("/{agreement_id}/status")
@@ -372,7 +378,10 @@ async def review_agreement(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Admin/manager approves or rejects a submitted agreement. Rejecting is
+    """Admin/manager approves or rejects a submitted agreement — verifying the
+    tenant's registration particulars (ID, witness, etc.) are complete and
+    genuine. Separate from counsel's own countersignature (see lawyer-sign
+    below), which a real solicitor login now does independently. Rejecting is
     not a dead end — the tenant's own /me/agreement/sign re-opens on their
     dashboard and resubmission updates this same row (see sign_my_agreement)."""
     if user.role not in ADMIN_ROLES:
@@ -386,10 +395,6 @@ async def review_agreement(
     if new_status == "rejected" and not reason:
         raise HTTPException(status_code=400, detail="A reason is required to reject an agreement")
 
-    lawyer_name = (body.lawyerTypedName or "").strip()
-    if new_status == "approved" and not lawyer_name:
-        raise HTTPException(status_code=400, detail="A signature is required to approve an agreement")
-
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
@@ -402,9 +407,112 @@ async def review_agreement(
     agreement.rejection_reason = reason if new_status == "rejected" else None
     agreement.reviewed_by = user.id
     agreement.reviewed_at = utcnow()
-    if new_status == "approved":
-        agreement.lawyer_typed_name = lawyer_name
-        agreement.lawyer_signature_image = body.lawyerSignatureImage
     await save(db, agreement)
 
     return {"success": True, "data": _serialize(agreement)}
+
+
+# ── Lawyer (counsel) endpoints ──────────────────────────────────────────────
+# A real solicitor login (role="lawyer", provisioned from Settings > Platform
+# > Prepared By) reviews every signed agreement platform-wide and adds their
+# own countersignature — independent of the admin review above, and only
+# possible once the tenant has already signed (this row only exists then).
+
+@list_router.get("/lawyer")
+async def list_agreements_for_lawyer(
+    signed: Optional[bool] = Query(None, description="Filter to counsel-signed / not-yet-signed"),
+    search: Optional[str] = None,
+    page: int = 1, limit: int = 20,
+    db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+):
+    """Every tenant-signed agreement, platform-wide — a lawyer isn't scoped to
+    any one estate, unlike admins/managers."""
+    conditions = []
+    if signed is True:
+        conditions.append(TenancyAgreement.lawyer_signed_at.isnot(None))
+    elif signed is False:
+        conditions.append(TenancyAgreement.lawyer_signed_at.is_(None))
+
+    agreements = await find_all(db, TenancyAgreement, *conditions,
+                                order_by=TenancyAgreement.signed_at.desc())
+
+    items = [_serialize(a) | {
+        "tenantId": a.tenant_id, "estateId": a.estate_id,
+        "tenantName": (a.parties or {}).get("tenant_name"),
+        "estateName": (a.parties or {}).get("estate_name"),
+        "unitLabel": (a.parties or {}).get("unit_label"),
+    } for a in agreements]
+
+    if search:
+        s = search.strip().lower()
+        items = [
+            i for i in items
+            if s in (i["tenantName"] or "").lower()
+            or s in (i["estateName"] or "").lower()
+            or s in (i["unitLabel"] or "").lower()
+        ]
+
+    total = len(items)
+    skip = (page - 1) * limit
+    page_items = items[skip: skip + limit]
+
+    return {"success": True, "data": page_items,
+            "pagination": {"currentPage": page,
+                            "totalPages": -(-total // limit) if total else 0,
+                            "totalItems": total}}
+
+
+@list_router.get("/lawyer/{agreement_id}")
+async def get_agreement_for_lawyer(
+    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+):
+    agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+    return {"success": True, "data": _serialize(agreement)}
+
+
+class LawyerSignBody(BaseModel):
+    typedName: str
+    signatureImage: str | None = None
+
+
+@list_router.post("/lawyer/{agreement_id}/sign")
+async def sign_agreement_as_lawyer(
+    agreement_id: str, body: LawyerSignBody,
+    db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+):
+    agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+
+    typed_name = (body.typedName or "").strip()
+    if not typed_name:
+        raise HTTPException(status_code=400, detail="Type your full name to sign")
+    if not (body.signatureImage or "").strip():
+        raise HTTPException(status_code=400, detail="Your signature is required")
+
+    agreement.lawyer_id = user.id
+    agreement.lawyer_typed_name = typed_name
+    agreement.lawyer_signature_image = body.signatureImage
+    agreement.lawyer_signed_at = utcnow()
+    await save(db, agreement)
+
+    return {"success": True, "data": _serialize(agreement)}
+
+
+@list_router.get("/lawyer/{agreement_id}/pdf")
+async def download_agreement_for_lawyer(
+    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+):
+    agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
+    if not agreement:
+        raise HTTPException(status_code=404, detail="Agreement not found")
+    pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
+                                       agreement.signature_image, agreement.signed_at,
+                                       registration=agreement.registration,
+                                       lawyer_typed_name=agreement.lawyer_typed_name,
+                                       lawyer_signature_image=agreement.lawyer_signature_image,
+                                       lawyer_signed_at=agreement.lawyer_signed_at)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=tenancy-agreement-{agreement.tenant_id}.pdf"})

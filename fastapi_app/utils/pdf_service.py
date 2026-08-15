@@ -349,7 +349,10 @@ def _sig_image(data_uri: str | None, width=5.5 * cm, height=2.2 * cm):
 
 def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
                            signature_image: str | None, signed_at,
-                           registration: dict | None = None) -> bytes:
+                           registration: dict | None = None,
+                           lawyer_typed_name: str | None = None,
+                           lawyer_signature_image: str | None = None,
+                           lawyer_signed_at=None) -> bytes:
     reg = registration or {}
     cw = content_width()
     story = brand_header(parties.get("estate_name"), parties.get("estate_address"),
@@ -403,6 +406,15 @@ def generate_agreement_pdf(parties: dict, terms: list, typed_name: str,
         story.append(Paragraph(
             f"{reg.get('witnessName')} — {reg.get('witnessOccupation')}, {reg.get('witnessAddress')} "
             f"({reg.get('witnessRelationship')} of the Tenant)", _A_VALUE))
+
+    if lawyer_typed_name:
+        story += [Spacer(1, 14), Paragraph("<font name='Helvetica-Bold'>Reviewed &amp; Signed by Counsel</font>", _A_LABEL), Spacer(1, 6)]
+        limg = _sig_image(lawyer_signature_image)
+        if limg:
+            story.append(limg)
+        story.append(Paragraph(f"Signed: {lawyer_typed_name}", _A_SIGN))
+        if lawyer_signed_at:
+            story.append(Paragraph(_fmt_date(lawyer_signed_at), _A_VALUE))
 
     if parties.get("prepared_by_name"):
         story += [Spacer(1, 18), HRFlowable(width="100%", thickness=0.5, color=BORDER), Spacer(1, 8)]
