@@ -151,10 +151,5 @@ def parse_flexible_date(value) -> datetime | None:
 
 
 def generate_temp_password(length: int = 6) -> str:
-    import random, string
-    letters = string.ascii_letters
-    digits  = string.digits
-    pwd = [random.choice(letters), random.choice(digits)]
-    pwd += [random.choice(letters + digits) for _ in range(length - 2)]
-    random.shuffle(pwd)
-    return "".join(pwd)
+    import random
+    return "".join(random.choice("0123456789") for _ in range(length))
