@@ -5,9 +5,10 @@ from typing import Optional
 
 from models.setting import Setting
 from models.user import User
+from models.tenancy_agreement import TenancyAgreement
 from core.security import require_super_admin, hash_password
 from core.database import get_db
-from core.db_helpers import find_one, save
+from core.db_helpers import find_one, find_all, save
 from models.base import gen_uuid
 from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
@@ -50,6 +51,23 @@ async def get_platform_settings(
         "bankInfo": {**BANK_DEFAULTS, **(data.get("bank_info") or {})},
         "preparedBy": {**PREPARED_BY_DEFAULTS, **(data.get("prepared_by") or {})},
     }}
+
+
+async def _sync_prepared_by_to_unsigned_agreements(db: AsyncSession, prepared_by: dict):
+    """Keep every agreement's printed "Prepared By" block current with whoever
+    the active solicitor is — but only for agreements counsel hasn't actually
+    countersigned yet. The moment a lawyer signs one, it's locked: a later
+    solicitor swap must never rewrite what a specific lawyer put their name
+    and signature to."""
+    agreements = await find_all(db, TenancyAgreement, TenancyAgreement.lawyer_signed_at.is_(None))
+    for a in agreements:
+        parties = dict(a.parties or {})
+        parties["prepared_by_name"] = prepared_by.get("name", "")
+        parties["prepared_by_address"] = prepared_by.get("address", "")
+        parties["prepared_by_phone"] = prepared_by.get("phone", "")
+        parties["prepared_by_email"] = prepared_by.get("email", "")
+        a.parties = parties
+        await save(db, a)
 
 
 @router.put("")
@@ -122,6 +140,10 @@ async def update_platform_settings(
 
     setting.data = data
     await save(db, setting)
+
+    if body.prepared_by is not None:
+        current_prepared_by = {**PREPARED_BY_DEFAULTS, **(data.get("prepared_by") or {})}
+        await _sync_prepared_by_to_unsigned_agreements(db, current_prepared_by)
 
     if provisioned_password and provisioned_email:
         await send_welcome_email(provisioned_email, body.prepared_by.name, provisioned_password)
