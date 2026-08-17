@@ -75,7 +75,8 @@ async def update_platform_settings(
 
         name = (body.prepared_by.name or "").strip()
         email = (body.prepared_by.email or "").strip()
-        lawyer_user_id = data.get("prepared_by_user_id")
+        prior_lawyer_user_id = data.get("prepared_by_user_id")
+        lawyer_user_id = prior_lawyer_user_id
 
         if name and email:
             existing = await find_one(db, User, User.email == email)
@@ -99,13 +100,23 @@ async def update_platform_settings(
                 await save(db, lawyer)
                 lawyer_user_id = lawyer.id
                 provisioned_email = email
-        elif lawyer_user_id:
+
+            # Swapped to a different solicitor — the previous one loses access.
+            # (Without this, replacing a lawyer left their old login active,
+            # since only the new one was ever touched.)
+            if prior_lawyer_user_id and prior_lawyer_user_id != lawyer_user_id:
+                prior = await db.get(User, prior_lawyer_user_id)
+                if prior:
+                    prior.is_active = False
+                    await save(db, prior)
+        elif prior_lawyer_user_id:
             # Blanked out — deactivate the login rather than deleting it, so
             # signatures they already made on real agreements stay attributable.
-            prior = await db.get(User, lawyer_user_id)
+            prior = await db.get(User, prior_lawyer_user_id)
             if prior:
                 prior.is_active = False
                 await save(db, prior)
+            lawyer_user_id = None
 
         data["prepared_by_user_id"] = lawyer_user_id
 
