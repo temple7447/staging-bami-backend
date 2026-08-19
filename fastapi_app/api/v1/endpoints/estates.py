@@ -11,6 +11,8 @@ from models.unit import Unit
 from models.transaction import Transaction
 from models.payment import Payment
 from models.user import User
+from models.business_type import BusinessType
+from models.tenancy_agreement import TenancyAgreement
 from schemas.estate import EstateCreate, EstateUpdate, EstateTenancyTermsUpdate
 from schemas.tenant import TenantCreate, TenantUpdate
 from schemas.unit import UnitCreate, UnitUpdate
@@ -20,7 +22,7 @@ from core.authz import require_estate_access, has_property_role, property_role, 
 from models.wallet import Wallet
 from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from core.db_helpers import find_all, find_one, save, count, sum_col
 from core.config import settings
 from models.base import gen_uuid
@@ -233,6 +235,49 @@ async def get_overall_overview(
             "completed_last_30_days": completed_30,
         },
     }}
+
+
+# ── Estate solicitor (lawyer-as-vendor) ─────────────────────────────────────
+# A lawyer is just a User with role="vendor", tagged with the "Legal /
+# Solicitor Services" BusinessType so they're distinguishable from other
+# vendor types (plumbers, etc.) in pickers. Assignment is per-estate
+# (Estate.lawyer_id) — different estates may share the same lawyer or use
+# different ones.
+
+LEGAL_BUSINESS_TYPE_NAME = "Legal / Solicitor Services"
+
+
+async def _get_or_create_legal_business_type(db: AsyncSession, actor_id: str) -> BusinessType:
+    bt = await find_one(db, BusinessType, BusinessType.name == LEGAL_BUSINESS_TYPE_NAME)
+    if bt:
+        return bt
+    bt = BusinessType(id=gen_uuid(), name=LEGAL_BUSINESS_TYPE_NAME,
+                       description="Solicitors / legal counsel assignable to estates as their agreement's Prepared By",
+                       created_by=actor_id)
+    return await save(db, bt)
+
+
+def _serialize_lawyer(u: Optional[User]) -> Optional[dict]:
+    if not u:
+        return None
+    return {
+        "id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "businessAddress": u.business_address, "isActive": u.is_active,
+    }
+
+
+@router.get("/lawyers")
+async def list_legal_vendors(
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Every vendor tagged as a solicitor, for the "assign an existing lawyer"
+    picker — lets several estates share the same one."""
+    legal_type = await find_one(db, BusinessType, BusinessType.name == LEGAL_BUSINESS_TYPE_NAME)
+    if not legal_type:
+        return {"success": True, "data": []}
+    vendors = await find_all(db, User, User.role == "vendor",
+                             User.business_type_id == legal_type.id, User.is_active == True)
+    return {"success": True, "data": [_serialize_lawyer(v) for v in vendors]}
 
 
 # ── Estate CRUD ───────────────────────────────────────────────────────────────
@@ -465,6 +510,127 @@ async def update_estate_tenancy_terms(
         "terms": estate.tenancy_terms if is_custom else list(TERMS_TEMPLATE),
         "isCustom": is_custom,
     }}
+
+
+async def _sync_prepared_by_for_estate(db: AsyncSession, estate_id: str, lawyer: Optional[User]):
+    """Push the (possibly now-blank) solicitor info onto this estate's
+    printed "Prepared By" block — but only for agreements no lawyer has
+    actually countersigned yet. One already signed is locked forever."""
+    agreements = await find_all(db, TenancyAgreement, TenancyAgreement.estate_id == estate_id,
+                                TenancyAgreement.lawyer_signed_at.is_(None))
+    for a in agreements:
+        parties = dict(a.parties or {})
+        parties["prepared_by_name"] = lawyer.name if lawyer else ""
+        parties["prepared_by_address"] = (lawyer.business_address or "") if lawyer else ""
+        parties["prepared_by_phone"] = (lawyer.phone or "") if lawyer else ""
+        parties["prepared_by_email"] = (lawyer.email or "") if lawyer else ""
+        a.parties = parties
+        await save(db, a)
+
+
+class AssignLawyerBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vendor_id: Optional[str] = Field(None, alias="vendorId")
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    business_address: Optional[str] = Field(None, alias="businessAddress")
+
+
+@router.get("/{estate_id}/lawyer")
+async def get_estate_lawyer(
+    estate_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    estate = await require_estate_role(db, user, estate_id, "viewer")
+    lawyer = await db.get(User, estate.lawyer_id) if estate.lawyer_id else None
+    return {"success": True, "data": _serialize_lawyer(lawyer)}
+
+
+@router.put("/{estate_id}/lawyer")
+async def assign_estate_lawyer(
+    estate_id: str, body: AssignLawyerBody,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Assign this estate's solicitor — either an existing lawyer-vendor
+    (vendorId, shared across estates) or a brand-new one (name + email)."""
+    estate = await require_estate_role(db, user, estate_id, "admin")
+    provisioned_password = None
+
+    if body.vendor_id:
+        lawyer = await find_one(db, User, User.id == body.vendor_id, User.role == "vendor")
+        if not lawyer:
+            raise HTTPException(status_code=404, detail="Vendor not found")
+        lawyer.is_active = True
+    else:
+        name = (body.name or "").strip()
+        email = (body.email or "").strip().lower()
+        if not name or not email:
+            raise HTTPException(status_code=400, detail="Provide vendorId, or a name and email to add a new lawyer")
+
+        existing = await find_one(db, User, func.lower(User.email) == email)
+        if existing and existing.role != "vendor":
+            raise HTTPException(status_code=400, detail=f"{email} is already used by a {existing.role} account — use a different email")
+
+        if existing:
+            lawyer = existing
+            lawyer.name = name
+            lawyer.phone = (body.phone or "").strip() or lawyer.phone
+            lawyer.business_address = (body.business_address or "").strip() or lawyer.business_address
+            lawyer.is_active = True
+        else:
+            legal_type = await _get_or_create_legal_business_type(db, user.id)
+            provisioned_password = generate_temp_password(8)
+            lawyer = User(
+                id=gen_uuid(), name=name, email=email, phone=(body.phone or "").strip() or None,
+                business_address=(body.business_address or "").strip() or None,
+                business_type_id=legal_type.id, specialization="Legal / Solicitor",
+                password=hash_password(provisioned_password), role="vendor",
+                created_by=user.id, email_verified=True,
+            )
+            await save(db, lawyer)
+            await save(db, Wallet(id=gen_uuid(), user_id=lawyer.id, balance=0, currency="NGN"))
+
+    await save(db, lawyer)
+
+    estate.lawyer_id = lawyer.id
+    estate.updated_by = user.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+
+    await _sync_prepared_by_for_estate(db, estate_id, lawyer)
+
+    if provisioned_password:
+        await send_welcome_email(lawyer.email, lawyer.name, provisioned_password, phone=lawyer.phone or "")
+
+    return {"success": True, "data": _serialize_lawyer(lawyer)}
+
+
+@router.delete("/{estate_id}/lawyer")
+async def unassign_estate_lawyer(
+    estate_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    estate = await require_estate_role(db, user, estate_id, "admin")
+    prior_id = estate.lawyer_id
+    estate.lawyer_id = None
+    estate.updated_by = user.id
+    estate.updated_at = utcnow()
+    await save(db, estate)
+
+    await _sync_prepared_by_for_estate(db, estate_id, None)
+
+    if prior_id:
+        # Deactivate the login only if they're not still covering another
+        # estate — this one lawyer may well be shared.
+        still_assigned = await find_one(db, Estate, Estate.lawyer_id == prior_id,
+                                        Estate.id != estate_id, Estate.is_active == True)
+        if not still_assigned:
+            lawyer = await db.get(User, prior_id)
+            if lawyer:
+                lawyer.is_active = False
+                await save(db, lawyer)
+
+    return {"success": True, "message": "Lawyer unassigned"}
 
 
 @router.delete("/{estate_id}")

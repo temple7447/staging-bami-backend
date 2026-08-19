@@ -23,7 +23,7 @@ from models.unit import Unit
 from models.user import User
 from models.tenancy_agreement import TenancyAgreement
 from models.base import gen_uuid
-from core.security import get_current_user, require_lawyer
+from core.security import get_current_user
 from core.database import get_db
 from core.config import settings
 from core.db_helpers import find_one, find_all, save
@@ -413,21 +413,35 @@ async def review_agreement(
 
 
 # ── Lawyer (counsel) endpoints ──────────────────────────────────────────────
-# A real solicitor login (role="lawyer", provisioned from Settings > Platform
-# > Prepared By) reviews every signed agreement platform-wide and adds their
-# own countersignature — independent of the admin review above, and only
-# possible once the tenant has already signed (this row only exists then).
+# A solicitor is a vendor (role="vendor") assigned to one or more estates via
+# Estate.lawyer_id — different estates may share the same lawyer or use
+# different ones. Each reviews agreements only for the estate(s) they're
+# assigned to, and adds their own countersignature — independent of the admin
+# review above, and only possible once the tenant has already signed (this
+# row only exists then).
+
+async def _lawyer_estate_ids(db: AsyncSession, user: User) -> list[str]:
+    if user.role != "vendor":
+        return []
+    estates = await find_all(db, Estate, Estate.lawyer_id == user.id)
+    return [e.id for e in estates]
+
 
 @list_router.get("/lawyer")
 async def list_agreements_for_lawyer(
     signed: Optional[bool] = Query(None, description="Filter to counsel-signed / not-yet-signed"),
     search: Optional[str] = None,
     page: int = 1, limit: int = 20,
-    db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
-    """Every tenant-signed agreement, platform-wide — a lawyer isn't scoped to
-    any one estate, unlike admins/managers."""
-    conditions = []
+    """Every tenant-signed agreement for the estate(s) this vendor is the
+    assigned solicitor for."""
+    estate_ids = await _lawyer_estate_ids(db, user)
+    if not estate_ids:
+        return {"success": True, "data": [],
+                "pagination": {"currentPage": page, "totalPages": 0, "totalItems": 0}}
+
+    conditions = [TenancyAgreement.estate_id.in_(estate_ids)]
     if signed is True:
         conditions.append(TenancyAgreement.lawyer_signed_at.isnot(None))
     elif signed is False:
@@ -464,11 +478,13 @@ async def list_agreements_for_lawyer(
 
 @list_router.get("/lawyer/{agreement_id}")
 async def get_agreement_for_lawyer(
-    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
+    if agreement.estate_id not in await _lawyer_estate_ids(db, user):
+        raise HTTPException(status_code=403, detail="You're not the assigned solicitor for this estate")
     return {"success": True, "data": _serialize(agreement)}
 
 
@@ -480,11 +496,13 @@ class LawyerSignBody(BaseModel):
 @list_router.post("/lawyer/{agreement_id}/sign")
 async def sign_agreement_as_lawyer(
     agreement_id: str, body: LawyerSignBody,
-    db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
+    if agreement.estate_id not in await _lawyer_estate_ids(db, user):
+        raise HTTPException(status_code=403, detail="You're not the assigned solicitor for this estate")
 
     typed_name = (body.typedName or "").strip()
     if not typed_name:
@@ -503,11 +521,13 @@ async def sign_agreement_as_lawyer(
 
 @list_router.get("/lawyer/{agreement_id}/pdf")
 async def download_agreement_for_lawyer(
-    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_lawyer),
+    agreement_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     agreement = await find_one(db, TenancyAgreement, TenancyAgreement.id == agreement_id)
     if not agreement:
         raise HTTPException(status_code=404, detail="Agreement not found")
+    if agreement.estate_id not in await _lawyer_estate_ids(db, user):
+        raise HTTPException(status_code=403, detail="You're not the assigned solicitor for this estate")
     pdf_bytes = generate_agreement_pdf(agreement.parties, agreement.terms, agreement.typed_name,
                                        agreement.signature_image, agreement.signed_at,
                                        registration=agreement.registration,

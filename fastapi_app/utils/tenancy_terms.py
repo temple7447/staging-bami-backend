@@ -63,24 +63,16 @@ TERMS_TEMPLATE = [
 ]
 
 
-# Fallback when no admin-configured solicitor exists yet (Setting.data.prepared_by,
-# editable from Settings > Platform in the dashboard). pdf_service.py skips the
-# whole "Prepared By" block on an empty name, so blank here + unset in Settings
-# means no solicitor is named on the agreement.
-PREPARED_BY = {
-    "name": "",
-    "address": "",
-    "phone": "",
-    "email": "",
-}
-
-
 async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, estate_config=None) -> dict:
     """Frozen snapshot of who/what this agreement is about, at signing time."""
-    from models.setting import Setting
-    from core.db_helpers import find_one
-    setting = await find_one(db, Setting)
-    prepared_by = {**PREPARED_BY, **((setting.data or {}).get("prepared_by") or {})} if setting else PREPARED_BY
+    from models.user import User
+    lawyer = await db.get(User, estate.lawyer_id) if estate and estate.lawyer_id else None
+    prepared_by = {
+        "name": lawyer.name if lawyer else "",
+        "address": (lawyer.business_address or "") if lawyer else "",
+        "phone": (lawyer.phone or "") if lawyer else "",
+        "email": (lawyer.email or "") if lawyer else "",
+    }
     # The tenant's actual periodic obligation is THIS YEAR's rent + service
     # charge — not next year's projected renewal total, and not rent alone.
     # Escalate from base_* (same as process_tenant/dashboard's "this year"

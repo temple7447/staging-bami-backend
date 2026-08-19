@@ -39,6 +39,12 @@ class Estate(Base):
     # applied to an agreement someone already signed (that's a frozen snapshot).
     tenancy_terms: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
+    # This estate's assigned solicitor — a User with role="vendor" (a legal
+    # services vendor). Different estates may point at different lawyers, or
+    # share the same one. Null means no solicitor assigned yet; the agreement
+    # PDF's "Prepared By" section is simply omitted until one is.
+    lawyer_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
