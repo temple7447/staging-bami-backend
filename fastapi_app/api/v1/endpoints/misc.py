@@ -108,14 +108,14 @@ async def create_business_type(
     bt = BusinessType(id=gen_uuid(), name=body.get("name", ""), description=body.get("description"),
                       icon=body.get("icon"), created_by=user.id)
     await save(db, bt)
-    return {"success": True, "data": {"id": bt.id, "name": bt.name}}
+    return {"success": True, "data": {"_id": bt.id, "name": bt.name}}
 
 
 @router.get("/business-types")
 async def list_business_types(db: AsyncSession = Depends(get_db)):
     items = await find_all(db, BusinessType, BusinessType.is_active == True,
                            order_by=BusinessType.name.asc())
-    return {"success": True, "data": [{"id": i.id, "name": i.name, "icon": i.icon} for i in items]}
+    return {"success": True, "data": [{"_id": i.id, "name": i.name, "icon": i.icon} for i in items]}
 
 
 @router.delete("/business-types/{bt_id}")
