@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from typing import Optional, List
@@ -489,22 +489,59 @@ async def get_estate_tenancy_terms(
     }}
 
 
+async def _notify_tenants_of_terms_change(estate_id: str, estate_name: str):
+    """Fired in the background after a tenancy-terms save actually changes
+    something — an email + SMS to every active tenant of this estate. Doesn't
+    rewrite anyone's already-signed agreement (that stays frozen); this is
+    purely so tenants aren't the last to know their estate's terms moved."""
+    from core.database import AsyncSessionLocal
+    from utils.email_service import send_email
+    from utils import sms_service
+
+    subject = f"Updated Tenancy Agreement Terms — {estate_name}"
+    sms_text = (
+        f"BamiHost: The tenancy agreement terms for {estate_name} have been updated. "
+        "Open the app to review the latest terms."
+    )
+
+    async with AsyncSessionLocal() as db:
+        active_tenants = await find_all(db, Tenant, Tenant.estate == estate_id, Tenant.is_active == True)
+        for t in active_tenants:
+            if t.tenant_email:
+                message = (
+                    f"Hi {t.tenant_name or 'there'},<br><br>"
+                    f"The tenancy agreement terms for <strong>{estate_name}</strong> have just been updated. "
+                    "This doesn't change any agreement you've already signed, but we wanted you to know "
+                    "before you next open your tenancy agreement in the app, where you can review the "
+                    "full updated terms.<br><br>"
+                    "If you have any questions, please reach out to your estate office."
+                )
+                await send_email(t.tenant_email, subject, html=message, name=t.tenant_name or "")
+            if t.tenant_phone and sms_service.is_configured():
+                await sms_service.send_sms(t.tenant_phone, sms_text)
+
+
 @router.put("/{estate_id}/tenancy-terms")
 async def update_estate_tenancy_terms(
     estate_id: str,
     body: EstateTenancyTermsUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Only the property admin/owner may change what tenants of this estate
     sign. Takes effect for the next tenant who opens or signs the agreement —
-    never rewrites an agreement someone already signed."""
+    never rewrites an agreement someone already signed. Notifies every active
+    tenant of this estate by email/SMS whenever the terms actually change."""
     estate = await require_estate_role(db, user, estate_id, "admin")
     cleaned = [t.strip() for t in body.terms if t.strip()]
+    changed = cleaned != (estate.tenancy_terms or [])
     estate.tenancy_terms = cleaned or None
     estate.updated_by = user.id
     estate.updated_at = utcnow()
     await save(db, estate)
+    if changed:
+        background_tasks.add_task(_notify_tenants_of_terms_change, estate_id, estate.name)
     is_custom = bool(estate.tenancy_terms)
     return {"success": True, "data": {
         "terms": estate.tenancy_terms if is_custom else list(TERMS_TEMPLATE),
