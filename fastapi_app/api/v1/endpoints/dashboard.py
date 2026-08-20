@@ -158,15 +158,18 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
         fee_payments = await find_all(db, Payment,
                                       Payment.tenant == tenant.id, Payment.payment_status == "completed",
                                       Payment.payment_type.in_(["caution_fee", "legal_fee", "initial", "bundle"]))
-        paid_fees = set()
+        # First occurrence wins per code — a direct caution_fee/legal_fee row
+        # (if one exists) is authoritative over a duplicate bundle-metadata entry.
+        fee_details = {}
         for p in fee_payments:
-            if p.payment_type in ("caution_fee", "legal_fee"):
-                paid_fees.add(p.payment_type)
+            if p.payment_type in ("caution_fee", "legal_fee") and p.payment_type not in fee_details:
+                fee_details[p.payment_type] = {"amount": p.amount, "created_at": p.created_at}
             items = (((p.paystack_response or {}).get("data") or {}).get("metadata") or {}).get("billing_items") or []
             for item in items:
                 code = item.get("code") or item.get("type") or ""
-                if code in ("caution_fee", "legal_fee"):
-                    paid_fees.add(code)
+                if code in ("caution_fee", "legal_fee") and code not in fee_details:
+                    fee_details[code] = {"amount": item.get("amount") or 0, "created_at": p.created_at}
+        paid_fees = set(fee_details.keys())
 
         cy_other_proj = 0.0
         cy_other_breakdown = []
@@ -177,6 +180,17 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
             if "legal_fee" not in paid_fees and (unit.legal_fee or 0) > 0:
                 cy_other_proj += unit.legal_fee
                 cy_other_breakdown.append({"code": "legal_fee", "label": "Legal Fee", "amount": unit.legal_fee})
+        elif unit:
+            # An "existing"/migrated tenant can still have paid real one-time
+            # fees for the lease year actually being displayed (e.g. move-in
+            # fees recorded after the fact from a paper receipt) — count
+            # those so the year's total/paid isn't understated just because
+            # the tenant wasn't onboarded through the "new tenant" flow.
+            for code, info in fee_details.items():
+                if info["created_at"] and billing_start <= info["created_at"] < renewal_start:
+                    cy_other_proj += info["amount"]
+                    label = "Caution Fee" if code == "caution_fee" else "Legal Fee"
+                    cy_other_breakdown.append({"code": code, "label": label, "amount": info["amount"]})
 
         cy_proj_total = cy_rent_proj["total_amount"] + cy_svc_proj["total_amount"] + cy_other_proj
         ny_total      = ny_rent_proj["total_amount"] + ny_svc_proj["total_amount"]
