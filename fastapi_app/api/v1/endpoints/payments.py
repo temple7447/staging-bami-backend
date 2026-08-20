@@ -33,6 +33,17 @@ class PaymentCreate(BaseModel):
     reference: Optional[str] = None
 
 
+class ManualPaymentRecord(BaseModel):
+    tenantId: str
+    paymentType: str
+    amount: float
+    paymentMethod: str = "bank_transfer"
+    durationMonths: Optional[int] = None
+    paymentDate: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+
+
 async def _require_payment_access(db, user, payment, write: bool = False):
     """Cross-business isolation: estate staff always pass; the paying tenant
     passes for reads. 404 so payment ids can't be probed across businesses."""
@@ -65,6 +76,56 @@ async def create_payment(
     payment = Payment(id=gen_uuid(), **data, payment_status="pending", created_by=user.id)
     await save(db, payment)
     return {"success": True, "data": _p(payment)}
+
+
+@router.post("/manual-record", status_code=201)
+async def record_manual_payment(
+    body: ManualPaymentRecord,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Staff confirms money already received outside the platform (cash, a
+    bank transfer seen in the account, a cheque) and logs it straight as
+    completed — there's no gateway callback to wait on any more."""
+    tenant = await find_one(db, Tenant, Tenant.id == body.tenantId, Tenant.is_active == True)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    await require_estate_access(db, user, tenant.estate, "manager")
+
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    paid_at = utcnow()
+    if body.paymentDate:
+        try:
+            paid_at = datetime.fromisoformat(body.paymentDate)
+        except ValueError:
+            pass
+
+    payment = Payment(
+        id=gen_uuid(), tenant=tenant.id, estate=tenant.estate,
+        amount=body.amount, payment_type=body.paymentType, payment_status="completed",
+        reference=f"MANUAL-{body.paymentType.upper()}-{gen_uuid()[:8]}",
+        paystack_response={"manual": {
+            "method": body.paymentMethod, "description": body.description,
+            "notes": body.notes, "recorded_by": user.id,
+        }},
+        created_by=user.id, created_at=paid_at, updated_at=paid_at,
+    )
+    await save(db, payment)
+
+    if body.paymentType in ("rent", "service_charge", "bundle") and body.durationMonths:
+        base = tenant.next_due_date or tenant.entry_date or utcnow()
+        new_due = base
+        for _ in range(body.durationMonths):
+            m = (new_due.month % 12) + 1
+            y = new_due.year + (1 if new_due.month == 12 else 0)
+            new_due = new_due.replace(year=y, month=m)
+        tenant.next_due_date = new_due
+        tenant.updated_at    = utcnow()
+        await save(db, tenant)
+
+    return {"success": True, "message": "Payment recorded", "data": _p(payment)}
 
 
 @router.get("")
