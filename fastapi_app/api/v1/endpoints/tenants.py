@@ -655,6 +655,7 @@ async def get_tenant(
     tenant = await _get_tenant_or_404(db, tenant_id, user)
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
+    linked_account = await db.get(User, tenant.user) if tenant.user else None
     origin = tenant.entry_date or tenant.created_at
     _rate, _cycle, _start = estate_rent_config(estate)   # per-estate increase policy
     _start = resolve_increase_start(tenant, _start)      # tenant override wins over estate
@@ -728,6 +729,7 @@ async def get_tenant(
             "legal_fee": unit.legal_fee,
         } if unit else None),
         "entry_date": tenant.entry_date, "status": tenant.status, "tenant_type": tenant.tenant_type,
+        "account_active": linked_account.is_active if linked_account else None,
         "rent_outstanding": tenant.rent_outstanding or 0,
         "service_charge_outstanding": tenant.service_charge_outstanding or 0,
         "total_outstanding": (tenant.rent_outstanding or 0) + (tenant.service_charge_outstanding or 0),
@@ -832,6 +834,48 @@ async def update_tenant(
     await save(db, tenant)
     return {"success": True, "message": "Tenant updated successfully",
             "data": {"id": tenant.id, "tenant_name": tenant.tenant_name}}
+
+
+class TenantAccountStatusBody(BaseModel):
+    is_active: bool
+    reason: Optional[str] = None
+
+
+@router.put("/{tenant_id}/account-status")
+async def set_tenant_account_status(
+    tenant_id: str, body: TenantAccountStatusBody,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Lock or restore a tenant's login — independent of their occupancy
+    status, lease, or billing (those are untouched either way). For when
+    there's a dispute or issue to resolve without pretending they've moved
+    out. Takes effect immediately: get_current_user rejects is_active=False
+    even for an already-issued token."""
+    tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)
+    if not tenant.user:
+        raise HTTPException(status_code=400, detail="This tenant has no login account to suspend")
+
+    account = await db.get(User, tenant.user)
+    if not account:
+        raise HTTPException(status_code=404, detail="Linked account not found")
+
+    account.is_active = body.is_active
+    await save(db, account)
+
+    history = tenant.history or []
+    history.append({
+        "event": "account_reactivated" if body.is_active else "account_suspended",
+        "note": (body.reason or "").strip() or ("Account access restored" if body.is_active else "Account access suspended"),
+        "created_by": user.id, "created_at": utcnow().isoformat(),
+    })
+    tenant.history = history
+    tenant.updated_by = user.id
+    tenant.updated_at = utcnow()
+    await save(db, tenant)
+
+    return {"success": True,
+            "message": "Tenant account access restored" if body.is_active else "Tenant account access suspended",
+            "data": {"tenantId": tenant.id, "userIsActive": account.is_active}}
 
 
 class AdjustBalanceBody(BaseModel):
