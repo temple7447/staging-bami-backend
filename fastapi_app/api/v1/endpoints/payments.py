@@ -262,7 +262,9 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant, as_of: date
         "next_year": renewal.year,
         "tenancy_duration": duration,
         "tenant_total_stay": f"{_ordinal(stay_year)} YEAR",
-        "year_duration": f"{billing_start.year} - {renewal.year}",
+        # Tenancy duration is always a single 1-year cycle (see above), so
+        # this names ONE year — the one the cycle started in — not a range.
+        "year_duration": f"{billing_start.year}",
         "next_increase_date": renewal if increased else None,
         "next_rent_increase": y2r["total_amount"] if increased else 0,
         "next_service_charge_increase": y2s["total_amount"] if increased else 0,
