@@ -173,12 +173,19 @@ def _ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
+async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant, as_of: datetime | None = None) -> dict:
     """Everything the classic receipt shows about the tenancy: current/next
-    tenancy rates (estate-policy aware), increase amounts and date, stay info."""
+    tenancy rates (estate-policy aware), increase amounts and date, stay info.
+
+    `as_of` pins the receipt to the lease year a SPECIFIC payment belongs to
+    (pass that payment's created_at) — without it, this describes the
+    tenant's current/latest cycle, which is wrong for a receipt documenting
+    an older payment (e.g. a year-1 caution/legal fee viewed while the
+    tenant is already in year 2 would otherwise show year 2's numbers,
+    including "no one-time fees due" for a fee they very much paid)."""
     from models.unit import Unit
     from utils.tenant_helpers import estate_config_for, project_next_due_date
-    from utils.rent_calculator import calculate_effective_rent, resolve_increase_start
+    from utils.rent_calculator import calculate_effective_rent, resolve_increase_start, current_lease_year_start
 
     unit   = await db.get(Unit, tenant.unit) if tenant.unit else None
     estate = await db.get(Estate, tenant.estate) if tenant.estate else None
@@ -187,8 +194,12 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
     _r, _c, _s = await estate_config_for(db, tenant.estate)
     _s = resolve_increase_start(tenant, _s)
 
-    renewal = project_next_due_date(tenant) or tenant.next_due_date or utcnow()
-    billing_start = renewal.replace(year=renewal.year - 1)
+    if as_of:
+        billing_start = current_lease_year_start(origin, as_of)
+        renewal = billing_start.replace(year=billing_start.year + 1)
+    else:
+        renewal = project_next_due_date(tenant) or tenant.next_due_date or utcnow()
+        billing_start = renewal.replace(year=renewal.year - 1)
     rent_base = tenant.base_rent or tenant.rent_amount or 0
     svc_base  = tenant.base_service_charge or tenant.service_charge_amount or 0
     y1r = calculate_effective_rent(rent_base, billing_start, 12, False, origin, _r, _c, _s)
@@ -206,12 +217,27 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant) -> dict:
         bedroom_type = (f"{unit.bedrooms} BED ROOM{'S' if unit.bedrooms != 1 else ''}"
                         if unit.bedrooms else (unit.category or ""))
 
-    # One-time fees belong to a NEW tenant's FIRST tenancy year only — that
+    # One-time fees belong to a tenant's FIRST tenancy year only — that
     # year's total is rent + service + fees (matches the dashboard Year Total,
     # e.g. 420k + 150k + 150k + 100k = 820k). Later years: rent + service.
-    fees_apply = tenant.tenant_type not in ("existing", "transfer") and stay_year == 1
-    caution = (unit.caution_fee or 0) if (unit and fees_apply) else 0
-    legal   = (unit.legal_fee or 0) if (unit and fees_apply) else 0
+    # A "new" tenant in year 1 gets the unit's listed fee amounts even before
+    # paying (so the receipt/statement can show what's due). An
+    # "existing"/migrated tenant has no such projection — only count a fee
+    # here if there's an actual completed payment for it dated within THIS
+    # lease year, so a real move-in fee paid outside the "new tenant" flow
+    # still shows up (and never bleeds into a later year's receipt).
+    is_new_first_year = tenant.tenant_type not in ("existing", "transfer") and stay_year == 1
+    if is_new_first_year and unit:
+        caution = unit.caution_fee or 0
+        legal   = unit.legal_fee or 0
+    else:
+        fee_rows = await find_all(db, Payment, Payment.tenant == tenant.id,
+                                  Payment.payment_status == "completed",
+                                  Payment.payment_type.in_(["caution_fee", "legal_fee"]))
+        caution = next((p.amount for p in fee_rows if p.payment_type == "caution_fee"
+                        and p.created_at and billing_start <= p.created_at < renewal), 0)
+        legal   = next((p.amount for p in fee_rows if p.payment_type == "legal_fee"
+                        and p.created_at and billing_start <= p.created_at < renewal), 0)
 
     return {
         "unit": unit, "estate": estate,
@@ -250,7 +276,6 @@ async def get_payment_receipts(
     if not tenant:
         return {"success": True, "count": 0, "receipts": []}
 
-    ctx = await _tenancy_receipt_context(db, tenant)
     payments = await find_all(db, Payment, Payment.tenant == tenant.id,
                               order_by=Payment.created_at.desc(), limit=100)
 
@@ -274,6 +299,7 @@ async def get_payment_receipts(
     receipts = []
     for g in grouped:
         p = g["payment"]
+        ctx = await _tenancy_receipt_context(db, tenant, as_of=p.created_at)
         receipts.append({
             "receipt_id": p.id,
             "reference": p.reference or p.id,
@@ -355,7 +381,7 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant record not found for this payment")
-    ctx = await _tenancy_receipt_context(db, tenant)
+    ctx = await _tenancy_receipt_context(db, tenant, as_of=payment.created_at)
     # Sum every payment row from the same checkout (bundle + separate fee rows)
     amount_paid = payment.amount or 0
     base_ref = (payment.reference or "").split("-caution_fee")[0].split("-legal_fee")[0]
