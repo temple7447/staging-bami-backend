@@ -346,7 +346,7 @@ def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dic
     ref = rd.get("reference") or ""
     story += [
         Spacer(1, 8),
-        Paragraph(f"BamiHost Property Management System{' • Ref: ' + ref if ref else ''} • "
+        Paragraph(f"Powered by: BamiHost Management System{' • Ref: ' + ref if ref else ''} • "
                   f"Generated {utcnow().strftime('%d %b %Y')}", _FOOT),
     ]
     return build_document(story)
