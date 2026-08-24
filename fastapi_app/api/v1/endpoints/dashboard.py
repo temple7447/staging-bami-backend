@@ -223,8 +223,22 @@ async def _tenant_overview(db: AsyncSession, user_id: str) -> dict:
             cy_outstanding  = tracked_out
             cy_paid_display = min(cy_proj_total, max(cy_paid_total, cy_proj_total - tracked_out))
 
-        ny_outstanding  = tracked_out if out_for_next_year else 0
-        ny_paid_display = max(0, ny_total - ny_outstanding) if out_for_next_year else 0
+        # A tenant can prepay toward next year's renewal before it starts —
+        # if there's an actual completed payment dated for that cycle, it's
+        # more reliable than the admin-tracked-arrears inference above.
+        ny_payments = await find_all(db, Payment, Payment.tenant == tenant.id,
+                                     Payment.payment_status == "completed",
+                                     Payment.payment_type.in_(["rent", "service_charge", "bundle", "initial"]))
+        ny_paid_from_payments = sum(
+            p.amount or 0 for p in ny_payments
+            if p.created_at and renewal_start <= p.created_at < renewal_start.replace(year=renewal_start.year + 1)
+        )
+        if ny_paid_from_payments > 0:
+            ny_paid_display = min(ny_total, ny_paid_from_payments)
+            ny_outstanding  = max(0, ny_total - ny_paid_from_payments)
+        else:
+            ny_outstanding  = tracked_out if out_for_next_year else 0
+            ny_paid_display = max(0, ny_total - ny_outstanding) if out_for_next_year else 0
 
         overview["yearly_payment"] = {
             "current_year": {
