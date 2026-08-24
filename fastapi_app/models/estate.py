@@ -45,6 +45,17 @@ class Estate(Base):
     # PDF's "Prepared By" section is simply omitted until one is.
     lawyer_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
+    # Letterhead branding for receipts/statements — distinct from `name`
+    # (the internal estate label, e.g. "Balado Estate") because the managing
+    # company's registered name/phone/logo may differ. Null falls back to
+    # `name` / the owner's phone / an initials badge, so nothing breaks for
+    # an estate that hasn't set these. company_name may contain a newline —
+    # the first line renders as the bold company name, the rest as a
+    # smaller subtitle (e.g. "SAMFRED\nGLOBAL RESOURCES LTD").
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company_phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

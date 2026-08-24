@@ -191,6 +191,7 @@ R_RED   = HexColor("#ff0000")
 R_GREY  = HexColor("#e7e6e6")
 
 _CO_NAME = ParagraphStyle("co",   fontName="Helvetica-Bold", fontSize=20, textColor=R_BLUE, leading=24)
+_CO_NAME2 = ParagraphStyle("co2", fontName="Helvetica-Bold", fontSize=14, textColor=R_BLUE, leading=17)
 _CO_SUB  = ParagraphStyle("cos",  fontName="Helvetica",      fontSize=11, textColor=INK, leading=15)
 _LOGO_TX = ParagraphStyle("lg",   fontName="Helvetica-Bold", fontSize=10, textColor=white, alignment=1, leading=13)
 _NOTICE_T = ParagraphStyle("rnt", fontName="Helvetica-Bold", fontSize=11, textColor=R_RED, leading=14)
@@ -208,25 +209,46 @@ def generate_receipt_pdf(receipt_data: dict, tenant_info: dict, estate_info: dic
                   next_year, tenancy_duration, tenant_total_stay, year_duration,
                   next_increase_date, next_rent_increase,
                   next_service_charge_increase, total_increase
-    estate_info:  name, address, phone, increase_percent, increase_cycle_years
+    estate_info:  name, address, phone, increase_percent, increase_cycle_years,
+                  company_name (letterhead name, may contain \n for a second
+                  styled line), company_phone, logo_url (falls back to name/
+                  phone/an initials badge when unset)
     """
     rd, ti, ei = receipt_data or {}, tenant_info or {}, estate_info or {}
     cw = content_width()
-    name = (ei.get("name") or "BamiHost").upper()
-    initials = "".join(w[0] for w in name.split()[:2]).upper() or "BH"
+    company_name = ei.get("company_name") or ei.get("name") or "BamiHost"
+    name_lines = str(company_name).split("\n")
+    initials = "".join(w[0] for w in name_lines[0].split()[:2]).upper() or "BH"
 
     # Letterhead: name/address/tel left, logo box right
-    left_lines = [Paragraph(name, _CO_NAME)]
+    left_lines = [Paragraph(name_lines[0].upper(), _CO_NAME)]
+    for extra in name_lines[1:]:
+        left_lines.append(Paragraph(f"<u>{extra.upper()}</u>", _CO_NAME2))
     if ei.get("address"):
         left_lines.append(Paragraph(str(ei["address"]).upper(), _CO_SUB))
-    if ei.get("phone"):
-        left_lines.append(Paragraph(f"Tel: {ei['phone']}", _CO_SUB))
-    logo = Table([[Paragraph(initials, _LOGO_TX)]], colWidths=[70], rowHeights=[70])
-    logo.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), HexColor("#0056b3")),
-        ("BOX",        (0, 0), (-1, -1), 1.2, HexColor("#2c5aa0")),
-        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
-    ]))
+    phone = ei.get("company_phone") or ei.get("phone")
+    if phone:
+        left_lines.append(Paragraph(f"Tel: {phone}", _CO_SUB))
+
+    logo_url = ei.get("logo_url")
+    logo_img = None
+    if logo_url:
+        try:
+            import requests
+            resp = requests.get(logo_url, timeout=5)
+            resp.raise_for_status()
+            logo_img = Image(io.BytesIO(resp.content), width=70, height=70)
+        except Exception:
+            logo_img = None
+    if logo_img is not None:
+        logo = logo_img
+    else:
+        logo = Table([[Paragraph(initials, _LOGO_TX)]], colWidths=[70], rowHeights=[70])
+        logo.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), HexColor("#0056b3")),
+            ("BOX",        (0, 0), (-1, -1), 1.2, HexColor("#2c5aa0")),
+            ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ]))
     header = Table([[left_lines, logo]], colWidths=[cw - 90, 90])
     header.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "TOP"),

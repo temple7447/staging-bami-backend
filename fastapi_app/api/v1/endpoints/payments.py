@@ -244,6 +244,11 @@ async def _tenancy_receipt_context(db: AsyncSession, tenant: Tenant, as_of: date
         "estate_name": estate.name if estate else "BamiHost",
         "estate_address": (estate.address if estate else "") or "",
         "estate_phone": (owner.phone if owner else "") or "",
+        # Letterhead branding: falls back to the estate label / owner phone /
+        # no logo when the estate hasn't set its own company identity.
+        "company_name": (estate.company_name if estate else None) or (estate.name if estate else "BamiHost"),
+        "company_phone": (estate.company_phone if estate else None) or (owner.phone if owner else "") or "",
+        "logo_url": (estate.logo_url if estate else None) or None,
         "increase_percent": estate.rent_increase_percent if estate else 0,
         "increase_cycle_years": estate.rent_increase_cycle_years if estate else 0,
         "bedroom_type": bedroom_type,
@@ -312,6 +317,9 @@ async def get_payment_receipts(
             "estate_name": ctx["estate_name"],
             "estate_address": ctx["estate_address"],
             "estate_phone": ctx["estate_phone"],
+            "company_name": ctx["company_name"],
+            "company_phone": ctx["company_phone"],
+            "logo_url": ctx["logo_url"],
             "increase_percent": ctx["increase_percent"],
             "increase_cycle_years": ctx["increase_cycle_years"],
             "meter_no": tenant.electric_meter_number or "",
@@ -417,6 +425,8 @@ async def download_receipt(pid: str, db: AsyncSession = Depends(get_db), user: U
     estate_info = {
         "name": ctx["estate_name"], "address": ctx["estate_address"],
         "phone": ctx["estate_phone"],
+        "company_name": ctx["company_name"], "company_phone": ctx["company_phone"],
+        "logo_url": ctx["logo_url"],
         "increase_percent": ctx["increase_percent"],
         "increase_cycle_years": ctx["increase_cycle_years"],
     }
