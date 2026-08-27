@@ -47,6 +47,7 @@ import models.tenancy_agreement  # noqa: F401
 import models.delete_otp  # noqa: F401
 from middleware.logging import logging_middleware
 from middleware.camelize import camelize_response_middleware
+from middleware.maintenance import maintenance_middleware
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -85,6 +86,13 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# Maintenance-mode kill switch — registered BEFORE CORS is added below so it
+# ends up wrapped BY CORS (CORS wraps whatever's registered earlier — see
+# middleware/maintenance.py's docstring for why this matters: without CORS
+# wrapping it, a blocked request's 503 would arrive with no CORS headers and
+# just look like a network error in the browser, not a readable message).
+app.middleware("http")(maintenance_middleware)
 
 # CORS
 app.add_middleware(

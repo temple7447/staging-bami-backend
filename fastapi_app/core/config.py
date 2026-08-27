@@ -120,6 +120,13 @@ class Settings(BaseSettings):
     ADMIN_OTP_PHONE: str = ""
     ADMIN_OTP_EMAIL: str = ""
 
+    # Shared secret for the machine-to-machine "auto-enable maintenance mode"
+    # endpoint (used by the scheduled monthly routine, not by any human
+    # login) — deliberately separate from any real user's password, and this
+    # endpoint can only ever turn maintenance ON, never off, to limit what a
+    # leaked secret could do. Empty by default = that endpoint 404s.
+    MAINTENANCE_TOGGLE_SECRET: str = ""
+
     # Environment
     NODE_ENV: str = "development"
 
