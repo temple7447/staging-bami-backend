@@ -30,7 +30,8 @@ def _end_date_display(entry_date) -> str:
 # names rather than the underscores this was drafted with.
 TERMS_TEMPLATE = [
     "The Landlord lets and the Tenant takes on a daily Tenancy the Apartment in the "
-    "Demised Premises at a rent of {rent_display} yearly for the apartment as aforesaid.",
+    "Demised Premises at a rent of {rent_display} yearly, translating to approximately "
+    "{rent_display_monthly} per month, for the apartment as aforesaid.",
     "That the “Tenant” shall one day before the expiration of the above sum in the "
     "Recitals paid OR ONE DAY BEFORE the anniversary of this tenancy pay his rent either "
     "reviewable or renewable and/or upon any term agreable by the Parties.",
@@ -181,6 +182,7 @@ async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, est
         "bedroom_count": bedroom_count,
         "rent_amount": rent,
         "rent_display": _naira(rent),
+        "rent_display_monthly": _naira(rent / 12),
         "caution_fee": caution,
         "caution_fee_display": _naira(caution),
         "legal_fee": legal,
