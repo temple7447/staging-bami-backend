@@ -7,59 +7,136 @@ it's the platform-wide default a tenant reads and e-signs from their
 dashboard. Estate owners who need bespoke clauses should treat this as a
 starting point today (a per-estate editor is a natural follow-up, not built
 here)."""
+from datetime import timedelta
 from utils.sms_service import format_currency as _naira
 from utils.rent_calculator import get_current_rent, resolve_increase_start
 from utils.time_utils import utcnow
 
 
+def _end_date_display(entry_date) -> str:
+    if not entry_date:
+        return "the tenancy end date"
+    try:
+        end = entry_date.replace(year=entry_date.year + 1) - timedelta(days=1)
+    except ValueError:
+        # entry was Feb 29 and next year isn't a leap year
+        end = entry_date.replace(year=entry_date.year + 1, day=28) - timedelta(days=1)
+    return end.strftime("%d %b %Y")
+
+
+# The operative "NOW IT IS HEREBY AGREED AS FOLLOWS" clauses (the estate
+# owner's own tenancy-agreement wording, adopted platform-wide as the
+# default). Renders under each tenant's frozen {rent_display} / dates /
+# names rather than the underscores this was drafted with.
 TERMS_TEMPLATE = [
-    "The Tenant shall pay rent of {rent_display} for the {unit_label} at {estate_name} "
-    "as agreed with the Landlord, on or before each due date.",
-    "The Tenant confirms having inspected the premises and accepts it as being, at the "
-    "start of this tenancy, in good and tenantable condition.",
-    "This tenancy begins on {start_date_display} and continues on the agreed cycle unless "
-    "ended by written notice from either party, or immediately for a serious breach of "
-    "these terms.",
-    "The Tenant shall not assign, sublet, or transfer possession of the premises, in whole "
-    "or in part, without the Landlord's prior written consent.",
-    "The premises shall be used strictly for residential purposes and shall not be used "
-    "for any commercial, illegal, or nuisance-causing activity.",
-    "The Landlord is not responsible for insuring, or for any loss or damage to, the "
-    "Tenant's personal property, however caused.",
-    "The Tenant shall comply with all applicable health, safety, and sanitation "
-    "regulations, and any estate rules communicated by the Landlord or management.",
-    "Before vacating, the Tenant shall arrange a joint inspection with the Landlord or "
-    "management and shall repair or make good any damage beyond normal wear and tear.",
-    "The Tenant shall not make structural alterations, fixtures, or additions to the "
-    "premises without the Landlord's prior written consent.",
-    "Any involvement by the Tenant in criminal activity on the premises may result in "
-    "immediate termination of this tenancy without refund of rent already paid.",
-    "The Tenant shall ensure electrical appliances, sockets, and water taps are switched "
-    "off when not in use or when the premises are unoccupied.",
-    "The Tenant shall not store flammable or hazardous materials on the premises, or use "
-    "open flames in a manner that creates a fire risk.",
-    "The Tenant shall maintain the premises' fixtures and fittings in good order for the "
-    "duration of the tenancy.",
-    "Any damage to the premises caused by the Tenant's negligence — including fire, water "
-    "damage, or misuse of fittings — shall be repaired at the Tenant's cost.",
-    "The Tenant shall not cause a nuisance or disturb neighbouring occupants' quiet "
-    "enjoyment of their own units.",
-    "The Tenant intending not to renew this tenancy shall give notice as agreed and vacate "
-    "the premises by the end of the tenancy period, returning all keys to the Landlord.",
-    "The Landlord or an authorised representative may enter the premises at reasonable "
-    "times, with prior notice, to inspect condition or carry out necessary repairs.",
-    "The Tenant is responsible for the security of their own property within the "
-    "premises; the Landlord accepts no liability for theft or burglary.",
-    "The Tenant shall pay utility bills (including electricity) attributable to the unit "
-    "promptly and provide proof of payment to the Landlord or management on request.",
-    "Where the premises has a prepaid meter or similar utility arrangement, the Tenant "
-    "shall keep it adequately funded and shall not tamper with or bypass it.",
-    "The Tenant shall promptly inform the Landlord or management of any person residing "
-    "with them for an extended period, for security and record purposes.",
-    "So long as the Tenant pays rent and observes these terms, they shall enjoy quiet "
-    "possession of the premises without interruption from the Landlord.",
-    "These terms represent the whole of the agreement between the parties on this tenancy "
-    "and supersede any prior discussion or understanding on the same subject.",
+    "The Landlord lets and the Tenant takes on a daily Tenancy the Apartment in the "
+    "Demised Premises at a rent of {rent_display} yearly for the apartment as aforesaid.",
+    "That the “Tenant” shall one day before the expiration of the above sum in the "
+    "Recitals paid OR ONE DAY BEFORE the anniversary of this tenancy pay his rent either "
+    "reviewable or renewable and/or upon any term agreable by the Parties.",
+    "This Tenancy agreement, which commences on {start_date_display} to {end_date_display} "
+    "is a continuous one except otherwise determined by a written NOTICE TO QUIT and/or "
+    "failure to religiously abide by the terms created herein regulating the tenancy, "
+    "which shall automatically determine the tenancy, upon a seven days notice.",
+    "The Tenant agrees that he has examined the Apartment and its appurtenances and that "
+    "it was, at the time of the execution of these present, in good order and in "
+    "tenantable condition.",
+    "The Tenant shall not assign, underlet, sublet, transfer or part with possession of "
+    "the “Apartment” and its appurtenances or any part thereof without the prior "
+    "written consent of the Landlord, first had and obtained. Upon the tenant committing "
+    "the act thereof, the tenancy shall automatically determine.",
+    "The Tenant shall apply the Apartment in the Demised Premises in a fair and "
+    "tenantable manner and shall not do or permit or suffer to be done on the Demised "
+    "Premises/Apartment anything, which may be a nuisance to the Landlord or the other "
+    "Residents and/or neighbours and shall apply the Apartment/Demised Premises strictly "
+    "for residential purposes, devoid of any taint of commercial purposes.",
+    "The Tenant hereby causes to admit that the Landlord shall not provide insurance "
+    "coverage for Tenant’s property, nor shall the Landlord be responsible for any loss "
+    "of Tenant’s property, whether by theft, fire, acts of God, force, third party "
+    "intervention or otherwise.",
+    "The Tenant shall comply with all the health and sanitary laws, ordinances, rules and "
+    "orders of appropriate governmental authorities and homes associations, if any, with "
+    "respect to the Apartment and the Demised Premises.",
+    "The Tenant before giving up possession shall cause to invite the Landlord in writing "
+    "for the purpose of carrying out a joint inspection of the Apartment and the tenant "
+    "shall repair or replace anything that is damaged in the apartment during the tenancy "
+    "and shall put the Apartment in a tenantable condition.",
+    "The Tenant shall drive no nails or other objects whatsoever into the wall of the "
+    "Apartment/Demised Premises without the express written consent of the Landlord, "
+    "first had and obtained.",
+    "The Tenant shall make no alterations to the Apartment or construct any building or "
+    "make other improvements without the prior written consent of the Landlord. Upon the "
+    "said breach, the Tenancy shall determined and/or the Tenant shall forfeit such "
+    "fixtures to the Landlord, without any lien.",
+    "The Tenant shall not be involved in fighting, stealing, trafficking of drugs and any "
+    "criminal or illegal activities whatsoever. If the tenant is involved in any or all "
+    "of the above vices, the consequences shall be immediate determination of the tenancy "
+    "without refund of rent and forfeiture of caution fee.",
+    "The Tenant must ensure that all electrical appliances, sockets are switched off and "
+    "water taps turned off before leaving the Apartment/Demised Premises at all times.",
+    "The Tenant shall not be involved in indiscriminate use of candle light, storage of "
+    "fuel (petrol) in the Apartment/Demised Premises.",
+    "During the Tenancy, the Tenant shall keep the Apartment in tenantable condition and "
+    "repair all the fixtures and fittings and shall also ensure that outside security "
+    "lights are always lighted in the evening/night, either with generating set or BEDC.",
+    "The Tenant hereby confirm that all fittings in the accommodation are in good and "
+    "perfect order and upon any demarcation and/or alteration on the Apartment, the "
+    "Tenant shall restore the Apartment to its original and tenantable state upon "
+    "determination of the tenancy.",
+    "The Tenant shall not cause or constitute nuisance in the Apartment/Demised Premises, "
+    "Neither shall he/she disturb the neighbours of the quiet enjoyment of their "
+    "Apartment/Residence and upon such act, the Landlord is at liberty to determine the "
+    "tenancy sooner or later and the balance rent returned thereto to the tenant.",
+    "That the Tenant not willing to continue with his tenancy shall vacate the Apartment "
+    "at the end of the month in which the tenancy expires and shall submit the keys to "
+    "the Landlord.",
+    "The Tenant shall participate in the monthly environmental sanitation on the "
+    "Apartment/Demised Premises every last Saturday of the month to be held by the "
+    "tenants and the tenant must possess his private/personal refuse bin.",
+    "The Tenant shall not under any circumstances use fire or any combustible equipment, "
+    "gadget or apparatus in the Apartment/Demised Premises hereby let to him. Such an act "
+    "shall automatically lead to the determination of the tenancy.",
+    "The tenant who causes any fire incident occasioning damage to the "
+    "Apartment/Demised Premises shall undertake the repair or cost of same.",
+    "The Tenant who is at liberty to make use of generating set shall put off same at "
+    "12:00am (midnight) in accordance with the local security procedures put in place "
+    "therein.",
+    "The Tenant shall not gain entrance into the Apartment/Demised Premises as from "
+    "12:00am (midnight).",
+    "The Tenant shall pay security, cleaning of the Demised Premises and other levies "
+    "that shall be approved from time to time in the area where the Apartment/Demised "
+    "Premises is situate. The Tenants shall also make provision for waste disposal bin "
+    "and also make arrangement for its evacuation.",
+    "The Tenant shall be responsible for, the security of his Apartment/Demised Premises "
+    "and/or properties. The Owner/Landlord admits no liability for theft, burglary and "
+    "incidental matters thereto.",
+    "The Tenant hereby agrees further with the Landlord that any criminality (including "
+    "fighting) shall automatically lead to the determination of the tenancy hereby "
+    "created. The Tenant shall also maintain orderliness in parking and removal of his "
+    "cars and vehicles and also ensure peaceful co-existence with his neighbours thereof.",
+    "The Tenant shall pay his electricity bills monthly and hand over photocopies of the "
+    "receipt of payment to the Landlord, whilst keeping the original copy with him for "
+    "the records and for the purpose of verification of payment by BEDC officials. The "
+    "Tenant shall also ensure that a minimum of 30kw/h is always maintained in its "
+    "prepaid meter and for no reason whatsoever make any by-pass thereof.",
+    "The Landlord and Landlord’s agents shall have the right at all reasonable times "
+    "during the pendency of the terms herein created and any renewal thereto to enter the "
+    "Apartment/Demised Premises for the purpose of inspecting the Apartment and/or "
+    "examine the state and condition thereof.",
+    "The Tenant undertake to promptly drain the soak-away pit/septic tank which is the "
+    "responsibility of the tenant whenever same is filled to capacity.",
+    "The Tenant before giving up possession, shall paint the interior of the Apartment "
+    "and replace all Damaged fixtures and fittings after a joint inspection by the "
+    "parties herein to ascertain the state of things as it is.",
+    "For security reasons and for the avoidance of any embarrassment, the Tenant shall "
+    "promptly disclose the identity/introduce to the Landlord any person coming to spend "
+    "a reasonable length of time with him in the Apartment/Demised premises.",
+    "The Tenant paying the rent and observing and performing all these obligations under "
+    "this agreement, shall quietly enjoy his tenancy without any interruption by the "
+    "Landlord, or any person claiming through, under or in trust for the Landlord.",
+    "These terms herein created regulate the parties to the title, and any previous "
+    "understanding and/or representation is hereby extinguished upon the execution of "
+    "these Present.",
 ]
 
 
@@ -110,6 +187,10 @@ async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, est
         "legal_fee_display": _naira(legal),
         "start_date": (tenant.entry_date.isoformat() if tenant.entry_date else None),
         "start_date_display": (tenant.entry_date.strftime("%d %b %Y") if tenant.entry_date else "the tenancy start date"),
+        # The last day of the current 1-year cycle — start date plus one
+        # year, minus a day (e.g. 1 Sep 2025 -> 31 Aug 2026), matching the
+        # "MOVE IN DATE / EXPIRY DATE" convention already used on receipts.
+        "end_date_display": _end_date_display(tenant.entry_date),
         "prepared_by_name": prepared_by["name"],
         "prepared_by_address": prepared_by["address"],
         "prepared_by_phone": prepared_by["phone"],
