@@ -183,6 +183,7 @@ async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, est
         "rent_amount": rent,
         "rent_display": _naira(rent),
         "rent_display_monthly": _naira(rent / 12),
+        "rent_display_daily": _naira(rent / 365),
         "caution_fee": caution,
         "caution_fee_display": _naira(caution),
         "legal_fee": legal,
@@ -200,21 +201,33 @@ async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, est
     }
 
 
+class _SafeParties(dict):
+    """A missing/mistyped placeholder (e.g. an admin writing {rent_display_daily}
+    before that field existed, or any future typo) resolves to an empty
+    string instead of raising — so one bad reference degrades that one
+    phrase, not the entire clause. Far better for a live legal document than
+    either a whole clause silently reverting to raw "{curly braces}", or (the
+    old behavior) the tenant seeing programmer syntax in their agreement."""
+    def __missing__(self, key):
+        return ""
+
+
 def build_terms(parties: dict, custom_terms: list[str] | None = None) -> list[str]:
     """Interpolate the template with the frozen party details.
 
     An estate with its own custom_terms (Estate.tenancy_terms, set by the
     property admin/owner) fully replaces the platform default below — this
     estate's whole term set, not a merge. Clauses are still run through
-    .format(**parties) so an admin can reuse the same {rent_display} /
-    {unit_label} placeholders if they want, but a clause is never dropped
-    over a stray "{" a non-technical editor typed — it just falls back to
-    the raw text unformatted."""
+    .format_map(**parties) so an admin can reuse the same {rent_display} /
+    {unit_label} placeholders if they want; an unknown placeholder just
+    resolves to nothing (see _SafeParties) rather than ever showing raw
+    template syntax to a tenant."""
     template = custom_terms if custom_terms else TERMS_TEMPLATE
+    safe_parties = _SafeParties(parties)
     resolved = []
     for clause in template:
         try:
-            resolved.append(clause.format(**parties))
-        except (KeyError, IndexError, ValueError):
+            resolved.append(clause.format_map(safe_parties))
+        except (IndexError, ValueError):
             resolved.append(clause)
     return resolved
