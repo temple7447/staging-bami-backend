@@ -7,21 +7,39 @@ it's the platform-wide default a tenant reads and e-signs from their
 dashboard. Estate owners who need bespoke clauses should treat this as a
 starting point today (a per-estate editor is a natural follow-up, not built
 here)."""
-from datetime import timedelta
 from utils.sms_service import format_currency as _naira
 from utils.rent_calculator import get_current_rent, resolve_increase_start
 from utils.time_utils import utcnow
 
 
-def _end_date_display(entry_date) -> str:
+def _full_date_display(dt) -> str:
+    """'1 September 2026' — no leading zero on the day, full month name.
+    Matches the format already used on the dashboard's Move In Date /
+    Next Due cards."""
+    return f"{dt.day} {dt.strftime('%B %Y')}"
+
+
+def _current_period_start(entry_date, next_due):
+    """The start of the lease period the tenant is CURRENTLY on the books
+    for — mirrors the frontend's "Move In Date" card exactly: walk
+    entry_date forward a full year at a time until the next anniversary
+    would land on or after next_due_date. For a tenant who has renewed,
+    this is the renewed period's start, not their original move-in date
+    (which next_due_date has long since moved past)."""
     if not entry_date:
-        return "the tenancy end date"
-    try:
-        end = entry_date.replace(year=entry_date.year + 1) - timedelta(days=1)
-    except ValueError:
-        # entry was Feb 29 and next year isn't a leap year
-        end = entry_date.replace(year=entry_date.year + 1, day=28) - timedelta(days=1)
-    return end.strftime("%d %b %Y")
+        return None
+    if not next_due:
+        return entry_date
+    start = entry_date
+    while True:
+        try:
+            anniversary = start.replace(year=start.year + 1)
+        except ValueError:
+            anniversary = start.replace(year=start.year + 1, day=28)
+        if anniversary < next_due:
+            start = anniversary
+        else:
+            return start
 
 
 # The operative "NOW IT IS HEREBY AGREED AS FOLLOWS" clauses (the estate
@@ -36,7 +54,7 @@ TERMS_TEMPLATE = [
     "Recitals paid OR ONE DAY BEFORE the anniversary of this tenancy pay his rent either "
     "reviewable or renewable and/or upon any term agreable by the Parties.",
     "This Tenancy agreement, which commences on {start_date_display} to {end_date_display} "
-    "is a continuous one except otherwise determined by a written NOTICE TO QUIT and/or "
+    "is a continuous one except otherwise determined by a -- written NOTICE TO QUIT and/or "
     "failure to religiously abide by the terms created herein regulating the tenancy, "
     "which shall automatically determine the tenancy, upon a seven days notice.",
     "The Tenant agrees that he has examined the Apartment and its appurtenances and that "
@@ -189,11 +207,18 @@ async def build_parties(db, tenant, estate, unit, owner, next_due_date=None, est
         "legal_fee": legal,
         "legal_fee_display": _naira(legal),
         "start_date": (tenant.entry_date.isoformat() if tenant.entry_date else None),
-        "start_date_display": (tenant.entry_date.strftime("%d %b %Y") if tenant.entry_date else "the tenancy start date"),
-        # The last day of the current 1-year cycle — start date plus one
-        # year, minus a day (e.g. 1 Sep 2025 -> 31 Aug 2026), matching the
-        # "MOVE IN DATE / EXPIRY DATE" convention already used on receipts.
-        "end_date_display": _end_date_display(tenant.entry_date),
+        # The CURRENT lease period the tenant is on the books for — not
+        # necessarily their original move-in date. A tenant who has since
+        # renewed has next_due_date pushed past their first year, so this
+        # walks forward to the period that's actually active now, matching
+        # the dashboard's own "Move In Date" card exactly.
+        "start_date_display": (
+            _full_date_display(_current_period_start(tenant.entry_date, tenant.next_due_date))
+            if tenant.entry_date else "the tenancy start date"
+        ),
+        "end_date_display": (
+            _full_date_display(tenant.next_due_date) if tenant.next_due_date else "the tenancy end date"
+        ),
         "prepared_by_name": prepared_by["name"],
         "prepared_by_address": prepared_by["address"],
         "prepared_by_phone": prepared_by["phone"],
