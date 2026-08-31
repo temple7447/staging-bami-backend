@@ -375,7 +375,7 @@ async def add_station_staff(
     created = False
     password = None
     if not user:
-        password = generate_temp_password(8)
+        password = generate_temp_password(6)
         user = User(id=gen_uuid(), name=name, email=email, phone=(body.phone or None),
                     password=hash_password(password), role="wash_staff",
                     created_by=actor.id, email_verified=True)
@@ -383,7 +383,7 @@ async def add_station_staff(
         await save(db, Wallet(id=gen_uuid(), user_id=user.id, balance=0, currency="NGN"))
         created = True
     elif body.sendCredentials:
-        password = generate_temp_password(8)
+        password = generate_temp_password(6)
         user.password = hash_password(password)
         user.email_verified = True
         await save(db, user)

@@ -617,7 +617,7 @@ async def assign_estate_lawyer(
             lawyer.is_active = True
         else:
             legal_type = await _get_or_create_legal_business_type(db, user.id)
-            provisioned_password = generate_temp_password(8)
+            provisioned_password = generate_temp_password(6)
             lawyer = User(
                 id=gen_uuid(), name=name, email=email, phone=(body.phone or "").strip() or None,
                 business_address=(body.business_address or "").strip() or None,
@@ -973,7 +973,7 @@ async def add_estate_member(
     created = False
     password = None
     if not user:
-        password = generate_temp_password(8)
+        password = generate_temp_password(6)
         user = User(id=gen_uuid(), name=name, email=email, phone=(body.phone or None),
                     password=hash_password(password), role="manager",
                     assigned_estates=[estate_id], created_by=actor.id, email_verified=True)
@@ -990,7 +990,7 @@ async def add_estate_member(
         # as a brand-new account. (Their previous password stops working; they use
         # the newly emailed one.)
         if body.sendCredentials:
-            password = generate_temp_password(8)
+            password = generate_temp_password(6)
             user.password = hash_password(password)
             user.email_verified = True
         await save(db, user)

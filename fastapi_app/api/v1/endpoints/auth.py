@@ -456,7 +456,7 @@ async def onboard_business_owner(
     if await find_one(db, User, func.lower(User.email) == email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     owner = User(id=gen_uuid(), name=name, email=email, phone=phone,
                  password=hash_password(password), role="business_owner",
                  created_by=actor.id, email_verified=True)
@@ -548,7 +548,7 @@ async def resend_business_owner_credentials(
     actor: User = Depends(require_super_admin),
 ):
     owner = await _get_business_owner_or_404(db, owner_id)
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     owner.password = hash_password(password)
     owner.is_active = True
     owner.updated_at = utcnow()
@@ -620,7 +620,7 @@ async def onboard_manager(
     if await find_one(db, User, func.lower(User.email) == email):
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     manager = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
                    position=position, assigned_estates=estate_ids,
                    password=hash_password(password), role="manager",
@@ -709,7 +709,7 @@ async def resend_manager_credentials(
     actor: User = Depends(require_super_admin),
 ):
     manager = await _get_manager_or_404(db, manager_id)
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     manager.password = hash_password(password)
     manager.is_active = True
     manager.updated_at = utcnow()
@@ -771,7 +771,7 @@ async def onboard_vendor(
     if manager_id and not await find_one(db, User, User.id == manager_id, User.role == "manager"):
         raise HTTPException(status_code=400, detail="Selected manager was not found")
 
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     vendor = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
                   position=position, manager=manager_id, business_type_id=business_type_id,
                   password=hash_password(password), role="vendor",
@@ -873,7 +873,7 @@ async def resend_vendor_credentials(
     actor: User = Depends(require_super_admin),
 ):
     vendor = await _get_vendor_or_404(db, vendor_id)
-    password = generate_temp_password(8)
+    password = generate_temp_password(6)
     vendor.password = hash_password(password)
     vendor.is_active = True
     vendor.updated_at = utcnow()
