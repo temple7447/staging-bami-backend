@@ -114,22 +114,22 @@ app.include_router(api_router)
 
 
 # ── Health endpoints ──────────────────────────────────────────────────────────
-@app.get("/health", tags=["Health"])
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
 async def health():
     return {"success": True, "status": "healthy", "version": settings.API_VERSION}
 
 
-@app.get("/health/ready", tags=["Health"])
+@app.api_route("/health/ready", methods=["GET", "HEAD"], tags=["Health"])
 async def ready():
     return {"ready": True}
 
 
-@app.get("/health/live", tags=["Health"])
+@app.api_route("/health/live", methods=["GET", "HEAD"], tags=["Health"])
 async def live():
     return {"alive": True}
 
 
-@app.get("/", tags=["Root"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Root"])
 async def root():
     return {
         "success": True,
