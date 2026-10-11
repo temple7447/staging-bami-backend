@@ -108,6 +108,13 @@ async def register_meter(
     existing = await find_one(db, MeterDevice, MeterDevice.device_id == body.device_id)
     if existing:
         raise HTTPException(status_code=409, detail="Device already registered")
+    # One meter per apartment — the tenant's app resolves "their" meter by unit.
+    unit_meter = await find_one(db, MeterDevice, MeterDevice.unit == body.unit_id,
+                                MeterDevice.is_active == True)
+    if unit_meter:
+        raise HTTPException(status_code=409,
+                            detail=f"{unit.label} already has a meter ({unit_meter.device_name or unit_meter.device_id}). "
+                                   "Remove it first to register a different one.")
 
     # Try to fetch device info from Tuya if credentials configured
     device_name = body.device_name
@@ -141,6 +148,112 @@ async def register_meter(
         await save(db, unit)
 
     return {"success": True, "message": "Meter registered", "data": _meter_dict(meter)}
+
+
+# ── admin: bulk-register meters for an estate ─────────────────────────────────
+
+class BulkMeterRow(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    unit_label:   str            = Field(..., alias="unitLabel")
+    device_id:    str            = Field(..., alias="deviceId")
+    meter_number: Optional[str]  = Field(None, alias="meterNumber")
+    rate_per_kwh: Optional[float]= Field(None, alias="ratePerKwh")
+
+
+class BulkRegisterMeters(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    estate_id: str               = Field(..., alias="estateId")
+    rows:      list[BulkMeterRow]
+    dry_run:   bool              = Field(True, alias="dryRun")
+
+
+@router.post("/bulk")
+async def bulk_register_meters(
+    body: BulkRegisterMeters,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Attach many meters to the apartments of ONE estate, matched by unit label.
+
+    All-or-nothing: if any row has a problem nothing is written and every row's
+    result says what is wrong, so the sheet can be fixed and re-sent. `dryRun`
+    (the default) validates without writing."""
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admins only")
+    await require_estate_access(db, user, body.estate_id, "manager")   # this writes
+    if not body.rows:
+        raise HTTPException(status_code=400, detail="No rows provided")
+    if len(body.rows) > 500:
+        raise HTTPException(status_code=400, detail="At most 500 meters per import")
+
+    def _key(label: str) -> str:
+        return " ".join((label or "").split()).casefold()
+
+    units = await find_all(db, Unit, Unit.estate == body.estate_id, Unit.is_active == True, limit=5000)
+    by_label: dict[str, list[Unit]] = {}
+    for u in units:
+        by_label.setdefault(_key(u.label), []).append(u)
+
+    metered_units = {m.unit for m in await find_all(db, MeterDevice, MeterDevice.estate == body.estate_id,
+                                                    MeterDevice.is_active == True, limit=5000)}
+    wanted_ids = [r.device_id.strip() for r in body.rows if r.device_id.strip()]
+    taken_ids = set()
+    if wanted_ids:
+        rows = await find_all(db, MeterDevice, MeterDevice.device_id.in_(wanted_ids), limit=5000)
+        taken_ids = {m.device_id for m in rows}
+
+    results, seen_ids, seen_units, valid = [], set(), set(), []
+    for i, r in enumerate(body.rows, start=1):
+        label, device_id = r.unit_label.strip(), r.device_id.strip()
+        error = None
+        matches = by_label.get(_key(label), [])
+        if not label or not device_id:
+            error = "Unit label and device ID are both required"
+        elif not matches:
+            error = f"No apartment named '{label}' in this estate"
+        elif len(matches) > 1:
+            error = f"More than one apartment is named '{label}' — rename one first"
+        elif device_id in taken_ids:
+            error = "This device is already registered"
+        elif device_id in seen_ids:
+            error = "This device ID appears more than once in the file"
+        elif matches[0].id in metered_units:
+            error = f"{matches[0].label} already has a meter"
+        elif matches[0].id in seen_units:
+            error = f"{matches[0].label} appears more than once in the file"
+        if r.rate_per_kwh is not None and r.rate_per_kwh <= 0:
+            error = error or "Rate per kWh must be positive"
+        seen_ids.add(device_id)
+        if matches:
+            seen_units.add(matches[0].id)
+        results.append({"row": i, "unit_label": label, "device_id": device_id,
+                        "status": "error" if error else "ok", "error": error})
+        if not error:
+            valid.append((matches[0], r, device_id))
+
+    errors = sum(1 for x in results if x["status"] == "error")
+    created = 0
+    if not body.dry_run and errors == 0:
+        tenants = await find_all(db, Tenant, Tenant.unit.in_([u.id for u, _, _ in valid]),
+                                 Tenant.is_active == True, limit=5000)
+        tenant_by_unit = {t.unit: t.id for t in tenants}
+        for unit, r, device_id in valid:
+            number = (r.meter_number or "").strip() or unit.meter_number
+            db.add(MeterDevice(
+                id=gen_uuid(), device_id=device_id, device_name=f"Meter – {unit.label}",
+                unit=unit.id, estate=unit.estate, tenant=tenant_by_unit.get(unit.id),
+                meter_number=number, rate_per_kwh=r.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE,
+                baseline_date=utcnow(),
+            ))
+            if (r.meter_number or "").strip():
+                unit.meter_number = number
+        await db.commit()
+        created = len(valid)
+
+    return {"success": errors == 0, "data": {
+        "dry_run": body.dry_run, "total": len(results), "valid": len(results) - errors,
+        "errors": errors, "created": created, "results": results,
+    }}
 
 
 # ── admin: list all meters ────────────────────────────────────────────────────
