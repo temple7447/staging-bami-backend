@@ -428,11 +428,13 @@ async def list_my_transactions(
     ]}
 
 
-async def execute_billing_payment(db: AsyncSession, tenant: Tenant, wallet: Wallet,
-                                   item_ids: list, duration_months: int, created_by: str,
-                                   source: str = "wallet") -> dict:
-    """Charge the wallet for the selected billing items. Shared by the tenant
-    pay endpoint and the auto-pay scheduler. Raises HTTPException on failure."""
+async def price_billing_items(db: AsyncSession, tenant: Tenant, item_ids: list,
+                              duration_months: int) -> tuple[list, list, float]:
+    """Price the selected billing items and enforce the billing rules (valid
+    items, first-payment-must-cover-everything). Returns
+    (items_to_process, fee_items, total_amount). Raises HTTPException.
+    Shared by the wallet charge and by Paystack direct payment, so both
+    price identically."""
     origin = tenant.entry_date if tenant else utcnow()
     _r, _c, _s = await estate_config_for(db, tenant.estate) if tenant else (None, None, None)
     if tenant:
@@ -514,6 +516,17 @@ async def execute_billing_payment(db: AsyncSession, tenant: Tenant, wallet: Wall
                 raise HTTPException(status_code=400,
                                     detail=f"Your first payment must cover everything due. Missing: {names}. "
                                            "You can choose 6 or 12 months of rent, but all fees must be included.")
+    return items_to_process, fee_items, total_amount
+
+
+async def execute_billing_payment(db: AsyncSession, tenant: Tenant, wallet: Wallet,
+                                   item_ids: list, duration_months: int, created_by: str,
+                                   source: str = "wallet") -> dict:
+    """Charge the wallet for the selected billing items. Shared by the tenant
+    pay endpoint and the auto-pay scheduler. Raises HTTPException on failure."""
+    items_to_process, fee_items, total_amount = await price_billing_items(
+        db, tenant, item_ids, duration_months)
+    all_items = items_to_process + fee_items
 
     if wallet.balance < total_amount:
         raise HTTPException(status_code=400,

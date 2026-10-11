@@ -75,14 +75,14 @@ async def create_wallet(
     return {"success": True, "data": {"id": wallet.id}}
 
 
-# Retired with the Paystack integration (2026-08-12). A wallet is now only ever
-# credited by (a) a reviewer approving a bank deposit against its transfer
-# proof, (b) an admin credit, or (c) an incoming wallet transfer — every one of
-# them backed by a human confirming money actually moved.
+# A client call can never credit a wallet. A wallet is only credited by (a) a
+# verified Paystack payment (api/v1/endpoints/paystack.py — the amount is read
+# back from Paystack), (b) a reviewer approving a bank deposit against its
+# transfer proof, (c) an admin credit, or (d) an incoming wallet transfer.
 _NO_GATEWAY = (
-    "Self-service top-ups by card are no longer available. Transfer to the "
-    "company account and submit the deposit with your proof of payment — your "
-    "wallet is credited as soon as it's confirmed."
+    "Top-ups can't be credited by a client call. Pay online with Paystack "
+    "(POST /api/paystack/initialize), or transfer to the company account and "
+    "submit the deposit with your proof of payment."
 )
 
 

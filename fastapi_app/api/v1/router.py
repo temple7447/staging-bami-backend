@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from api.v1.endpoints import auth, estates, units, tenants, dashboard
-from api.v1.endpoints import wallet, billing, payments
+from api.v1.endpoints import wallet, billing, payments, paystack
 from api.v1.endpoints import notifications, issues, service_requests, enquiries, feedback
 from api.v1.endpoints import subscriptions, withdrawals, misc, distribution, wallets, meters, billionaire
 from api.v1.endpoints import carwash
@@ -30,6 +30,7 @@ api_router.include_router(dashboard.router)
 api_router.include_router(wallet.router)
 api_router.include_router(billing.router)
 api_router.include_router(payments.router)
+api_router.include_router(paystack.router)
 api_router.include_router(notifications.router)
 api_router.include_router(issues.router)
 api_router.include_router(service_requests.router)

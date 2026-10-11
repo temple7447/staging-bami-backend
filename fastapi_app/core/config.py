@@ -127,6 +127,10 @@ class Settings(BaseSettings):
     # leaked secret could do. Empty by default = that endpoint 404s.
     MAINTENANCE_TOGGLE_SECRET: str = ""
 
+    # Paystack (card / bank transfer / USSD checkout). Empty = Paystack payments
+    # are unavailable and every Paystack endpoint refuses to start a payment.
+    PAYSTACK_SECRET_KEY: str = ""
+
     # Environment
     NODE_ENV: str = "development"
 
