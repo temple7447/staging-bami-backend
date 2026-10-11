@@ -550,7 +550,8 @@ async def topup_my_meter(
     # 1. Reachable before we take a naira.
     try:
         info = await tuya.get_device_info(meter.device_id)
-        balance_before = await tuya.read_balance_kwh(meter.device_id)
+        status_before = await tuya.get_device_status(meter.device_id)
+        balance_before = tuya.parse_status(status_before)["balance_kwh"]
     except Exception:
         raise HTTPException(status_code=502, detail="We could not reach your meter. You have not been charged — please try again shortly.")
     if not info.get("online"):
@@ -599,24 +600,40 @@ async def topup_my_meter(
         await refund("meter rejected the recharge")
         raise HTTPException(status_code=502, detail="Your meter did not accept the top-up. Your wallet has been refunded.")
 
+    # Two signs of delivery, whichever comes first:
+    #  * the meter acknowledges the credit (its charge_energy now reads exactly
+    #    what we sent) — seen within ~1 minute on breaker meters;
+    #  * the balance rises by the amount — breaker meters can take ~5 minutes
+    #    to report that.
+    # The acknowledgement only counts if it changed, since a repeat of the same
+    # amount would look identical to the last top-up.
+    units = int(round(kwh * 100))
+    charge_before = status_before.get("charge_energy")
     confirmed, balance_after = False, None
-    # The meter takes ~20 s to report a new balance, so give it up to ~35 s.
-    for _ in range(12):
-        await asyncio.sleep(3)
+    for _ in range(15):
+        await asyncio.sleep(4)
         try:
-            balance_after = await tuya.read_balance_kwh(meter.device_id)
+            status = await tuya.get_device_status(meter.device_id)
         except Exception:
             continue
-        if balance_before is None or balance_after is None:
-            confirmed = balance_after is None and balance_before is None   # no own balance to check (older meters)
+        balance_after = tuya.parse_status(status)["balance_kwh"]
+        if balance_before is None and balance_after is None and "charge_energy" not in status:
+            confirmed = True          # older meter with nothing to read back; Tuya accepted it
             break
-        if abs(balance_after - (balance_before + kwh)) <= 0.011:
+        if "charge_energy" in status and status["charge_energy"] == units and charge_before != units:
+            confirmed = True
+            break
+        if balance_before is not None and balance_after is not None \
+                and abs(balance_after - (balance_before + kwh)) <= 0.011:
             confirmed = True
             break
 
     tx.status = "completed" if confirmed else "unconfirmed"
     await save(db, tx)
-    if balance_after is not None:
+    if confirmed and balance_before is not None and (balance_after is None or balance_after < balance_before + kwh - 0.011):
+        # Delivered, but the meter's balance report lags — use what we know it holds.
+        meter.credit_balance = round((balance_before + kwh) * rate, 2)
+    elif balance_after is not None:
         meter.credit_balance = round(balance_after * rate, 2)
     elif confirmed:
         meter.credit_balance += body.amount          # older meters keep no balance of their own
