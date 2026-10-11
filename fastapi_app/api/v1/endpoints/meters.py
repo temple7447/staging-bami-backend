@@ -19,6 +19,8 @@ from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 import utils.tuya as tuya
+import asyncio
+import math
 import time
 from utils.time_utils import utcnow
 
@@ -40,6 +42,7 @@ def _meter_dict(m: MeterDevice) -> dict:
         "rate_per_kwh": m.rate_per_kwh,
         "prepaid_mode": m.prepaid_mode,
         "credit_balance": m.credit_balance,
+        "balance_kwh": round(m.credit_balance / m.rate_per_kwh, 2) if m.rate_per_kwh else None,
         "low_balance_threshold": m.low_balance_threshold,
         "last_kwh": m.last_kwh,
         "last_voltage": m.last_voltage,
@@ -523,77 +526,179 @@ async def topup_my_meter(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Buy electricity from the wallet and send it to the tenant's own meter.
+
+    Money only leaves the wallet for electricity that is really delivered:
+      1. the meter must be reachable (online) BEFORE anything is charged;
+      2. if Tuya refuses the recharge, the wallet is refunded in full;
+      3. after Tuya accepts, the meter's own balance is read back to confirm.
+    If it is accepted but not yet confirmed we keep the money and say so
+    (status "unconfirmed") rather than refund — a refund could give away power
+    the meter then applies."""
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
+    if not settings.TUYA_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Electricity top-up is not available right now")
 
     meter = await _get_tenant_meter(db, user)
+    rate = meter.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE
+    # The meter takes whole 0.01 kWh steps — round DOWN so nobody is credited more than they paid for.
+    kwh = math.floor(body.amount / rate * 100 + 1e-9) / 100
+    if kwh < 0.01:
+        raise HTTPException(status_code=400, detail="Amount is too small to buy any electricity")
 
-    # Deduct from wallet
+    # 1. Reachable before we take a naira.
+    try:
+        info = await tuya.get_device_info(meter.device_id)
+        balance_before = await tuya.read_balance_kwh(meter.device_id)
+    except Exception:
+        raise HTTPException(status_code=502, detail="We could not reach your meter. You have not been charged — please try again shortly.")
+    if not info.get("online"):
+        raise HTTPException(status_code=409, detail="Your meter is offline right now, so it can't be topped up. You have not been charged.")
+
     wallet = await find_one(db, Wallet, Wallet.user_id == user.id)
     if not wallet or wallet.balance < body.amount:
         raise HTTPException(status_code=400, detail="Insufficient wallet balance")
 
+    # 2. Take the money (recorded as pending until the meter confirms).
     wallet.balance -= body.amount
     wallet.total_spent += body.amount
     wallet.updated_at = utcnow()
     await save(db, wallet)
-
-    # Record transaction
+    reference = f"ELEC-{int(time.time()*1000)}"
+    label = meter.device_name or meter.meter_number
     tx = Transaction(
-        id=gen_uuid(), user=user.id, wallet_id=wallet.id,
-        amount=body.amount, type="electricity_topup", status="completed",
-        method="wallet",
-        reference=f"ELEC-{int(time.time()*1000)}",
-        description=f"Electricity top-up – {meter.device_name or meter.meter_number}",
-        created_by=user.id,
+        id=gen_uuid(), user=user.id, wallet_id=wallet.id, amount=body.amount,
+        type="electricity_topup", status="pending", method="wallet", reference=reference,
+        description=f"Electricity top-up – {label} ({kwh:g} kWh)", created_by=user.id,
     )
     await save(db, tx)
 
-    # Calculate kWh units purchased
-    kwh_purchased = body.amount / meter.rate_per_kwh
-    meter.credit_balance += body.amount
+    async def refund(reason: str):
+        wallet.balance += body.amount
+        wallet.total_spent -= body.amount
+        wallet.updated_at = utcnow()
+        tx.status = "failed"
+        tx.notes = reason
+        await save(db, wallet)
+        await save(db, tx)
+        await save(db, Transaction(
+            id=gen_uuid(), user=user.id, wallet_id=wallet.id, amount=body.amount,
+            type="electricity_refund", status="completed", method="wallet",
+            reference=f"{reference}-REFUND", description=f"Refund – electricity top-up could not be delivered",
+            created_by=user.id,
+        ))
 
-    # Push to Tuya if configured
-    tuya_success = False
-    if settings.TUYA_CLIENT_ID:
+    # 3. Deliver, then verify.
+    try:
+        accepted = await tuya.recharge_meter(meter.device_id, kwh)
+    except Exception as e:
+        await refund(f"recharge error: {e}"[:250])
+        raise HTTPException(status_code=502, detail="Your meter did not accept the top-up. Your wallet has been refunded.")
+    if not accepted:
+        await refund("meter rejected the recharge")
+        raise HTTPException(status_code=502, detail="Your meter did not accept the top-up. Your wallet has been refunded.")
+
+    confirmed, balance_after = False, None
+    # The meter takes ~20 s to report a new balance, so give it up to ~35 s.
+    for _ in range(12):
+        await asyncio.sleep(3)
         try:
-            tuya_success = await tuya.recharge_meter(meter.device_id, kwh_purchased)
-            if tuya_success and not meter.is_connected:
-                await tuya.set_switch(meter.device_id, True)
-                meter.is_connected = True
+            balance_after = await tuya.read_balance_kwh(meter.device_id)
+        except Exception:
+            continue
+        if balance_before is None or balance_after is None:
+            confirmed = balance_after is None and balance_before is None   # no own balance to check (older meters)
+            break
+        if abs(balance_after - (balance_before + kwh)) <= 0.011:
+            confirmed = True
+            break
+
+    tx.status = "completed" if confirmed else "unconfirmed"
+    await save(db, tx)
+    if balance_after is not None:
+        meter.credit_balance = round(balance_after * rate, 2)
+    elif confirmed:
+        meter.credit_balance += body.amount          # older meters keep no balance of their own
+    if confirmed and not meter.is_connected:
+        try:
+            await tuya.set_switch(meter.device_id, True)
+            meter.is_connected = True
         except Exception:
             pass
-
     meter.updated_at = utcnow()
     await save(db, meter)
 
-    # Notify tenant
-    notif = Notification(
+    await save(db, Notification(
         id=gen_uuid(), user=user.id,
-        title="Electricity Top-Up Successful",
-        message=(
-            f"₦{body.amount:,.0f} added — {kwh_purchased:.1f} kWh units credited to your meter. "
-            f"New balance: ₦{meter.credit_balance:,.0f}"
-        ),
+        title="Electricity Top-Up Successful" if confirmed else "Electricity Top-Up Received",
+        message=(f"₦{body.amount:,.0f} added — {kwh:g} kWh credited to your meter."
+                 if confirmed else
+                 f"We received ₦{body.amount:,.0f} for {kwh:g} kWh. Your meter hasn't confirmed it yet — it will update shortly."),
         type="meter_topup",
-    )
-    await save(db, notif)
+    ))
 
     return {
         "success": True,
-        "message": "Top-up successful",
+        "message": "Top-up successful" if confirmed else "Top-up received — waiting for your meter to confirm",
         "data": {
             "amount_paid": body.amount,
-            "kwh_purchased": round(kwh_purchased, 2),
+            "kwh_purchased": kwh,
+            "status": "completed" if confirmed else "unconfirmed",
             "new_balance": meter.credit_balance,
+            "balance_kwh": round(meter.credit_balance / rate, 2) if rate else None,
             "new_wallet_balance": wallet.balance,
-            "tuya_updated": tuya_success,
+            "tuya_updated": confirmed,
             "transaction_id": tx.id,
         },
     }
 
 
 # ── admin: remote disconnect/reconnect ────────────────────────────────────────
+
+class PrepaymentRequest(BaseModel):
+    enabled: bool
+    confirm: bool = False      # required to switch ON when the balance is zero
+
+
+@router.post("/{meter_id}/prepayment")
+async def set_meter_prepayment(
+    meter_id: str,
+    body: PrepaymentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Turn the meter's OWN prepaid mode on/off. ON means the meter itself cuts
+    power the moment its balance hits zero, so switching it on for a meter with
+    no credit cuts that apartment immediately — hence the explicit `confirm`."""
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admins only")
+    meter = await find_one(db, MeterDevice, MeterDevice.id == meter_id, MeterDevice.is_active == True)
+    if not meter:
+        raise HTTPException(status_code=404, detail="Meter not found")
+    await require_estate_access(db, user, meter.estate, "manager")
+
+    try:
+        balance = await tuya.read_balance_kwh(meter.device_id)
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not reach the meter")
+    if balance is None:
+        raise HTTPException(status_code=400, detail="This meter has no prepaid mode of its own")
+    if body.enabled and balance <= 0 and not body.confirm:
+        raise HTTPException(status_code=409,
+                            detail="This meter has no credit, so turning prepaid mode on will cut its power immediately. "
+                                   "Top it up first, or send confirm=true to go ahead.")
+    try:
+        ok = await tuya.set_prepayment(meter.device_id, body.enabled)
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(status_code=502, detail="The meter did not accept the change")
+    meter.prepaid_mode = body.enabled
+    meter.updated_at = utcnow()
+    await save(db, meter)
+    return {"success": True, "data": _meter_dict(meter)}
+
 
 @router.post("/{meter_id}/disconnect")
 async def disconnect_meter(

@@ -173,6 +173,7 @@ async def _sync_meters():
         from core.db_helpers import find_all, save
         from models.base import gen_uuid
         from core.config import settings
+        from datetime import timedelta
         import utils.tuya as tuya
 
         if not settings.TUYA_CLIENT_ID:
@@ -185,14 +186,24 @@ async def _sync_meters():
                 try:
                     raw = await tuya.get_device_status(meter.device_id)
                     parsed = tuya.parse_status(raw)
+                    # The status call succeeds even for an offline meter (it returns the
+                    # last known values), so ask Tuya whether it is actually online.
+                    info = await tuya.get_device_info(meter.device_id)
                     now = utcnow()
+                    # Breaker-type prepaid meters keep their own balance and cut power
+                    # by themselves at zero — mirror that rather than second-guess it.
+                    native_prepaid = parsed.get("balance_kwh") is not None
+                    if native_prepaid:
+                        meter.credit_balance = round(parsed["balance_kwh"] * meter.rate_per_kwh, 2)
+                        meter.prepaid_mode = parsed["prepayment"]
+                        meter.is_connected = bool(parsed["switch"])
 
                     meter.last_kwh = parsed["kwh"]
                     meter.last_voltage = parsed["voltage"]
                     meter.last_current = parsed["current"]
                     meter.last_power = parsed["power"]
                     meter.last_power_factor = parsed["power_factor"]
-                    meter.is_online = True
+                    meter.is_online = bool(info.get("online"))
                     meter.last_synced_at = now
                     meter.raw_status = parsed.get("raw", {})
                     await save(db, meter)
@@ -211,14 +222,48 @@ async def _sync_meters():
 
                     if (meter.prepaid_mode and meter.tenant
                             and 0 < meter.credit_balance <= meter.low_balance_threshold):
-                        await save(db, Notification(
-                            id=gen_uuid(), user=meter.tenant,
-                            title="Low Electricity Balance",
-                            message=f"Your electricity balance is ₦{meter.credit_balance:,.0f}. Top up to avoid disconnection.",
-                            type="meter_low_balance",
-                        ))
+                        from models.tenant import Tenant
+                        tenant = await db.get(Tenant, meter.tenant)
+                        # Notification.user is a USER id (meter.tenant is a tenant id), and
+                        # warn at most once a day rather than on every 30-minute sync.
+                        if tenant and tenant.user:
+                            recent = await find_all(
+                                db, Notification, Notification.user == tenant.user,
+                                Notification.type == "meter_low_balance",
+                                Notification.created_at >= now - timedelta(hours=24), limit=1)
+                            if not recent:
+                                await save(db, Notification(
+                                    id=gen_uuid(), user=tenant.user,
+                                    title="Low Electricity Balance",
+                                    message=f"Your electricity balance is ₦{meter.credit_balance:,.0f} "
+                                            f"(about {meter.credit_balance / meter.rate_per_kwh:.1f} kWh). "
+                                            "Top up to avoid disconnection.",
+                                    type="meter_low_balance",
+                                ))
 
-                    if meter.prepaid_mode and meter.credit_balance <= 0 and meter.is_connected:
+                    # A breaker meter that has cut itself off at zero: tell the tenant once.
+                    if native_prepaid and meter.prepaid_mode and meter.tenant and not meter.is_connected \
+                            and meter.credit_balance <= 0:
+                        from models.tenant import Tenant
+                        tenant = await db.get(Tenant, meter.tenant)
+                        if tenant and tenant.user:
+                            recent = await find_all(
+                                db, Notification, Notification.user == tenant.user,
+                                Notification.type == "meter_disconnect",
+                                Notification.created_at >= now - timedelta(hours=24), limit=1)
+                            if not recent:
+                                await save(db, Notification(
+                                    id=gen_uuid(), user=tenant.user,
+                                    title="Power Disconnected — Zero Balance",
+                                    message="Your electricity credit has run out and your meter has switched off. "
+                                            "Top up to restore power.",
+                                    type="meter_disconnect",
+                                ))
+
+                    # Software cut-off is only for older meters with no balance of their
+                    # own; breaker meters cut power themselves, so don't duplicate that.
+                    if (not native_prepaid and meter.prepaid_mode
+                            and meter.credit_balance <= 0 and meter.is_connected):
                         try:
                             await tuya.set_switch(meter.device_id, False)
                             meter.is_connected = False

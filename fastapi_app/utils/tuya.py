@@ -149,29 +149,79 @@ async def set_switch(device_id: str, on: bool) -> bool:
     return data.get("success", False)
 
 
-async def recharge_meter(device_id: str, kwh_units: float) -> bool:
-    """
-    Recharge prepaid meter by adding kWh units.
-    Tuya prepaid meters accept 'electricity_left' or 'remaining_electricity' DP.
-    Value unit is 0.01 kWh → multiply kwh_units * 100.
-    """
+async def _command(device_id: str, code: str, value) -> bool:
     data = await _request("POST", f"/v1.0/devices/{device_id}/commands",
-                          {"commands": [{"code": "remaining_electricity",
-                                         "value": int(kwh_units * 100)}]})
-    return data.get("success", False)
+                          {"commands": [{"code": code, "value": value}]})
+    return bool(data.get("success", False))
+
+
+async def set_prepayment(device_id: str, on: bool) -> bool:
+    """Turn the meter's own prepaid mode on/off. With it ON the meter itself cuts
+    power when its balance reaches zero, whether or not our server is reachable."""
+    return await _command(device_id, "switch_prepayment", on)
+
+
+async def recharge_meter(device_id: str, kwh_units: float) -> bool:
+    """Send purchased kWh to the meter. Returns whether Tuya accepted the command
+    (NOT whether the balance moved — callers verify with read_balance_kwh).
+
+    Breaker-type prepaid meters (category dlq) take `charge_energy`, scale 2
+    (0.01 kWh steps); older prepaid meters take `remaining_electricity`."""
+    status = await get_device_status(device_id)
+    units = int(round(kwh_units * 100))
+    if units <= 0:
+        return False
+    code = "charge_energy" if "charge_energy" in status else "remaining_electricity"
+    return await _command(device_id, code, units)
+
+
+async def read_balance_kwh(device_id: str):
+    """The meter's own remaining-credit reading in kWh, or None if it has none."""
+    status = await get_device_status(device_id)
+    return parse_status(status)["balance_kwh"]
+
+
+def _decode_phase(b64: str) -> tuple[float, float, float]:
+    """Breaker meters pack one phase into 8 bytes: voltage (0.1 V, 2 bytes),
+    current (mA, 3 bytes), power (W, 3 bytes)."""
+    import base64
+    try:
+        b = base64.b64decode(b64)
+    except Exception:
+        return 0.0, 0.0, 0.0
+    if len(b) < 8:
+        return 0.0, 0.0, 0.0
+    return (int.from_bytes(b[0:2], "big") / 10,
+            int.from_bytes(b[2:5], "big") / 1000,
+            float(int.from_bytes(b[5:8], "big")))
 
 
 def parse_status(raw: dict) -> dict:
     """
     Normalize Tuya DP values to human-readable units.
 
-    Raw Tuya values use integer encoding:
-      cur_voltage   / 10  → V
-      cur_current   / 1000 → A
-      cur_power     / 10  → W
-      add_ele       / 100 → kWh  (some devices /1000)
-      power_factor  / 100 → ratio
+    Two families are understood:
+      * breaker meters (category dlq): phase_a (packed), total_forward_energy and
+        balance_energy (both 0.01 kWh), switch_prepayment
+      * plain energy meters: cur_voltage/10, cur_current/1000, cur_power/10,
+        add_ele/100, power_factor/100
+    `balance_kwh` is the meter's own remaining credit, or None when the device
+    has no prepaid balance of its own.
     """
+    if "phase_a" in raw:
+        v, a, w = _decode_phase(raw.get("phase_a") or "")
+        return {
+            "voltage": v, "current": a, "power": w,
+            "kwh": round((raw.get("total_forward_energy") or 0) / 100, 3),
+            "power_factor": 0.0,
+            "balance_kwh": round((raw.get("balance_energy") or 0) / 100, 3)
+                           if "balance_energy" in raw else None,
+            "prepayment": bool(raw.get("switch_prepayment", False)),
+            "switch": raw.get("switch", True),
+            "fault": raw.get("fault", 0),
+            "raw": raw,
+        }
+
     def _v(code, divisor, default=0.0):
         val = raw.get(code, 0)
         return round(val / divisor, 3) if isinstance(val, (int, float)) else default
@@ -182,6 +232,8 @@ def parse_status(raw: dict) -> dict:
         "power":         _v("cur_power", 10),
         "kwh":           _v("add_ele", 100),
         "power_factor":  _v("power_factor", 100),
+        "balance_kwh":   None,
+        "prepayment":    False,
         "switch":        raw.get("switch", True),
         "fault":         raw.get("fault", 0),
         "raw":           raw,
