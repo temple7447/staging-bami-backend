@@ -19,6 +19,7 @@ from core.db_helpers import find_one, find_all, save, count
 from core.config import settings
 from models.base import gen_uuid
 import utils.tuya as tuya
+from api.v1.endpoints.settings import electricity_rate_per_kwh
 import asyncio
 import math
 import time
@@ -43,6 +44,7 @@ def _meter_dict(m: MeterDevice) -> dict:
         "prepaid_mode": m.prepaid_mode,
         "credit_balance": m.credit_balance,
         "balance_kwh": round(m.credit_balance / m.rate_per_kwh, 2) if m.rate_per_kwh else None,
+        "price_per_unit": round(m.rate_per_kwh / 100, 4) if m.rate_per_kwh else None,   # ₦ per 0.01 kWh
         "low_balance_threshold": m.low_balance_threshold,
         "last_kwh": m.last_kwh,
         "last_voltage": m.last_voltage,
@@ -138,7 +140,7 @@ async def register_meter(
         estate=unit.estate,
         tenant=tenant.id if tenant else None,
         meter_number=body.meter_number or unit.meter_number,
-        rate_per_kwh=body.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE,
+        rate_per_kwh=body.rate_per_kwh or await electricity_rate_per_kwh(db),
         prepaid_mode=body.prepaid_mode,
         low_balance_threshold=body.low_balance_threshold,
         baseline_date=utcnow(),
@@ -240,12 +242,13 @@ async def bulk_register_meters(
         tenants = await find_all(db, Tenant, Tenant.unit.in_([u.id for u, _, _ in valid]),
                                  Tenant.is_active == True, limit=5000)
         tenant_by_unit = {t.unit: t.id for t in tenants}
+        platform_rate = await electricity_rate_per_kwh(db)
         for unit, r, device_id in valid:
             number = (r.meter_number or "").strip() or unit.meter_number
             db.add(MeterDevice(
                 id=gen_uuid(), device_id=device_id, device_name=f"Meter – {unit.label}",
                 unit=unit.id, estate=unit.estate, tenant=tenant_by_unit.get(unit.id),
-                meter_number=number, rate_per_kwh=r.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE,
+                meter_number=number, rate_per_kwh=r.rate_per_kwh or platform_rate,
                 baseline_date=utcnow(),
             ))
             if (r.meter_number or "").strip():
@@ -541,7 +544,7 @@ async def topup_my_meter(
         raise HTTPException(status_code=503, detail="Electricity top-up is not available right now")
 
     meter = await _get_tenant_meter(db, user)
-    rate = meter.rate_per_kwh or settings.TUYA_ELECTRICITY_RATE
+    rate = meter.rate_per_kwh or await electricity_rate_per_kwh(db)
     # The meter takes whole 0.01 kWh steps — round DOWN so nobody is credited more than they paid for.
     kwh = math.floor(body.amount / rate * 100 + 1e-9) / 100
     if kwh < 0.01:

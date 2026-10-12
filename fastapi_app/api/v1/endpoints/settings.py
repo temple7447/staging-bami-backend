@@ -16,6 +16,20 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 
 BANK_DEFAULTS = {"bank_name": "UBA", "account_number": "1234567890", "account_name": "BamiHost Properties Ltd"}
 
+# Electricity is priced per 0.01 kWh — the smallest step a prepaid meter takes.
+DEFAULT_ELECTRICITY_UNIT_PRICE = 0.70     # ₦ per 0.01 kWh  (= ₦70 per kWh)
+
+
+def _unit_price(data: dict) -> float:
+    price = data.get("electricity_unit_price")
+    return float(price) if isinstance(price, (int, float)) and price > 0 else DEFAULT_ELECTRICITY_UNIT_PRICE
+
+
+async def electricity_rate_per_kwh(db: AsyncSession) -> float:
+    """The platform electricity price as ₦ per kWh (what MeterDevice.rate_per_kwh stores)."""
+    setting = await find_one(db, Setting)
+    return round(_unit_price((setting.data or {}) if setting else {}) * 100, 4)
+
 
 class BankInfoBody(BaseModel):
     bank_name: Optional[str] = None
@@ -27,6 +41,7 @@ class PlatformSettingsBody(BaseModel):
     bank_info: Optional[BankInfoBody] = None
     maintenance_mode: Optional[bool] = None
     maintenance_message: Optional[str] = None
+    electricity_unit_price: Optional[float] = None    # ₦ per 0.01 kWh
 
 
 def _settings_payload(data: dict) -> dict:
@@ -34,6 +49,8 @@ def _settings_payload(data: dict) -> dict:
         "bankInfo": {**BANK_DEFAULTS, **(data.get("bank_info") or {})},
         "maintenanceMode": bool(data.get("maintenance_mode") or False),
         "maintenanceMessage": data.get("maintenance_message") or DEFAULT_MAINTENANCE_MESSAGE,
+        "electricityUnitPrice": _unit_price(data),
+        "electricityRatePerKwh": round(_unit_price(data) * 100, 4),
     }
 
 
@@ -67,12 +84,33 @@ async def update_platform_settings(
         data["maintenance_mode"] = body.maintenance_mode
     if body.maintenance_message is not None:
         data["maintenance_message"] = body.maintenance_message
+    repriced = 0
+    if body.electricity_unit_price is not None:
+        if not (0 < body.electricity_unit_price <= 1000):
+            raise HTTPException(status_code=400, detail="Electricity price must be between ₦0 and ₦1,000 per 0.01 kWh")
+        data["electricity_unit_price"] = round(body.electricity_unit_price, 4)
+        repriced = await _reprice_meters(db, data["electricity_unit_price"] * 100)
 
     setting.data = data
     await save(db, setting)
     _invalidate_maintenance_cache()
 
-    return {"success": True, "message": "Settings updated", "data": _settings_payload(data)}
+    return {"success": True, "message": "Settings updated",
+            "data": {**_settings_payload(data), "metersRepriced": repriced}}
+
+
+async def _reprice_meters(db: AsyncSession, rate_per_kwh: float) -> int:
+    """Apply the new price to every active meter. The prepaid credit lives on the
+    meter in kWh, so only its naira mirror is recalculated — nobody's kWh change."""
+    from models.meter_device import MeterDevice
+    from core.db_helpers import find_all
+    meters = await find_all(db, MeterDevice, MeterDevice.is_active == True, limit=100000)
+    for m in meters:
+        kwh_left = (m.credit_balance / m.rate_per_kwh) if m.rate_per_kwh else 0.0
+        m.rate_per_kwh = rate_per_kwh
+        m.credit_balance = round(kwh_left * rate_per_kwh, 2)
+    await db.commit()
+    return len(meters)
 
 
 @router.post("/maintenance/auto-enable")
