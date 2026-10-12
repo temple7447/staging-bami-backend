@@ -420,13 +420,20 @@ async def get_my_meter(
         try:
             raw = await tuya.get_device_status(meter.device_id)
             live = tuya.parse_status(raw)
+            info = await tuya.get_device_info(meter.device_id)
+            meter.is_online = bool(info.get("online"))
             meter.last_kwh = live["kwh"]
             meter.last_voltage = live["voltage"]
             meter.last_current = live["current"]
             meter.last_power = live["power"]
             meter.is_connected = live.get("switch", True)
+            if live.get("balance_kwh") is not None:
+                # Breaker meters hold the prepaid credit themselves — show theirs.
+                meter.credit_balance = round(live["balance_kwh"] * meter.rate_per_kwh, 2)
+                meter.prepaid_mode = live["prepayment"]
             meter.last_synced_at = utcnow()
             await save(db, meter)
+            live.pop("raw", None)
         except Exception:
             pass
 
