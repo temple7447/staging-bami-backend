@@ -12,7 +12,7 @@ from models.tenant import Tenant
 from models.notification import Notification
 from models.wallet import Wallet
 from models.transaction import Transaction
-from core.security import get_current_user
+from core.security import get_current_user, require_super_admin
 from core.database import get_db
 from core.authz import accessible_estate_ids, require_estate_access
 from core.db_helpers import find_one, find_all, save, count
@@ -694,6 +694,86 @@ async def topup_my_meter(
 
 
 # ── admin: remote disconnect/reconnect ────────────────────────────────────────
+
+class BulkPrepaymentRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    enabled:             bool
+    estate_id:           Optional[str] = Field(None, alias="estateId")      # omit = every estate
+    include_no_credit:   bool          = Field(False, alias="includeNoCredit")
+    dry_run:             bool          = Field(True, alias="dryRun")
+
+
+@router.post("/prepayment/bulk")
+async def bulk_set_prepayment(
+    body: BulkPrepaymentRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_super_admin),
+):
+    """Switch the prepaid mode of many smart meters at once (super admin only).
+
+    Only meters that have a prepaid balance of their own are touched; every
+    other meter is reported as unsupported. `dryRun` (the default) changes
+    nothing and returns what WOULD happen — notably which apartments would lose
+    power. Switching ON skips meters with no credit unless `includeNoCredit`,
+    because the meter cuts power the moment prepaid starts with a zero balance.
+    Offline meters are reported, never silently skipped."""
+    conditions = [MeterDevice.is_active == True]
+    if body.estate_id:
+        conditions.append(MeterDevice.estate == body.estate_id)
+    meters = await find_all(db, MeterDevice, *conditions, limit=501)
+    if not meters:
+        raise HTTPException(status_code=404, detail="No meters found")
+    if len(meters) > 500:
+        raise HTTPException(status_code=400, detail="Too many meters at once — pick one estate")
+
+    units = {u.id: u.label for u in await find_all(db, Unit, Unit.id.in_([m.unit for m in meters if m.unit]), limit=5000)}
+    sem = asyncio.Semaphore(5)
+
+    async def one(m: MeterDevice) -> dict:
+        row = {"meter_id": m.id, "device_id": m.device_id, "unit_label": units.get(m.unit, "—"),
+               "estate": m.estate, "balance_kwh": None, "status": "", "detail": ""}
+        async with sem:
+            try:
+                info = await tuya.get_device_info(m.device_id)
+                if not info.get("online"):
+                    return {**row, "status": "unreachable", "detail": "Meter is offline"}
+                parsed = tuya.parse_status(await tuya.get_device_status(m.device_id))
+            except Exception:
+                return {**row, "status": "unreachable", "detail": "Could not reach the meter"}
+            balance = parsed["balance_kwh"]
+            row["balance_kwh"] = balance
+            if balance is None:
+                return {**row, "status": "unsupported", "detail": "This meter has no prepaid mode of its own"}
+            if parsed["prepayment"] == body.enabled:
+                return {**row, "status": "unchanged", "detail": "Already " + ("on" if body.enabled else "off")}
+            if body.enabled and balance <= 0 and not body.include_no_credit:
+                return {**row, "status": "skipped_no_credit",
+                        "detail": "No credit — turning prepaid on would cut power immediately"}
+            if body.dry_run:
+                return {**row, "status": "will_change",
+                        "detail": ("Will cut power now (no credit)" if body.enabled and balance <= 0 else "Will switch")}
+            try:
+                ok = await tuya.set_prepayment(m.device_id, body.enabled)
+            except Exception:
+                ok = False
+            if not ok:
+                return {**row, "status": "failed", "detail": "The meter did not accept the change"}
+            m.prepaid_mode = body.enabled
+            m.updated_at = utcnow()
+            return {**row, "status": "changed", "detail": "Switched " + ("on" if body.enabled else "off")}
+
+    results = await asyncio.gather(*[one(m) for m in meters])
+    if not body.dry_run:
+        await db.commit()
+
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    return {"success": True, "data": {
+        "dry_run": body.dry_run, "enabled": body.enabled, "total": len(results),
+        "counts": counts, "results": results,
+    }}
+
 
 class PrepaymentRequest(BaseModel):
     enabled: bool
