@@ -152,6 +152,13 @@ async def register_meter(
         unit.meter_number = body.meter_number
         await save(db, unit)
 
+    # A tenant's record keeps its own copy of the meter number (taken when they
+    # were added); keep it in step so the tenant pages don't show a stale one.
+    if tenant and meter.meter_number and tenant.electric_meter_number != meter.meter_number:
+        tenant.electric_meter_number = meter.meter_number
+        tenant.updated_at = utcnow()
+        await save(db, tenant)
+
     return {"success": True, "message": "Meter registered", "data": _meter_dict(meter)}
 
 
@@ -242,6 +249,7 @@ async def bulk_register_meters(
         tenants = await find_all(db, Tenant, Tenant.unit.in_([u.id for u, _, _ in valid]),
                                  Tenant.is_active == True, limit=5000)
         tenant_by_unit = {t.unit: t.id for t in tenants}
+        tenant_obj_by_unit = {t.unit: t for t in tenants}
         platform_rate = await electricity_rate_per_kwh(db)
         for unit, r, device_id in valid:
             number = (r.meter_number or "").strip() or unit.meter_number
@@ -253,6 +261,10 @@ async def bulk_register_meters(
             ))
             if (r.meter_number or "").strip():
                 unit.meter_number = number
+            occupant = tenant_obj_by_unit.get(unit.id)
+            if occupant and number and occupant.electric_meter_number != number:
+                occupant.electric_meter_number = number      # keep the tenant's own copy in step
+                occupant.updated_at = utcnow()
         await db.commit()
         created = len(valid)
 
