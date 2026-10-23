@@ -83,48 +83,55 @@ def _phone_suffix(raw: str) -> str:
     return digits[-10:] if len(digits) >= 10 else digits
 
 
-async def _find_user_by_identifier(db: AsyncSession, identifier: str) -> User | None:
-    """Resolve a login identifier to a User — an email address, or a phone
-    number matched against User.phone regardless of how it was formatted."""
+MAX_LOGIN_CANDIDATES = 5
+
+
+async def _login_candidates(db: AsyncSession, identifier: str) -> list[User]:
+    """Every account the login identifier could belong to.
+
+    An email is unique. A phone number can legitimately match several accounts —
+    it may be saved on the login account itself, only on the tenant record (most
+    tenants: the number was never copied to the account), or shared (a manager and
+    a tenant, a family). So collect them all; the caller decides by password.
+    Phone numbers are compared by their last 10 digits, since they are stored as typed."""
     ident = (identifier or "").strip()
     if not ident:
-        return None
+        return []
     if "@" in ident:
-        return await find_one(db, User, func.lower(User.email) == ident.lower())
+        user = await find_one(db, User, func.lower(User.email) == ident.lower())
+        return [user] if user else []
 
     suffix = _phone_suffix(ident)
     if len(suffix) < 7:  # too short to be a real phone number
-        return None
-    matches = (await db.execute(
-        select(User).where(User.phone.isnot(None), User.phone.like(f"%{suffix}"))
-    )).scalars().all()
-    if len(matches) == 1:
-        return matches[0]
-    if matches:
-        return None          # ambiguous — more than one account has this number
-
-    # Most tenant login accounts carry no phone of their own — the number was only
-    # ever entered on the tenant record — so fall back to that. It is stored in
-    # whatever format it was typed ("+234 903 278 3640"), so compare digits here
-    # rather than in SQL. Only an unambiguous match counts.
+        return []
     from models.tenant import Tenant
+    found: dict[str, User] = {}
+    for u in (await db.execute(
+        select(User).where(User.phone.isnot(None), User.phone.like(f"%{suffix}"))
+    )).scalars().all():
+        found[u.id] = u
     rows = (await db.execute(
         select(Tenant.user, Tenant.tenant_phone).where(
             Tenant.is_active == True, Tenant.user.isnot(None), Tenant.tenant_phone.isnot(None))
     )).all()
-    user_ids = {uid for uid, phone in rows if _phone_suffix(phone) == suffix}
-    if len(user_ids) != 1:
-        return None
-    return await find_one(db, User, User.id == user_ids.pop())
+    for uid in {uid for uid, phone in rows if _phone_suffix(phone) == suffix} - found.keys():
+        u = await find_one(db, User, User.id == uid)
+        if u:
+            found[u.id] = u
+    return list(found.values())
 
 
 @router.post("/login")
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
-    user = await _find_user_by_identifier(db, body.email)
-    if not user:
+    candidates = await _login_candidates(db, body.email)
+    if not candidates or len(candidates) > MAX_LOGIN_CANDIDATES:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not verify_password(body.password, user.password):
+    # Decide by password. Exactly one account must match: if two accounts sharing a
+    # number also share a password we can't tell them apart, so refuse (use email).
+    matching = [u for u in candidates if verify_password(body.password, u.password)]
+    if len(matching) != 1:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    user = matching[0]
     if not user.is_active:
         raise HTTPException(status_code=401, detail="Account has been deactivated")
 
