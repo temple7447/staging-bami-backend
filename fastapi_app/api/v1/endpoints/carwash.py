@@ -31,6 +31,7 @@ from core.authz import (
     require_station_access, accessible_station_ids,
 )
 from core.db_helpers import find_one, find_all, save, count, sum_col
+from core.contact_unique import ensure_unique_contact
 from core.config import settings
 from models.base import gen_uuid
 from utils.tenant_helpers import generate_temp_password
@@ -372,6 +373,8 @@ async def add_station_staff(
         raise HTTPException(status_code=409, detail="This email is already the station owner (admin)")
 
     user = await find_one(db, User, func.lower(User.email) == email)
+    if (body.phone or "").strip():
+        await ensure_unique_contact(db, phone=body.phone, exclude_user_ids=[user.id if user else None])
     created = False
     password = None
     if not user:

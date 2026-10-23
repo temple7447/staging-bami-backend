@@ -19,6 +19,7 @@ from core.security import get_current_user, hash_password, require_super_admin
 from core.database import get_db
 from core.authz import require_tenant_access, require_estate_access, accessible_estate_ids
 from core.db_helpers import find_one, find_all, save, count, sum_col
+from core.contact_unique import ensure_unique_contact, find_contact_conflict, phone_key
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for, add_months
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start, current_lease_year_start
@@ -127,6 +128,16 @@ async def create_tenant(
     if email_addr:
         await _reject_active_email_conflict(db, user, email_addr,
                                             same_unit=(estate_id, unit.label))
+
+    # No email or phone may already belong to someone else. A returning tenant (same
+    # account) and whoever is being replaced in this unit are not "someone else".
+    replaced = await find_all(db, Tenant, Tenant.estate == estate_id, Tenant.unit_label == unit.label,
+                              Tenant.is_active == True)
+    returning = await find_one(db, User, func.lower(User.email) == email_addr.lower()) if email_addr else None
+    await ensure_unique_contact(
+        db, email=email_addr or None, phone=phone or None,
+        exclude_user_ids=[returning.id if returning else None] + [t.user for t in replaced],
+        exclude_tenant_ids=[t.id for t in replaced])
 
     duration = body.duration_months
     if tenant_type == "new":
@@ -795,9 +806,15 @@ async def update_tenant(
         new_email = (body.tenant_email or body.email or "").strip()
         if new_email and new_email.lower() != (tenant.tenant_email or "").lower():
             await _reject_active_email_conflict(db, user, new_email, exclude_tenant_id=tenant.id)
+            await ensure_unique_contact(db, email=new_email, exclude_user_ids=[tenant.user],
+                                        exclude_tenant_ids=[tenant.id])
         tenant.tenant_email = new_email or tenant.tenant_email
     if body.tenant_phone or body.whatsapp:
-        tenant.tenant_phone = body.tenant_phone or body.whatsapp
+        new_phone = body.tenant_phone or body.whatsapp
+        if phone_key(new_phone) != phone_key(tenant.tenant_phone):
+            await ensure_unique_contact(db, phone=new_phone, exclude_user_ids=[tenant.user],
+                                        exclude_tenant_ids=[tenant.id])
+        tenant.tenant_phone = new_phone
         if tenant.user:
             account = await db.get(User, tenant.user)
             if account:
@@ -1025,9 +1042,16 @@ async def resend_tenant_credentials(
             account.email = email_addr
         account.password = hash_password(generated_password)
         account.is_active = True
-        account.phone = phone or account.phone
+        # Keep the account's phone in step with the tenant's — unless that number
+        # already belongs to someone else, in which case leave it alone (credentials
+        # still go out; they sign in with their email).
+        if phone and phone_key(phone) != phone_key(account.phone) and not await find_contact_conflict(
+                db, phone=phone, exclude_user_ids=[account.id], exclude_tenant_ids=[tenant.id]):
+            account.phone = phone
         await save(db, account)
     else:
+        if phone and await find_contact_conflict(db, phone=phone, exclude_tenant_ids=[tenant.id]):
+            phone = ""     # someone else's number — create the account without it
         account = User(id=gen_uuid(), name=tenant.tenant_name or "Tenant", email=email_addr,
                        password=hash_password(generated_password), role="tenant",
                        phone=phone or None, created_by=user.id, email_verified=True)

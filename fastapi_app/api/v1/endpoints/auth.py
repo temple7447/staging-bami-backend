@@ -20,6 +20,7 @@ from core.security import (
 )
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save
+from core.contact_unique import ensure_unique_contact
 from utils.email_service import send_welcome_email, send_password_reset
 from utils.tenant_helpers import generate_temp_password
 from models.base import gen_uuid
@@ -57,6 +58,7 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     existing = await find_one(db, User, User.email == body.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
+    await ensure_unique_contact(db, email=body.email, phone=getattr(body, "phone", None), reveal_owner=False)
 
     user = User(
         id=gen_uuid(),
@@ -183,6 +185,9 @@ async def update_details(
     current_user: User = Depends(get_current_user),
 ):
     allowed = {"name", "phone", "position", "bio"}
+    new_phone = (body.get("phone") or "").strip()
+    if new_phone:
+        await ensure_unique_contact(db, phone=new_phone, exclude_user_ids=[current_user.id])
     for key, val in body.items():
         if key in allowed:
             setattr(current_user, key, val)
@@ -479,6 +484,7 @@ async def onboard_business_owner(
         raise HTTPException(status_code=400, detail="Name, email and phone are required")
     if await find_one(db, User, func.lower(User.email) == email):
         raise HTTPException(status_code=400, detail="Email already registered")
+    await ensure_unique_contact(db, phone=phone)
 
     password = generate_temp_password(6)
     owner = User(id=gen_uuid(), name=name, email=email, phone=phone,
@@ -515,6 +521,8 @@ async def update_business_owner(
         owner.name = body["name"].strip()
     if body.get("phone") is not None:
         owner.phone = (body["phone"] or "").strip() or None
+        if owner.phone:
+            await ensure_unique_contact(db, phone=owner.phone, exclude_user_ids=[owner.id])
     if body.get("email"):
         new_email = body["email"].strip().lower()
         if new_email != (owner.email or "").lower():
@@ -643,6 +651,7 @@ async def onboard_manager(
         raise HTTPException(status_code=400, detail="Name and email are required")
     if await find_one(db, User, func.lower(User.email) == email):
         raise HTTPException(status_code=400, detail="Email already registered")
+    await ensure_unique_contact(db, phone=phone)
 
     password = generate_temp_password(6)
     manager = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
@@ -679,6 +688,8 @@ async def update_manager(
         manager.name = body["name"].strip()
     if body.get("phone") is not None:
         manager.phone = (body["phone"] or "").strip() or None
+        if manager.phone:
+            await ensure_unique_contact(db, phone=manager.phone, exclude_user_ids=[manager.id])
     if body.get("position") is not None:
         manager.position = (body["position"] or "").strip() or None
     if body.get("email"):
@@ -792,6 +803,7 @@ async def onboard_vendor(
         raise HTTPException(status_code=400, detail="Name and email are required")
     if await find_one(db, User, func.lower(User.email) == email):
         raise HTTPException(status_code=400, detail="Email already registered")
+    await ensure_unique_contact(db, phone=phone)
     if manager_id and not await find_one(db, User, User.id == manager_id, User.role == "manager"):
         raise HTTPException(status_code=400, detail="Selected manager was not found")
 
@@ -830,6 +842,8 @@ async def update_vendor(
         vendor.name = body["name"].strip()
     if body.get("phone") is not None:
         vendor.phone = (body["phone"] or "").strip() or None
+        if vendor.phone:
+            await ensure_unique_contact(db, phone=vendor.phone, exclude_user_ids=[vendor.id])
     if body.get("email"):
         new_email = body["email"].strip().lower()
         if new_email != (vendor.email or "").lower():

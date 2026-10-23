@@ -24,6 +24,7 @@ from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
 from pydantic import BaseModel, Field, ConfigDict
 from core.db_helpers import find_all, find_one, save, count, sum_col
+from core.contact_unique import ensure_unique_contact
 from core.config import settings
 from models.base import gen_uuid
 from utils.date_range import resolve_date_range
@@ -609,6 +610,9 @@ async def assign_estate_lawyer(
         if existing and existing.role != "vendor":
             raise HTTPException(status_code=400, detail=f"{email} is already used by a {existing.role} account — use a different email")
 
+        new_phone = (body.phone or "").strip()
+        if new_phone:
+            await ensure_unique_contact(db, phone=new_phone, exclude_user_ids=[existing.id if existing else None])
         if existing:
             lawyer = existing
             lawyer.name = name
@@ -970,6 +974,8 @@ async def add_estate_member(
         raise HTTPException(status_code=409, detail="This email is already the property owner (admin)")
 
     user = await find_one(db, User, func.lower(User.email) == email)
+    if (body.phone or "").strip():
+        await ensure_unique_contact(db, phone=body.phone, exclude_user_ids=[user.id if user else None])
     created = False
     password = None
     if not user:
