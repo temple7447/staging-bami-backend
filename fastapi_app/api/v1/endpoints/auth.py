@@ -98,7 +98,24 @@ async def _find_user_by_identifier(db: AsyncSession, identifier: str) -> User | 
     matches = (await db.execute(
         select(User).where(User.phone.isnot(None), User.phone.like(f"%{suffix}"))
     )).scalars().all()
-    return matches[0] if len(matches) == 1 else None
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        return None          # ambiguous — more than one account has this number
+
+    # Most tenant login accounts carry no phone of their own — the number was only
+    # ever entered on the tenant record — so fall back to that. It is stored in
+    # whatever format it was typed ("+234 903 278 3640"), so compare digits here
+    # rather than in SQL. Only an unambiguous match counts.
+    from models.tenant import Tenant
+    rows = (await db.execute(
+        select(Tenant.user, Tenant.tenant_phone).where(
+            Tenant.is_active == True, Tenant.user.isnot(None), Tenant.tenant_phone.isnot(None))
+    )).all()
+    user_ids = {uid for uid, phone in rows if _phone_suffix(phone) == suffix}
+    if len(user_ids) != 1:
+        return None
+    return await find_one(db, User, User.id == user_ids.pop())
 
 
 @router.post("/login")
