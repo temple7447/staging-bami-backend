@@ -17,6 +17,11 @@ class Subscription(Base):
     status: Mapped[str] = mapped_column(String(50), default="Active")
     features: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # What the money buys: domain | frontend | backend | other
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(255), nullable=True)   # e.g. Vercel, Render, Namecheap
+    # One entry per payment: {id, paid_on, amount, months, period_start, period_end, note}
+    payments: Mapped[list] = mapped_column(JSON, default=list)
     start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

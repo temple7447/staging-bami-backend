@@ -182,3 +182,6 @@ client_secret_*.apps.googleusercontent.com.json
 logs/supervisord.pid
 logs/supervisord.log
 logs/supervisor.sock
+
+# Python virtualenv
+venv/
