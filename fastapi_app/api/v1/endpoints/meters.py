@@ -111,7 +111,7 @@ async def register_meter(
     await require_estate_access(db, user, unit.estate)
 
     existing = await find_one(db, MeterDevice, MeterDevice.device_id == body.device_id)
-    if existing:
+    if existing and existing.is_active:
         raise HTTPException(status_code=409, detail="Device already registered")
     # One meter per apartment — the tenant's app resolves "their" meter by unit.
     unit_meter = await find_one(db, MeterDevice, MeterDevice.unit == body.unit_id,
@@ -132,19 +132,37 @@ async def register_meter(
 
     tenant = await find_one(db, Tenant, Tenant.unit == body.unit_id, Tenant.is_active == True)
 
-    meter = MeterDevice(
-        id=gen_uuid(),
-        device_id=body.device_id,
-        device_name=device_name or f"Meter – {unit.label}",
-        unit=body.unit_id,
-        estate=unit.estate,
-        tenant=tenant.id if tenant else None,
-        meter_number=body.meter_number or unit.meter_number,
-        rate_per_kwh=body.rate_per_kwh or await electricity_rate_per_kwh(db),
-        prepaid_mode=body.prepaid_mode,
-        low_balance_threshold=body.low_balance_threshold,
-        baseline_date=utcnow(),
-    )
+    rate = body.rate_per_kwh or await electricity_rate_per_kwh(db)
+    if existing:
+        # device_id is unique, so a previously unassigned meter is reactivated
+        # and re-pointed at this unit instead of inserting a second row.
+        meter = existing
+        meter.is_active = True
+        meter.device_name = device_name or f"Meter – {unit.label}"
+        meter.unit = body.unit_id
+        meter.estate = unit.estate
+        meter.tenant = tenant.id if tenant else None
+        meter.meter_number = body.meter_number or unit.meter_number
+        meter.rate_per_kwh = rate
+        meter.prepaid_mode = body.prepaid_mode
+        meter.low_balance_threshold = body.low_balance_threshold
+        meter.baseline_kwh = meter.last_kwh
+        meter.baseline_date = utcnow()
+        meter.updated_at = utcnow()
+    else:
+        meter = MeterDevice(
+            id=gen_uuid(),
+            device_id=body.device_id,
+            device_name=device_name or f"Meter – {unit.label}",
+            unit=body.unit_id,
+            estate=unit.estate,
+            tenant=tenant.id if tenant else None,
+            meter_number=body.meter_number or unit.meter_number,
+            rate_per_kwh=rate,
+            prepaid_mode=body.prepaid_mode,
+            low_balance_threshold=body.low_balance_threshold,
+            baseline_date=utcnow(),
+        )
     await save(db, meter)
 
     # Update unit's meter_number field
@@ -210,9 +228,11 @@ async def bulk_register_meters(
                                                     MeterDevice.is_active == True, limit=5000)}
     wanted_ids = [r.device_id.strip() for r in body.rows if r.device_id.strip()]
     taken_ids = set()
+    inactive_by_device: dict[str, MeterDevice] = {}   # unassigned meters, reusable
     if wanted_ids:
         rows = await find_all(db, MeterDevice, MeterDevice.device_id.in_(wanted_ids), limit=5000)
-        taken_ids = {m.device_id for m in rows}
+        taken_ids = {m.device_id for m in rows if m.is_active}
+        inactive_by_device = {m.device_id: m for m in rows if not m.is_active}
 
     results, seen_ids, seen_units, valid = [], set(), set(), []
     for i, r in enumerate(body.rows, start=1):
@@ -253,12 +273,23 @@ async def bulk_register_meters(
         platform_rate = await electricity_rate_per_kwh(db)
         for unit, r, device_id in valid:
             number = (r.meter_number or "").strip() or unit.meter_number
-            db.add(MeterDevice(
-                id=gen_uuid(), device_id=device_id, device_name=f"Meter – {unit.label}",
-                unit=unit.id, estate=unit.estate, tenant=tenant_by_unit.get(unit.id),
-                meter_number=number, rate_per_kwh=r.rate_per_kwh or platform_rate,
-                baseline_date=utcnow(),
-            ))
+            old = inactive_by_device.get(device_id)
+            if old:
+                old.is_active = True
+                old.device_name = f"Meter – {unit.label}"
+                old.unit, old.estate = unit.id, unit.estate
+                old.tenant = tenant_by_unit.get(unit.id)
+                old.meter_number = number
+                old.rate_per_kwh = r.rate_per_kwh or platform_rate
+                old.baseline_kwh, old.baseline_date = old.last_kwh, utcnow()
+                old.updated_at = utcnow()
+            else:
+                db.add(MeterDevice(
+                    id=gen_uuid(), device_id=device_id, device_name=f"Meter – {unit.label}",
+                    unit=unit.id, estate=unit.estate, tenant=tenant_by_unit.get(unit.id),
+                    meter_number=number, rate_per_kwh=r.rate_per_kwh or platform_rate,
+                    baseline_date=utcnow(),
+                ))
             if (r.meter_number or "").strip():
                 unit.meter_number = number
             occupant = tenant_obj_by_unit.get(unit.id)

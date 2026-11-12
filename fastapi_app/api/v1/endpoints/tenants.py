@@ -223,6 +223,18 @@ async def create_tenant(
     unit.updated_by = user.id
     await save(db, unit)
 
+    # Point the unit's smart meter (if any) at the new occupant, so low-balance
+    # alerts and admin top-ups reach them rather than the previous tenant.
+    from models.meter_device import MeterDevice
+    unit_meter = await find_one(db, MeterDevice, MeterDevice.unit == body.unit_id, MeterDevice.is_active == True)
+    if unit_meter:
+        unit_meter.tenant = tenant.id
+        unit_meter.updated_at = utcnow()
+        await save(db, unit_meter)
+        if unit_meter.meter_number and tenant.electric_meter_number != unit_meter.meter_number:
+            tenant.electric_meter_number = unit_meter.meter_number
+            await save(db, tenant)
+
     if email_addr and generated_password:
         await send_welcome_email(email_addr, full_name or "Tenant", generated_password, phone=phone)
         if phone and sms_service.is_configured():
