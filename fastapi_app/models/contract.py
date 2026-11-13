@@ -1,4 +1,4 @@
-from sqlalchemy import String, Boolean, DateTime, JSON, Float, Text
+from sqlalchemy import String, Boolean, DateTime, JSON, Float, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base, gen_uuid
 from datetime import datetime
@@ -18,6 +18,13 @@ class Contract(Base):
     total_amount: Mapped[float] = mapped_column(Float, default=0.0)
     currency: Mapped[str] = mapped_column(String(3), default="NGN")              # NGN | USD
     status: Mapped[str] = mapped_column(String(20), default="active")            # active | completed | cancelled
+    # project  = a fixed price job (total_amount, instalments)
+    # retainer = monthly support with no fixed total: monthly_amount due on billing_day each month
+    kind: Mapped[str] = mapped_column(String(20), default="project", server_default="project")
+    monthly_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    billing_day: Mapped[int | None] = mapped_column(Integer, nullable=True)     # 1-28
+    start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # [{id, label, amount, due_date}] — due_date is YYYY-MM-DD or null
     instalments: Mapped[list] = mapped_column(JSON, default=list)
     # [{id, paid_on, amount, method, note, recorded_by, recorded_by_name}]

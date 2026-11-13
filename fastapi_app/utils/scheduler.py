@@ -580,8 +580,8 @@ async def _check_contract_dues():
             sent = 0
             for c in contracts:
                 calc = calc_contract(c, today)
-                if calc["balance"] <= 0.005:
-                    continue
+                if not any(i["status"] != "paid" for i in calc["instalments"]):
+                    continue                  # nothing scheduled and unpaid, so nothing to remind about
                 recipients = {a.id for a in admins} | ({c.developer_id} if c.developer_id else set())
                 for i in calc["instalments"]:
                     left = i["days_until_due"]
@@ -596,8 +596,9 @@ async def _check_contract_dues():
                     else:
                         continue
                     msg = (f"{c.title}: the {i['label']} instalment of "
-                           f"{format_money(i['outstanding'], c.currency)} {when}. "
-                           f"Total still owed on this contract: {format_money(calc['balance'], c.currency)}.")
+                           f"{format_money(i['outstanding'], c.currency)} {when}."
+                           + (f" Total still owed on this contract: {format_money(calc['balance'], c.currency)}."
+                              if (c.kind or "project") == "project" else ""))
                     for uid in recipients:
                         if await find_one(db, Notification, Notification.user == uid,
                                           Notification.type == "contract_due", Notification.message == msg,

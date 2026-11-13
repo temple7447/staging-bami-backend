@@ -102,11 +102,15 @@ def generate_invoice_pdf(contract: dict, developer: dict) -> bytes:
             ("Currency", "US Dollar (USD)" if cur == "USD" else "Naira (NGN)"),
         ], w),
         Spacer(1, 10),
-        section_table("Summary", [
+        section_table("Summary", ([
+            ("Monthly support", f"{money(contract['monthly_amount'], cur)} per month (due on day {contract.get('billing_day') or 1})"),
+            ("Received so far", money(contract["paid"], cur), GREEN),
+            ("Owed now", money(balance, cur), RED if balance > 0.005 else GREEN),
+        ] if contract.get("kind") == "retainer" else [
             ("Agreed total", money(contract["total_amount"], cur)),
             ("Received so far", money(contract["paid"], cur), GREEN),
             ("Still owed", money(balance, cur), RED if balance > 0.005 else GREEN),
-        ], w),
+        ]), w),
         total_row("BALANCE DUE" if balance > 0.005 else "BALANCE", money(balance, cur), w,
                   RED if balance > 0.005 else GREEN),
         Spacer(1, 12),
@@ -156,16 +160,17 @@ def generate_receipt_pdf(contract: dict, payment: dict, developer: dict, balance
         Spacer(1, 10),
         section_table("Payment for", [
             ("Contract", contract["title"]),
-            ("Agreed total", money(contract["total_amount"], cur)),
+            (("Arrangement", f"Monthly support - {money(contract['monthly_amount'], cur)} per month")
+             if contract.get("kind") == "retainer" else ("Agreed total", money(contract["total_amount"], cur))),
             ("How it was paid", payment.get("method") or "-"),
             ("Note", payment.get("note") or "-"),
         ], w),
         total_row("AMOUNT RECEIVED", money(payment["amount"], cur), w, GREEN),
-        Spacer(1, 10),
-        section_table("Balance", [
+    ]
+    if balance_after is not None:          # fixed-price projects only; monthly support has no running total
+        story += [Spacer(1, 10), section_table("Balance", [
             ("Still owed after this payment", money(balance_after, cur),
              RED if balance_after > 0.005 else GREEN),
-        ], w),
-    ]
+        ], w)]
     story += _footer(number)
     return build_document(story)

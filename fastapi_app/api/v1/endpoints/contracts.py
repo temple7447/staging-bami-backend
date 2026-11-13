@@ -25,6 +25,9 @@ CURRENCIES = ("NGN", "USD")
 DUE_SOON_DAYS = 7
 LOGIN_URL = "https://www.bamihost.com"
 PAGE_LINK = "/dashboard/contracts"
+KINDS = ("project", "retainer")      # fixed-price job | monthly support
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August",
+               "September", "October", "November", "December"]
 
 
 # ── money / date helpers ──────────────────────────────────────────────────────
@@ -60,19 +63,55 @@ def _status_of(p: dict) -> str:
     return p.get("status") or "confirmed"
 
 
+def _retainer_instalments(c: Contract, today: date) -> list[dict]:
+    """The monthly instalments of a monthly-support arrangement: one per month from the start
+    date up to the next one that is not yet due (so there is always an upcoming month to remind
+    about). An ended arrangement (completed/cancelled) keeps only the months already due."""
+    monthly = c.monthly_amount or 0
+    if monthly <= 0:
+        return []
+    day = min(max(c.billing_day or 1, 1), 28)
+    start = _date(c.start_date) or (c.created_at.date() if c.created_at else today)
+    end = _date(c.end_date)
+    live = c.status == "active"
+    y, m = start.year, start.month
+    if start.day > day:                      # first billing day on or after the start date
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    out = []
+    for _ in range(240):                     # 20 years is more than enough
+        due = date(y, m, day)
+        if end and due > end:
+            break
+        already_due = due <= today
+        if not already_due and not live:
+            break
+        out.append({"id": f"m-{y}-{m:02d}", "label": f"{MONTH_NAMES[m - 1]} {y}",
+                    "amount": round(monthly, 2), "due_date": due.isoformat()})
+        if not already_due:
+            break                            # one upcoming month is enough
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return out
+
+
 def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
     """Everything derived from a contract: what is paid, what is left, and which
     instalments are covered. Only CONFIRMED payments count; pending ones are shown
     separately. Payments are applied to the earliest-due instalment first."""
     today = today or utcnow().date()
-    total = c.total_amount or 0.0
+    retainer = (c.kind or "project") == "retainer"
+    if retainer:
+        inst0 = _retainer_instalments(c, today)
+        total = round(sum(i["amount"] for i in inst0), 2)       # billed so far (incl. the next month)
+    else:
+        inst0 = c.instalments or []
+        total = c.total_amount or 0.0
     payments = c.payments or []
     paid = round(sum(p.get("amount") or 0 for p in payments if _status_of(p) == "confirmed"), 2)
     pending = [p for p in payments if _status_of(p) == "pending"]
     pending_amount = round(sum(p.get("amount") or 0 for p in pending), 2)
     balance = round(max(total - paid, 0), 2)
 
-    inst = sorted((dict(i) for i in (c.instalments or [])),
+    inst = sorted((dict(i) for i in inst0),
                   key=lambda i: (_date(i.get("due_date")) is None, _date(i.get("due_date")) or date.max))
     scheduled = round(sum(i.get("amount") or 0 for i in inst), 2)
     # The part of the total that has no instalment is treated as paid up front (a deposit), so
@@ -97,6 +136,10 @@ def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
         if i["due_soon"]:
             due_soon_count += 1
 
+    if retainer:
+        # for monthly support "owed" means what has fallen due and is unpaid; next month's is only upcoming
+        balance = round(sum(i["outstanding"] for i in inst if (_date(i["due_date"]) or date.max) <= today), 2)
+
     next_due = next((i for i in inst if i["status"] != "paid"), None)
     if c.status == "cancelled":
         payment_status = "cancelled"
@@ -112,7 +155,8 @@ def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
     return {
         "paid": paid, "balance": balance,
         "pending_amount": pending_amount, "pending_count": len(pending),
-        "percent_paid": round(min(paid / total * 100, 100), 1) if total else 0,
+        "total_amount": total,
+        "percent_paid": round(min(paid / total * 100, 100), 1) if (total and not retainer) else 0,
         "instalments": inst,
         "scheduled_total": scheduled,
         "overdue_amount": round(overdue_amount, 2), "overdue_count": overdue_count,
@@ -128,7 +172,10 @@ def _serialize(c: Contract, names: dict) -> dict:
         "client_name": c.client_name, "developer_id": c.developer_id,
         "developer_name": names.get(c.developer_id),
         "total_amount": c.total_amount, "currency": c.currency or "NGN",
-        "status": c.status,
+        "status": c.status, "kind": c.kind or "project",
+        "monthly_amount": c.monthly_amount, "billing_day": c.billing_day,
+        "start_date": c.start_date.date().isoformat() if c.start_date else None,
+        "end_date": c.end_date.date().isoformat() if c.end_date else None,
         "payments": [{**p, "status": _status_of(p)} for p in (c.payments or [])],
         "created_at": c.created_at, "updated_at": c.updated_at,
         **calc_contract(c),
@@ -197,7 +244,12 @@ class ContractCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     client_name: Optional[str] = Field(default=None, alias="clientName")
-    total_amount: float = Field(..., gt=0, alias="totalAmount")
+    kind: Optional[str] = None                      # project (default) | retainer (monthly support)
+    total_amount: Optional[float] = Field(default=None, gt=0, alias="totalAmount")     # projects
+    monthly_amount: Optional[float] = Field(default=None, gt=0, alias="monthlyAmount")  # monthly support
+    billing_day: Optional[int] = Field(default=None, alias="billingDay")
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+    end_date: Optional[str] = Field(default=None, alias="endDate")
     currency: Optional[str] = None
     developer_id: Optional[str] = Field(default=None, alias="developerId")
     instalments: list[InstalmentIn] = []
@@ -210,6 +262,10 @@ class ContractUpdate(BaseModel):
     description: Optional[str] = None
     client_name: Optional[str] = Field(default=None, alias="clientName")
     total_amount: Optional[float] = Field(default=None, gt=0, alias="totalAmount")
+    monthly_amount: Optional[float] = Field(default=None, gt=0, alias="monthlyAmount")
+    billing_day: Optional[int] = Field(default=None, alias="billingDay")
+    start_date: Optional[str] = Field(default=None, alias="startDate")
+    end_date: Optional[str] = Field(default=None, alias="endDate")       # "" clears it
     currency: Optional[str] = None
     status: Optional[str] = None
     developer_id: Optional[str] = Field(default=None, alias="developerId")
@@ -328,7 +384,8 @@ async def list_contracts(db: AsyncSession = Depends(get_db), user: User = Depend
             continue
         s = summary.setdefault(r["currency"], {"contracted": 0.0, "received": 0.0, "outstanding": 0.0,
                                                "overdue": 0.0, "pending": 0.0})
-        s["contracted"] = round(s["contracted"] + r["total_amount"], 2)
+        if r["kind"] == "project":
+            s["contracted"] = round(s["contracted"] + r["total_amount"], 2)
         s["received"] = round(s["received"] + r["paid"], 2)
         s["outstanding"] = round(s["outstanding"] + r["balance"], 2)
         s["overdue"] = round(s["overdue"] + r["overdue_amount"], 2)
@@ -354,16 +411,36 @@ async def create_contract(body: ContractCreate, db: AsyncSession = Depends(get_d
     else:
         developer_id = user.id          # a developer can only create contracts for themself
 
-    total = round(body.total_amount, 2)
+    kind = (body.kind or "project").lower()
+    if kind not in KINDS:
+        raise HTTPException(status_code=422, detail="kind must be project or retainer")
     received = _make_payments(body.received, user, developer_id)
-    if sum(p["amount"] for p in received) > total + 0.01:
-        raise HTTPException(status_code=422, detail="The payments received are more than the contract total")
+    extra: dict = {}
+    if kind == "project":
+        if not body.total_amount:
+            raise HTTPException(status_code=422, detail="Enter the total amount agreed")
+        total = round(body.total_amount, 2)
+        if sum(p["amount"] for p in received) > total + 0.01:
+            raise HTTPException(status_code=422, detail="The payments received are more than the contract total")
+        instalments = _make_instalments(body.instalments, total)
+    else:
+        if not body.monthly_amount:
+            raise HTTPException(status_code=422, detail="Enter the monthly amount")
+        day = body.billing_day or 1
+        if not 1 <= day <= 28:
+            raise HTTPException(status_code=422, detail="The day of the month must be between 1 and 28")
+        start, end = _date(body.start_date) or utcnow().date(), _date(body.end_date)
+        if end and end < start:
+            raise HTTPException(status_code=422, detail="The end date is before the start date")
+        total, instalments = 0.0, []
+        extra = {"monthly_amount": round(body.monthly_amount, 2), "billing_day": day,
+                 "start_date": datetime(start.year, start.month, start.day),
+                 "end_date": datetime(end.year, end.month, end.day) if end else None}
     c = Contract(
         id=gen_uuid(), title=body.title.strip(), description=body.description,
         client_name=(body.client_name or "").strip() or None, developer_id=developer_id,
-        total_amount=total, currency=_currency(body.currency),
-        instalments=_make_instalments(body.instalments, total), payments=received,
-        created_by=user.id)
+        kind=kind, total_amount=total, currency=_currency(body.currency),
+        instalments=instalments, payments=received, created_by=user.id, **extra)
     await save(db, c)
     await _tell_developer_of_pending(db, c, received, user)
     return {"success": True, "data": _serialize(c, await _names(db, [c]))}
@@ -402,14 +479,30 @@ async def update_contract(contract_id: str, body: ContractUpdate, db: AsyncSessi
         if not dev or dev.role not in {DEVELOPER_ROLE, *OWNER_ROLES}:
             raise HTTPException(status_code=422, detail="That developer was not found")
         c.developer_id = dev.id
-    if body.total_amount is not None:
-        if body.total_amount + 0.01 < paid:
-            raise HTTPException(status_code=422, detail="The total cannot be lower than what has already been paid")
-        c.total_amount = round(body.total_amount, 2)
-    if body.instalments is not None:
-        c.instalments = _make_instalments(body.instalments, c.total_amount)
-    elif sum(i.get("amount") or 0 for i in (c.instalments or [])) > c.total_amount + 0.01:
-        raise HTTPException(status_code=422, detail="The existing instalments add up to more than the new total — edit them too")
+    if (c.kind or "project") == "retainer":
+        if body.monthly_amount is not None:
+            c.monthly_amount = round(body.monthly_amount, 2)      # re-prices every month of the arrangement
+        if body.billing_day is not None:
+            if not 1 <= body.billing_day <= 28:
+                raise HTTPException(status_code=422, detail="The day of the month must be between 1 and 28")
+            c.billing_day = body.billing_day
+        if body.start_date is not None and _date(body.start_date):
+            d = _date(body.start_date)
+            c.start_date = datetime(d.year, d.month, d.day)
+        if body.end_date is not None:
+            d = _date(body.end_date)                              # "" clears the end date
+            c.end_date = datetime(d.year, d.month, d.day) if d else None
+        if c.start_date and c.end_date and c.end_date < c.start_date:
+            raise HTTPException(status_code=422, detail="The end date is before the start date")
+    else:
+        if body.total_amount is not None:
+            if body.total_amount + 0.01 < paid:
+                raise HTTPException(status_code=422, detail="The total cannot be lower than what has already been paid")
+            c.total_amount = round(body.total_amount, 2)
+        if body.instalments is not None:
+            c.instalments = _make_instalments(body.instalments, c.total_amount)
+        elif sum(i.get("amount") or 0 for i in (c.instalments or [])) > c.total_amount + 0.01:
+            raise HTTPException(status_code=422, detail="The existing instalments add up to more than the new total — edit them too")
     c.updated_at = utcnow()
     await save(db, c)
     return {"success": True, "data": _serialize(c, await _names(db, [c]))}
@@ -436,8 +529,14 @@ async def add_payment(contract_id: str, body: PaymentIn, db: AsyncSession = Depe
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
     calc = calc_contract(c)
+    retainer = (c.kind or "project") == "retainer"
     open_amount = round(calc["balance"] - calc["pending_amount"], 2)   # not already claimed by a pending payment
-    if body.amount > open_amount + 0.01:
+    if retainer:
+        # no fixed total: allow paying ahead, but catch a slipped decimal (more than a year at once)
+        cap = 12 * (c.monthly_amount or 0)
+        if body.amount > cap + 0.01:
+            raise HTTPException(status_code=422, detail=f"That is more than 12 months of support ({format_money(cap, c.currency)}). Please check the amount.")
+    elif body.amount > open_amount + 0.01:
         extra = (f" ({format_money(calc['pending_amount'], c.currency)} more is already waiting for confirmation)"
                  if calc["pending_amount"] else "")
         raise HTTPException(
@@ -446,7 +545,7 @@ async def add_payment(contract_id: str, body: PaymentIn, db: AsyncSession = Depe
                    "If the total has changed, raise the contract total first.")
     new = _make_payments([body], user, c.developer_id)
     c.payments = [*(c.payments or []), *new]
-    if calc_contract(c)["balance"] <= 0.005 and c.status == "active":
+    if not retainer and calc_contract(c)["balance"] <= 0.005 and c.status == "active":
         c.status = "completed"
     c.updated_at = utcnow()
     await save(db, c)
@@ -477,11 +576,12 @@ async def confirm_payment(contract_id: str, payment_id: str, db: AsyncSession = 
     p = _find_payment(c, payment_id)
     if _status_of(p) != "pending":
         raise HTTPException(status_code=409, detail="That payment is not waiting for confirmation")
-    if calc_contract(c)["paid"] + p["amount"] > (c.total_amount or 0) + 0.01:
+    retainer = (c.kind or "project") == "retainer"
+    if not retainer and calc_contract(c)["paid"] + p["amount"] > (c.total_amount or 0) + 0.01:
         raise HTTPException(status_code=422, detail="Confirming this would take the paid amount above the contract total")
     _replace_payment(c, payment_id, {"status": "confirmed", "confirmed_by": user.id,
                                      "confirmed_at": utcnow().isoformat(), "reject_reason": None})
-    if calc_contract(c)["balance"] <= 0.005 and c.status == "active":
+    if not retainer and calc_contract(c)["balance"] <= 0.005 and c.status == "active":
         c.status = "completed"
     c.updated_at = utcnow()
     await save(db, c)
@@ -527,7 +627,7 @@ async def delete_payment(contract_id: str, payment_id: str, db: AsyncSession = D
     elif not (is_developer or p.get("recorded_by") == user.id):
         raise HTTPException(status_code=403, detail="Only the person who entered it or the developer can remove this payment")
     c.payments = [x for x in (c.payments or []) if x.get("id") != payment_id]
-    if c.status == "completed" and calc_contract(c)["balance"] > 0.005:
+    if (c.kind or "project") == "project" and c.status == "completed" and calc_contract(c)["balance"] > 0.005:
         c.status = "active"
     c.updated_at = utcnow()
     await save(db, c)
@@ -576,7 +676,7 @@ async def payment_receipt(contract_id: str, payment_id: str, db: AsyncSession = 
         running += x.get("amount") or 0
         if x.get("id") == payment_id:
             break
-    balance_after = round(max((c.total_amount or 0) - running, 0), 2)
+    balance_after = None if (c.kind or "project") == "retainer" else round(max((c.total_amount or 0) - running, 0), 2)
     data = _serialize(c, await _names(db, [c]))
     pdf = contract_pdf.generate_receipt_pdf(data, {**p, "status": "confirmed"}, await _developer_info(db, c), balance_after)
     return _pdf(pdf, f"receipt-{payment_id[:8]}.pdf")
