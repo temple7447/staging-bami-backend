@@ -6,6 +6,7 @@ from typing import Optional, Union
 from pydantic import BaseModel, Field, model_validator
 
 from models.subscription import Subscription
+from models.contract import Contract
 from models.user import User
 from core.security import get_current_user
 from core.database import get_db
@@ -211,10 +212,12 @@ async def list_subscriptions(
 async def subscription_spend(
     date_from: Optional[str] = Query(None, alias="from"),
     date_to: Optional[str] = Query(None, alias="to"),
+    include_contracts: bool = Query(True, alias="includeContracts"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """What the platform has spent on its own subscriptions (domain, hosting, ...),
+    """What the platform has spent on its own subscriptions (domain, hosting, ...) and,
+    unless `includeContracts=false`, on development work (confirmed contract payments),
     built from every recorded payment. Amounts are kept per currency (never summed
     across USD and NGN). `ngn_total` is the naira cost where it is known: naira
     payments plus the naira the bank debited for dollar payments."""
@@ -234,10 +237,29 @@ async def subscription_spend(
                 "payment_id": p.get("id"), "subscription_id": sub.id, "name": sub.name,
                 "category": category, "provider": sub.provider,
                 "paid_on": paid_on, "amount": p.get("amount") or 0, "currency": _pay_currency(p),
-                "ngn_equivalent": p.get("ngn_equivalent"),
+                "ngn_equivalent": p.get("ngn_equivalent"), "source": "subscription",
                 "months": p.get("months"), "period_start": p.get("period_start"),
                 "period_end": p.get("period_end"), "note": p.get("note"),
             })
+    if include_contracts:
+        contracts = await find_all(db, Contract, Contract.is_active == True, limit=1000)
+        dev_ids = {c.developer_id for c in contracts if c.developer_id}
+        devs = {u.id: u.name for u in await find_all(db, User, User.id.in_(list(dev_ids)), limit=1000)} if dev_ids else {}
+        for c in contracts:
+            for p in (c.payments or []):
+                if (p.get("status") or "confirmed") != "confirmed":
+                    continue          # only money the developer confirmed receiving is a cost
+                paid_on = _parse_date(p.get("paid_on"))
+                if not paid_on or (start and paid_on < start) or (end and paid_on >= end + timedelta(days=1)):
+                    continue
+                ledger.append({
+                    "payment_id": p.get("id"), "subscription_id": c.id, "name": c.title,
+                    "category": "development", "provider": devs.get(c.developer_id),
+                    "paid_on": paid_on, "amount": p.get("amount") or 0, "currency": c.currency or "NGN",
+                    "ngn_equivalent": None, "source": "contract",
+                    "months": None, "period_start": None, "period_end": None,
+                    "note": " - ".join(x for x in (p.get("method"), p.get("note")) if x) or None,
+                })
     ledger.sort(key=lambda x: x["paid_on"], reverse=True)
 
     def add(bucket: dict, key, row):
@@ -353,6 +375,29 @@ async def renew_subscription(
     sub.updated_at = utcnow()
     await save(db, sub)
     return {"success": True, "message": "Subscription renewed", "data": _s(sub)}
+
+
+@router.delete("/{sub_id}/payments/{payment_id}")
+async def delete_subscription_payment(
+    sub_id: str,
+    payment_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Remove a payment that was entered by mistake. The expiry date is left as it is
+    (edit the dates if the payment also moved them)."""
+    if user.role not in ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admins only")
+    sub = await find_one(db, Subscription, Subscription.id == sub_id, Subscription.is_active == True)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription plan not found")
+    kept = [p for p in (sub.payments or []) if p.get("id") != payment_id]
+    if len(kept) == len(sub.payments or []):
+        raise HTTPException(status_code=404, detail="Payment not found")
+    sub.payments = kept
+    sub.updated_at = utcnow()
+    await save(db, sub)
+    return {"success": True, "message": "Payment removed", "data": _s(sub)}
 
 
 @router.delete("/{sub_id}")

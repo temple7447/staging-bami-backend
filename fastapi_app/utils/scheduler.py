@@ -506,6 +506,58 @@ async def _run_auto_payments():
         logger.error("[SCHEDULER] Auto-pay run failed: %s", e)
 
 
+async def _check_subscription_expiry():
+    """Daily: warn the admins when a platform subscription (domain, hosting...) is about to
+    expire (14, 7, 3, 1 days ahead and on the day) or has lapsed (daily for two weeks)."""
+    try:
+        from core.database import AsyncSessionLocal
+        from models.subscription import Subscription
+        from models.notification import Notification
+        from models.user import User
+        from core.db_helpers import find_all, find_one, save
+        from models.base import gen_uuid
+        from utils import email_service
+
+        today = utcnow().date()
+        day_start = datetime(today.year, today.month, today.day)
+        async with AsyncSessionLocal() as db:
+            subs = await find_all(db, Subscription, Subscription.is_active == True,
+                                  Subscription.status == "Active", limit=1000)
+            admins = await find_all(db, User, User.role.in_(["super_admin", "admin"]),
+                                    User.is_active == True, limit=100)
+            sent = 0
+            for sub in subs:
+                if not sub.expires_at:
+                    continue
+                left = (sub.expires_at.date() - today).days
+                if left < 0 and left >= -14:
+                    title = "Subscription expired"
+                    when = f"expired on {sub.expires_at:%d %b %Y} ({-left} day{'s' if -left != 1 else ''} ago)"
+                elif left in (14, 7, 3, 1, 0):
+                    title = "Subscription expiring soon"
+                    when = "expires today" if left == 0 else f"expires in {left} day{'s' if left != 1 else ''} ({sub.expires_at:%d %b %Y})"
+                else:
+                    continue
+                msg = f"{sub.name} {when}. Renew it on the Subscription page so the platform keeps running."
+                for a in admins:
+                    if await find_one(db, Notification, Notification.user == a.id,
+                                      Notification.type == "subscription_expiry", Notification.message == msg,
+                                      Notification.created_at >= day_start):
+                        continue          # already told them today
+                    await save(db, Notification(id=gen_uuid(), user=a.id, title=title, message=msg,
+                                                type="subscription_expiry", link="/dashboard/subscription"))
+                    sent += 1
+                    if a.email:
+                        try:
+                            await email_service.send_email(a.email, f"{title}: {sub.name}", message=msg, name=a.name)
+                        except Exception:
+                            pass
+            if sent:
+                logger.info("[SCHEDULER] Subscription expiry reminders sent: %d", sent)
+    except Exception as e:
+        logger.error("[SCHEDULER] Subscription expiry job failed: %s", e)
+
+
 async def _check_contract_dues():
     """Daily: remind the developer and the admins about contract instalments that are
     overdue (every day until paid) or coming due (7, 3, 1 days ahead and on the day)."""
@@ -628,6 +680,8 @@ def start_scheduler():
                            hour=7, minute=45, id="auto_pay")
         _scheduler.add_job(_wrap(_check_contract_dues), "cron",
                            hour=8, minute=30, id="contract_dues")
+        _scheduler.add_job(_wrap(_check_subscription_expiry), "cron",
+                           hour=8, minute=45, id="subscription_expiry")
         _scheduler.start()
         logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min, autopilot@07:00, leases@07:30")
     except Exception as e:

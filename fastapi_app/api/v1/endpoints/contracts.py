@@ -2,7 +2,7 @@ import secrets
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,8 +12,9 @@ from core.db_helpers import find_all, find_one, save
 from core.security import get_current_user, hash_password
 from models.base import gen_uuid
 from models.contract import Contract
+from models.notification import Notification
 from models.user import User
-from utils import email_service
+from utils import contract_pdf, email_service
 from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
@@ -23,6 +24,7 @@ DEVELOPER_ROLE = "developer"               # the person owed: sees only their ow
 CURRENCIES = ("NGN", "USD")
 DUE_SOON_DAYS = 7
 LOGIN_URL = "https://www.bamihost.com"
+PAGE_LINK = "/dashboard/contracts"
 
 
 # ── money / date helpers ──────────────────────────────────────────────────────
@@ -53,12 +55,21 @@ def _currency(v, default: str = "NGN") -> str:
     return v
 
 
+def _status_of(p: dict) -> str:
+    """confirmed | pending | rejected. Payments saved before confirmation existed count as confirmed."""
+    return p.get("status") or "confirmed"
+
+
 def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
     """Everything derived from a contract: what is paid, what is left, and which
-    instalments are covered. Payments are applied to the earliest-due instalment first."""
+    instalments are covered. Only CONFIRMED payments count; pending ones are shown
+    separately. Payments are applied to the earliest-due instalment first."""
     today = today or utcnow().date()
     total = c.total_amount or 0.0
-    paid = round(sum(p.get("amount") or 0 for p in (c.payments or [])), 2)
+    payments = c.payments or []
+    paid = round(sum(p.get("amount") or 0 for p in payments if _status_of(p) == "confirmed"), 2)
+    pending = [p for p in payments if _status_of(p) == "pending"]
+    pending_amount = round(sum(p.get("amount") or 0 for p in pending), 2)
     balance = round(max(total - paid, 0), 2)
 
     inst = sorted((dict(i) for i in (c.instalments or [])),
@@ -100,6 +111,7 @@ def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
 
     return {
         "paid": paid, "balance": balance,
+        "pending_amount": pending_amount, "pending_count": len(pending),
         "percent_paid": round(min(paid / total * 100, 100), 1) if total else 0,
         "instalments": inst,
         "scheduled_total": scheduled,
@@ -116,7 +128,8 @@ def _serialize(c: Contract, names: dict) -> dict:
         "client_name": c.client_name, "developer_id": c.developer_id,
         "developer_name": names.get(c.developer_id),
         "total_amount": c.total_amount, "currency": c.currency or "NGN",
-        "status": c.status, "payments": c.payments or [],
+        "status": c.status,
+        "payments": [{**p, "status": _status_of(p)} for p in (c.payments or [])],
         "created_at": c.created_at, "updated_at": c.updated_at,
         **calc_contract(c),
     }
@@ -128,6 +141,12 @@ async def _names(db: AsyncSession, contracts) -> dict:
         return {}
     users = await find_all(db, User, User.id.in_(list(ids)), limit=1000)
     return {u.id: u.name for u in users}
+
+
+async def _notify(db: AsyncSession, user_id: Optional[str], title: str, message: str, type_: str) -> None:
+    if user_id:
+        await save(db, Notification(id=gen_uuid(), user=user_id, title=title, message=message,
+                                    type=type_, link=PAGE_LINK))
 
 
 def _is_owner(user) -> bool:
@@ -147,6 +166,11 @@ def _require_staff(user: User) -> None:
         raise HTTPException(status_code=403, detail="Not allowed")
 
 
+def _require_developer_of(user: User, c: Contract) -> None:
+    if user.id != c.developer_id:
+        raise HTTPException(status_code=403, detail="Only the developer who is owed this money can do that")
+
+
 # ── schemas ───────────────────────────────────────────────────────────────────
 
 class InstalmentIn(BaseModel):
@@ -162,6 +186,10 @@ class PaymentIn(BaseModel):
     paid_on: Optional[str] = Field(default=None, alias="paidOn")
     method: Optional[str] = Field(default=None, max_length=60)
     note: Optional[str] = Field(default=None, max_length=300)
+
+
+class RejectIn(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=300)
 
 
 class ContractCreate(BaseModel):
@@ -194,13 +222,20 @@ class DeveloperCreate(BaseModel):
     phone: Optional[str] = None
 
 
-def _make_payments(items: list[PaymentIn], user: User) -> list[dict]:
+def _make_payments(items: list[PaymentIn], user: User, developer_id: Optional[str]) -> list[dict]:
+    """The person receiving the money is the authority on it: a payment the developer
+    records is confirmed at once; one recorded by anyone else waits for the developer."""
+    confirmed = user.id == developer_id
+    now = utcnow().isoformat()
     out = []
     for p in items:
         paid_on = _date(p.paid_on) or utcnow().date()
         out.append({
             "id": gen_uuid(), "paid_on": paid_on.isoformat(), "amount": round(p.amount, 2),
             "method": p.method, "note": p.note,
+            "status": "confirmed" if confirmed else "pending",
+            "confirmed_by": user.id if confirmed else None,
+            "confirmed_at": now if confirmed else None,
             "recorded_by": user.id, "recorded_by_name": user.name,
         })
     return out
@@ -212,6 +247,16 @@ def _make_instalments(items: list[InstalmentIn], total: float) -> list[dict]:
     if sum(i["amount"] for i in out) > total + 0.01:
         raise HTTPException(status_code=422, detail="The instalments add up to more than the contract total")
     return out
+
+
+async def _tell_developer_of_pending(db: AsyncSession, c: Contract, payments: list[dict], recorder: User) -> None:
+    pend = [p for p in payments if p["status"] == "pending"]
+    if not pend:
+        return
+    total = round(sum(p["amount"] for p in pend), 2)
+    await _notify(db, c.developer_id, "Payment waiting for your confirmation",
+                  f"{recorder.name} recorded {format_money(total, c.currency)} paid towards \"{c.title}\". "
+                  "Open Contracts & Payments to confirm that you received it.", "contract_payment_pending")
 
 
 # ── onboarding a developer (owner side) ───────────────────────────────────────
@@ -281,14 +326,18 @@ async def list_contracts(db: AsyncSession = Depends(get_db), user: User = Depend
     for r in rows:
         if r["status"] == "cancelled":
             continue
-        s = summary.setdefault(r["currency"], {"contracted": 0.0, "received": 0.0, "outstanding": 0.0, "overdue": 0.0})
+        s = summary.setdefault(r["currency"], {"contracted": 0.0, "received": 0.0, "outstanding": 0.0,
+                                               "overdue": 0.0, "pending": 0.0})
         s["contracted"] = round(s["contracted"] + r["total_amount"], 2)
         s["received"] = round(s["received"] + r["paid"], 2)
         s["outstanding"] = round(s["outstanding"] + r["balance"], 2)
         s["overdue"] = round(s["overdue"] + r["overdue_amount"], 2)
+        s["pending"] = round(s["pending"] + r["pending_amount"], 2)
+    live = [r for r in rows if r["status"] != "cancelled"]
     return {"success": True, "data": rows, "summary": summary,
-            "overdue_count": sum(r["overdue_count"] for r in rows if r["status"] != "cancelled"),
-            "due_soon_count": sum(r["due_soon_count"] for r in rows if r["status"] != "cancelled")}
+            "overdue_count": sum(r["overdue_count"] for r in live),
+            "due_soon_count": sum(r["due_soon_count"] for r in live),
+            "pending_count": sum(r["pending_count"] for r in live)}
 
 
 @router.post("", status_code=201)
@@ -306,7 +355,7 @@ async def create_contract(body: ContractCreate, db: AsyncSession = Depends(get_d
         developer_id = user.id          # a developer can only create contracts for themself
 
     total = round(body.total_amount, 2)
-    received = _make_payments(body.received, user)
+    received = _make_payments(body.received, user, developer_id)
     if sum(p["amount"] for p in received) > total + 0.01:
         raise HTTPException(status_code=422, detail="The payments received are more than the contract total")
     c = Contract(
@@ -316,6 +365,7 @@ async def create_contract(body: ContractCreate, db: AsyncSession = Depends(get_d
         instalments=_make_instalments(body.instalments, total), payments=received,
         created_by=user.id)
     await save(db, c)
+    await _tell_developer_of_pending(db, c, received, user)
     return {"success": True, "data": _serialize(c, await _names(db, [c]))}
 
 
@@ -376,36 +426,157 @@ async def delete_contract(contract_id: str, db: AsyncSession = Depends(get_db), 
     return {"success": True, "message": "Contract removed"}
 
 
+# ── payments ──────────────────────────────────────────────────────────────────
+
 @router.post("/{contract_id}/payments", status_code=201)
 async def add_payment(contract_id: str, body: PaymentIn, db: AsyncSession = Depends(get_db),
                       user: User = Depends(get_current_user)):
+    """Record a payment. If the developer records it, it counts straight away; if anyone
+    else does, it is 'pending' until the developer confirms they received it."""
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
-    owed = calc_contract(c)["balance"]
-    if body.amount > owed + 0.01:
+    calc = calc_contract(c)
+    open_amount = round(calc["balance"] - calc["pending_amount"], 2)   # not already claimed by a pending payment
+    if body.amount > open_amount + 0.01:
+        extra = (f" ({format_money(calc['pending_amount'], c.currency)} more is already waiting for confirmation)"
+                 if calc["pending_amount"] else "")
         raise HTTPException(
             status_code=422,
-            detail=f"That is more than the {format_money(owed, c.currency)} still owed. "
+            detail=f"That is more than the {format_money(max(open_amount, 0), c.currency)} still open{extra}. "
                    "If the total has changed, raise the contract total first.")
-    c.payments = [*(c.payments or []), *_make_payments([body], user)]
+    new = _make_payments([body], user, c.developer_id)
+    c.payments = [*(c.payments or []), *new]
     if calc_contract(c)["balance"] <= 0.005 and c.status == "active":
         c.status = "completed"
     c.updated_at = utcnow()
     await save(db, c)
-    return {"success": True, "message": "Payment recorded", "data": _serialize(c, await _names(db, [c]))}
+    await _tell_developer_of_pending(db, c, new, user)
+    return {"success": True,
+            "message": "Payment recorded" if new[0]["status"] == "confirmed" else "Payment recorded — waiting for the developer to confirm",
+            "data": _serialize(c, await _names(db, [c]))}
+
+
+def _find_payment(c: Contract, payment_id: str) -> dict:
+    p = next((p for p in (c.payments or []) if p.get("id") == payment_id), None)
+    if not p:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    return p
+
+
+def _replace_payment(c: Contract, payment_id: str, patch: dict) -> None:
+    c.payments = [{**p, **patch} if p.get("id") == payment_id else p for p in (c.payments or [])]
+
+
+@router.post("/{contract_id}/payments/{payment_id}/confirm")
+async def confirm_payment(contract_id: str, payment_id: str, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """The developer says: yes, I received this. Only then does it count."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    _require_developer_of(user, c)
+    p = _find_payment(c, payment_id)
+    if _status_of(p) != "pending":
+        raise HTTPException(status_code=409, detail="That payment is not waiting for confirmation")
+    if calc_contract(c)["paid"] + p["amount"] > (c.total_amount or 0) + 0.01:
+        raise HTTPException(status_code=422, detail="Confirming this would take the paid amount above the contract total")
+    _replace_payment(c, payment_id, {"status": "confirmed", "confirmed_by": user.id,
+                                     "confirmed_at": utcnow().isoformat(), "reject_reason": None})
+    if calc_contract(c)["balance"] <= 0.005 and c.status == "active":
+        c.status = "completed"
+    c.updated_at = utcnow()
+    await save(db, c)
+    await _notify(db, p.get("recorded_by"), "Payment confirmed",
+                  f"{user.name} confirmed receiving {format_money(p['amount'], c.currency)} for \"{c.title}\".",
+                  "contract_payment_confirmed")
+    return {"success": True, "message": "Payment confirmed", "data": _serialize(c, await _names(db, [c]))}
+
+
+@router.post("/{contract_id}/payments/{payment_id}/reject")
+async def reject_payment(contract_id: str, payment_id: str, body: RejectIn, db: AsyncSession = Depends(get_db),
+                         user: User = Depends(get_current_user)):
+    """The developer says: no, I did not receive this. It stays in the history, marked rejected."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    _require_developer_of(user, c)
+    p = _find_payment(c, payment_id)
+    if _status_of(p) != "pending":
+        raise HTTPException(status_code=409, detail="That payment is not waiting for confirmation")
+    _replace_payment(c, payment_id, {"status": "rejected", "reject_reason": (body.reason or "").strip() or None,
+                                     "rejected_at": utcnow().isoformat()})
+    c.updated_at = utcnow()
+    await save(db, c)
+    reason = f" Reason: {body.reason.strip()}" if (body.reason or "").strip() else ""
+    await _notify(db, p.get("recorded_by"), "Payment not confirmed",
+                  f"{user.name} did not confirm {format_money(p['amount'], c.currency)} for \"{c.title}\".{reason}",
+                  "contract_payment_rejected")
+    return {"success": True, "message": "Payment rejected", "data": _serialize(c, await _names(db, [c]))}
 
 
 @router.delete("/{contract_id}/payments/{payment_id}")
 async def delete_payment(contract_id: str, payment_id: str, db: AsyncSession = Depends(get_db),
                          user: User = Depends(get_current_user)):
+    """Remove a mistaken payment. A confirmed payment is the developer's record, so only the
+    developer can remove it; unconfirmed ones can also be removed by whoever entered them."""
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
-    kept = [p for p in (c.payments or []) if p.get("id") != payment_id]
-    if len(kept) == len(c.payments or []):
-        raise HTTPException(status_code=404, detail="Payment not found")
-    c.payments = kept
+    p = _find_payment(c, payment_id)
+    is_developer = user.id == c.developer_id
+    if _status_of(p) == "confirmed":
+        if not is_developer:
+            raise HTTPException(status_code=403, detail="Only the developer can remove a confirmed payment")
+    elif not (is_developer or p.get("recorded_by") == user.id):
+        raise HTTPException(status_code=403, detail="Only the person who entered it or the developer can remove this payment")
+    c.payments = [x for x in (c.payments or []) if x.get("id") != payment_id]
     if c.status == "completed" and calc_contract(c)["balance"] > 0.005:
         c.status = "active"
     c.updated_at = utcnow()
     await save(db, c)
     return {"success": True, "message": "Payment removed", "data": _serialize(c, await _names(db, [c]))}
+
+
+# ── PDFs ──────────────────────────────────────────────────────────────────────
+
+async def _developer_info(db: AsyncSession, c: Contract) -> dict:
+    dev = await find_one(db, User, User.id == c.developer_id) if c.developer_id else None
+    return {"name": dev.name if dev else None, "email": dev.email if dev else None,
+            "phone": dev.phone if dev else None}
+
+
+def _pdf(content: bytes, filename: str) -> Response:
+    return Response(content=content, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@router.get("/{contract_id}/invoice.pdf")
+async def contract_invoice(contract_id: str, db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """An invoice for what is still owed (or a paid-in-full statement)."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    data = _serialize(c, await _names(db, [c]))
+    pdf = contract_pdf.generate_invoice_pdf(data, await _developer_info(db, c))
+    safe = "".join(ch if ch.isalnum() else "-" for ch in c.title).strip("-")[:40] or "contract"
+    return _pdf(pdf, f"invoice-{safe}.pdf")
+
+
+@router.get("/{contract_id}/payments/{payment_id}/receipt.pdf")
+async def payment_receipt(contract_id: str, payment_id: str, db: AsyncSession = Depends(get_db),
+                          user: User = Depends(get_current_user)):
+    """A receipt for one confirmed payment, showing what was still owed after it."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    p = _find_payment(c, payment_id)
+    if _status_of(p) != "confirmed":
+        raise HTTPException(status_code=409, detail="A receipt is only available once the developer has confirmed the payment")
+    # what was still owed right after this payment, taking confirmed payments in the order they were received
+    ordered = sorted(((x.get("paid_on") or "", idx, x) for idx, x in enumerate(c.payments or [])
+                      if _status_of(x) == "confirmed"), key=lambda t: (t[0], t[1]))
+    running = 0.0
+    for _, _, x in ordered:
+        running += x.get("amount") or 0
+        if x.get("id") == payment_id:
+            break
+    balance_after = round(max((c.total_amount or 0) - running, 0), 2)
+    data = _serialize(c, await _names(db, [c]))
+    pdf = contract_pdf.generate_receipt_pdf(data, {**p, "status": "confirmed"}, await _developer_info(db, c), balance_after)
+    return _pdf(pdf, f"receipt-{payment_id[:8]}.pdf")
