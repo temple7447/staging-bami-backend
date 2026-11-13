@@ -506,6 +506,67 @@ async def _run_auto_payments():
         logger.error("[SCHEDULER] Auto-pay run failed: %s", e)
 
 
+async def _check_contract_dues():
+    """Daily: remind the developer and the admins about contract instalments that are
+    overdue (every day until paid) or coming due (7, 3, 1 days ahead and on the day)."""
+    try:
+        from core.database import AsyncSessionLocal
+        from models.contract import Contract
+        from models.notification import Notification
+        from models.user import User
+        from core.db_helpers import find_all, find_one, save
+        from models.base import gen_uuid
+        from api.v1.endpoints.contracts import calc_contract, format_money
+        from utils import email_service
+
+        today = utcnow().date()
+        day_start = datetime(today.year, today.month, today.day)
+        async with AsyncSessionLocal() as db:
+            contracts = await find_all(db, Contract, Contract.is_active == True,
+                                       Contract.status == "active", limit=1000)
+            admins = await find_all(db, User, User.role == "super_admin", User.is_active == True, limit=100)
+            sent = 0
+            for c in contracts:
+                calc = calc_contract(c, today)
+                if calc["balance"] <= 0.005:
+                    continue
+                recipients = {a.id for a in admins} | ({c.developer_id} if c.developer_id else set())
+                for i in calc["instalments"]:
+                    left = i["days_until_due"]
+                    if i["status"] == "paid" or left is None:
+                        continue
+                    if i["overdue"]:
+                        title = "Payment overdue"
+                        when = f"was due on {i['due_date']} ({-left} day{'s' if -left != 1 else ''} overdue)"
+                    elif left in (7, 3, 1, 0):
+                        title = "Payment due soon"
+                        when = "is due today" if left == 0 else f"is due in {left} day{'s' if left != 1 else ''} ({i['due_date']})"
+                    else:
+                        continue
+                    msg = (f"{c.title}: the {i['label']} instalment of "
+                           f"{format_money(i['outstanding'], c.currency)} {when}. "
+                           f"Total still owed on this contract: {format_money(calc['balance'], c.currency)}.")
+                    for uid in recipients:
+                        if await find_one(db, Notification, Notification.user == uid,
+                                          Notification.type == "contract_due", Notification.message == msg,
+                                          Notification.created_at >= day_start):
+                            continue          # already told them today
+                        await save(db, Notification(id=gen_uuid(), user=uid, title=title, message=msg,
+                                                    type="contract_due"))
+                        sent += 1
+                        person = await db.get(User, uid)
+                        if person and person.email:
+                            try:
+                                await email_service.send_email(person.email, f"{title}: {c.title}", message=msg,
+                                                               name=person.name)
+                            except Exception:
+                                pass
+            if sent:
+                logger.info("[SCHEDULER] Contract reminders sent: %d", sent)
+    except Exception as e:
+        logger.error("[SCHEDULER] Contract reminder job failed: %s", e)
+
+
 def _wrap(coro_fn):
     def job():
         # APScheduler runs jobs in a worker thread that has no event loop.
@@ -565,6 +626,8 @@ def start_scheduler():
                            hour=7, minute=30, id="lease_renewals")
         _scheduler.add_job(_wrap(_run_auto_payments), "cron",
                            hour=7, minute=45, id="auto_pay")
+        _scheduler.add_job(_wrap(_check_contract_dues), "cron",
+                           hour=8, minute=30, id="contract_dues")
         _scheduler.start()
         logger.info("[SCHEDULER] Started — reminders@08:00&20:00, report@1st/09:00, backup@02:00, meters@30min, autopilot@07:00, leases@07:30")
     except Exception as e:
