@@ -17,6 +17,27 @@ from utils.time_utils import utcnow
 router = APIRouter(prefix="/subscriptions", tags=["Subscriptions"])
 ADMIN_ROLES = {"super_admin", "admin"}
 CATEGORIES = {"domain", "frontend", "backend", "other"}
+CURRENCIES = ("USD", "NGN")   # most of the platform's bills are in dollars
+
+
+def _currency(v, default: str = "NGN") -> str:
+    v = (v or default).upper()
+    if v not in CURRENCIES:
+        raise HTTPException(status_code=422, detail=f"currency must be one of: {', '.join(CURRENCIES)}")
+    return v
+
+
+def _pay_currency(p: dict) -> str:
+    return p.get("currency") or "NGN"      # payments recorded before currencies existed were naira
+
+
+def _totals(payments) -> dict:
+    """Sum payments per currency — dollars and naira are never added together."""
+    out: dict[str, float] = {}
+    for p in payments or []:
+        c = _pay_currency(p)
+        out[c] = round(out.get(c, 0) + (p.get("amount") or 0), 2)
+    return out
 
 
 def _check_category(v):
@@ -31,11 +52,15 @@ def _months_between(start: "datetime | None", end: "datetime | None") -> "int | 
     return max(1, round((end - start).days / 30.44))
 
 
-def _payment(amount, months, period_start, period_end, paid_on=None, note=None) -> dict:
+def _payment(amount, months, period_start, period_end, paid_on=None, note=None,
+             currency="NGN", ngn_equivalent=None) -> dict:
     return {
         "id": gen_uuid(),
         "paid_on": (paid_on or utcnow()).isoformat(),
-        "amount": amount,
+        "amount": round(amount, 2),            # exactly what was paid, in `currency`
+        "currency": currency,
+        # For dollar payments: the naira the bank actually debited (optional)
+        "ngn_equivalent": round(ngn_equivalent, 2) if ngn_equivalent is not None else None,
         "months": months,
         "period_start": period_start.isoformat() if period_start else None,
         "period_end": period_end.isoformat() if period_end else None,
@@ -73,6 +98,8 @@ class SubscriptionCreate(BaseModel):
     plan: Optional[str] = None
     price: float = 0.0
     amount: Optional[float] = None
+    currency: Optional[str] = None
+    ngn_equivalent: Optional[float] = Field(default=None, alias="ngnEquivalent", ge=0)
     billing_period: Optional[str] = Field(default=None, alias="billingPeriod")
     duration_months: Optional[int] = None
     description: Optional[str] = None
@@ -97,6 +124,7 @@ class SubscriptionUpdate(BaseModel):
 
     name: Optional[str] = None
     price: Optional[float] = None
+    currency: Optional[str] = None
     billing_period: Optional[str] = Field(default=None, alias="billingPeriod")
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -119,6 +147,8 @@ class RenewRequest(BaseModel):
 
     months: int = Field(..., ge=1, le=60)
     amount: Optional[float] = Field(default=None, ge=0)   # defaults to the plan's price
+    currency: Optional[str] = None                        # defaults to the plan's currency
+    ngn_equivalent: Optional[float] = Field(default=None, alias="ngnEquivalent", ge=0)
     paid_on: Optional[str] = Field(default=None, alias="paidOn")
     note: Optional[str] = Field(default=None, max_length=300)
 
@@ -132,13 +162,15 @@ async def create_subscription(
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
     _check_category(body.category)
+    currency = _currency(body.currency)
     name = body.name or body.plan or "Plan"
     price = body.price or body.amount or 0.0
     start, expires = _parse_date(body.start_date), _parse_date(body.expires_at)
     # What was paid up front is the first entry in the payment history.
-    payments = [_payment(price, _months_between(start, expires), start, expires, paid_on=start)] if price > 0 else []
+    payments = [_payment(price, _months_between(start, expires), start, expires, paid_on=start,
+                         currency=currency, ngn_equivalent=body.ngn_equivalent)] if price > 0 else []
     sub = Subscription(
-        id=gen_uuid(), name=name, price=price,
+        id=gen_uuid(), name=name, price=price, currency=currency,
         billing_period=body.billing_period or "month",
         description=body.description, icon=body.icon,
         category=body.category, provider=body.provider, payments=payments,
@@ -183,7 +215,9 @@ async def subscription_spend(
     user: User = Depends(get_current_user),
 ):
     """What the platform has spent on its own subscriptions (domain, hosting, ...),
-    built from every recorded payment. Meant for setting against profit."""
+    built from every recorded payment. Amounts are kept per currency (never summed
+    across USD and NGN). `ngn_total` is the naira cost where it is known: naira
+    payments plus the naira the bank debited for dollar payments."""
     if user.role not in ADMIN_ROLES:
         raise HTTPException(status_code=403, detail="Admins only")
     start, end = _parse_date(date_from), _parse_date(date_to)
@@ -199,29 +233,51 @@ async def subscription_spend(
             ledger.append({
                 "payment_id": p.get("id"), "subscription_id": sub.id, "name": sub.name,
                 "category": category, "provider": sub.provider,
-                "paid_on": paid_on, "amount": p.get("amount") or 0,
+                "paid_on": paid_on, "amount": p.get("amount") or 0, "currency": _pay_currency(p),
+                "ngn_equivalent": p.get("ngn_equivalent"),
                 "months": p.get("months"), "period_start": p.get("period_start"),
                 "period_end": p.get("period_end"), "note": p.get("note"),
             })
     ledger.sort(key=lambda x: x["paid_on"], reverse=True)
 
-    by_month: dict[str, float] = {}
-    by_category: dict[str, float] = {}
-    for row in ledger:
-        key = row["paid_on"].strftime("%Y-%m")
-        by_month[key] = by_month.get(key, 0) + row["amount"]
-        by_category[row["category"]] = by_category.get(row["category"], 0) + row["amount"]
+    def add(bucket: dict, key, row):
+        cur = bucket.setdefault(key, {})
+        cur[row["currency"]] = round(cur.get(row["currency"], 0) + row["amount"], 2)
 
+    by_month: dict[str, dict] = {}
+    by_category: dict[str, dict] = {}
+    totals: dict[str, float] = {}
+    this_month: dict[str, float] = {}
+    this_year: dict[str, float] = {}
+    ngn_total, ngn_missing = 0.0, 0
     now = utcnow()
-    this_month = by_month.get(now.strftime("%Y-%m"), 0)
-    this_year = sum(v for k, v in by_month.items() if k.startswith(str(now.year)))
+    for row in ledger:
+        add(by_month, row["paid_on"].strftime("%Y-%m"), row)
+        add(by_category, row["category"], row)
+        c = row["currency"]
+        totals[c] = round(totals.get(c, 0) + row["amount"], 2)
+        if row["paid_on"].year == now.year:
+            this_year[c] = round(this_year.get(c, 0) + row["amount"], 2)
+            if row["paid_on"].month == now.month:
+                this_month[c] = round(this_month.get(c, 0) + row["amount"], 2)
+        if c == "NGN":
+            ngn_total += row["amount"]
+        elif row["ngn_equivalent"] is not None:
+            ngn_total += row["ngn_equivalent"]
+        else:
+            ngn_missing += 1
+
+    currencies = [c for c in CURRENCIES if c in totals]
     return {"success": True, "data": {
-        "total": round(sum(r["amount"] for r in ledger), 2),
-        "this_month": round(this_month, 2),
-        "this_year": round(this_year, 2),
+        "currencies": currencies,
+        "totals": totals,
+        "this_month": this_month,
+        "this_year": this_year,
+        "ngn_total": round(ngn_total, 2),
+        "ngn_missing": ngn_missing,          # dollar payments with no naira amount recorded
         "payment_count": len(ledger),
-        "by_month": [{"month": k, "amount": round(v, 2)} for k, v in sorted(by_month.items(), reverse=True)],
-        "by_category": [{"category": k, "amount": round(v, 2)} for k, v in sorted(by_category.items(), key=lambda kv: -kv[1])],
+        "by_month": [{"month": k, "amounts": v} for k, v in sorted(by_month.items(), reverse=True)],
+        "by_category": [{"category": k, "amounts": v} for k, v in sorted(by_category.items())],
         "payments": ledger,
     }}
 
@@ -250,6 +306,8 @@ async def update_subscription(
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription plan not found")
     _check_category(body.category)
+    if body.currency is not None:
+        body.currency = _currency(body.currency)
     updates = body.model_dump(exclude_none=True, by_alias=False)
     for k in ("start_date", "expires_at"):
         if k in updates:
@@ -282,9 +340,12 @@ async def renew_subscription(
     period_start = sub.expires_at if sub.expires_at and sub.expires_at > paid_on else paid_on
     period_end = add_months(period_start, body.months)
     amount = sub.price if body.amount is None else body.amount
+    currency = _currency(body.currency, default=sub.currency or "NGN")
 
     sub.payments = [*(sub.payments or []),
-                    _payment(amount, body.months, period_start, period_end, paid_on=paid_on, note=body.note)]
+                    _payment(amount, body.months, period_start, period_end, paid_on=paid_on, note=body.note,
+                             currency=currency, ngn_equivalent=body.ngn_equivalent)]
+    sub.currency = currency
     sub.expires_at = period_end
     if not sub.start_date:
         sub.start_date = period_start
@@ -317,7 +378,8 @@ def _s(s: Subscription) -> dict:
         "billing_period": s.billing_period, "description": s.description,
         "icon": s.icon, "category": s.category, "provider": s.provider,
         "payments": s.payments or [],
-        "total_paid": round(sum(p.get("amount") or 0 for p in (s.payments or [])), 2),
+        "currency": s.currency or "NGN",
+        "total_paid_by_currency": _totals(s.payments),
         "status": s.status, "features": s.features or [],
         "is_active": s.is_active,
         "start_date": s.start_date,

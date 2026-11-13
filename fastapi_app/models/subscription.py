@@ -11,6 +11,8 @@ class Subscription(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=gen_uuid)
     name: Mapped[str] = mapped_column(String(255), default="")
     price: Mapped[float] = mapped_column(Float, default=0.0)
+    # Currency of `price` and of the latest payment: NGN | USD (each payment also records its own)
+    currency: Mapped[str] = mapped_column(String(3), default="NGN", server_default="NGN")
     billing_period: Mapped[str] = mapped_column(String(50), default="month")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     icon: Mapped[str | None] = mapped_column(String(255), nullable=True)
