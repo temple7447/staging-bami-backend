@@ -67,6 +67,9 @@ async def lifespan(app: FastAPI):
     from utils.scheduler import start_scheduler, stop_scheduler
     start_scheduler()
     logger.info("BamiHost FastAPI server started")
+    # Test vs live is decided only by the Paystack secret key's prefix (sk_test_ / sk_live_).
+    key = settings.PAYSTACK_SECRET_KEY or ""
+    logger.info("Paystack mode: %s", "LIVE" if key.startswith("sk_live_") else "TEST" if key.startswith("sk_test_") else "not configured")
     yield
     stop_scheduler()
     await disconnect_db()
