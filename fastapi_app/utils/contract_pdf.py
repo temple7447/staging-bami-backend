@@ -116,6 +116,21 @@ def generate_invoice_pdf(contract: dict, developer: dict) -> bytes:
         Spacer(1, 12),
     ]
 
+    acc = contract.get("acceptance") or {}
+    agreement = {
+        "accepted": f"Accepted by {acc.get('typed_name')} on {_date(acc.get('accepted_at'))}",
+        "pending": "Awaiting acceptance by the contractor",
+        "changed": "Changed since it was accepted - awaiting acceptance again",
+        "declined": "Changes requested by the contractor",
+    }.get(contract.get("acceptance_status"), "-")
+    rows = [("Agreement", agreement)]
+    if contract.get("category"):
+        rows.insert(0, ("Type of work", str(contract["category"]).capitalize()))
+    story += [section_table("Agreement", rows, w), Spacer(1, 6)]
+    if contract.get("terms"):
+        story += [Paragraph(escape(contract["terms"][:2500]).replace("\n", "<br/>"),
+                            _FOOT.clone("tm", alignment=0, textColor=INK, fontSize=8, leading=11)), Spacer(1, 10)]
+
     nxt = contract.get("next_due")
     if nxt and balance > 0.005:
         story += [Paragraph(

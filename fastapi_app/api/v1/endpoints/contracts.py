@@ -1,9 +1,12 @@
+import hashlib
+import json
 import secrets
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.contact_unique import ensure_unique_contact
@@ -20,7 +23,10 @@ from utils.time_utils import utcnow
 router = APIRouter(prefix="/contracts", tags=["Contracts"])
 
 OWNER_ROLES = {"super_admin", "admin"}     # the paying side: sees and manages every contract
-DEVELOPER_ROLE = "developer"               # the person owed: sees only their own contracts
+MANAGER_ROLES = {"manager", "super_manager"}   # may create contracts; see and manage only the ones they created
+DEVELOPER_ROLE = "developer"               # a company contractor (developer, designer, ...)
+CONTRACTOR_ROLES = {DEVELOPER_ROLE, "vendor", "super_vendor"}   # people who are paid; each sees only their own contracts
+CATEGORIES = ("development", "legal", "maintenance", "design", "marketing", "other")
 CURRENCIES = ("NGN", "USD")
 DUE_SOON_DAYS = 7
 LOGIN_URL = "https://www.bamihost.com"
@@ -166,7 +172,9 @@ def calc_contract(c: Contract, today: Optional[date] = None) -> dict:
     }
 
 
-def _serialize(c: Contract, names: dict) -> dict:
+def _serialize(c: Contract, names: dict, viewer: Optional[User] = None) -> dict:
+    state = _acceptance_state(c)
+    a = c.acceptance or {}
     return {
         "id": c.id, "title": c.title, "description": c.description,
         "client_name": c.client_name, "developer_id": c.developer_id,
@@ -178,6 +186,19 @@ def _serialize(c: Contract, names: dict) -> dict:
         "end_date": c.end_date.date().isoformat() if c.end_date else None,
         "payments": [{**p, "status": _status_of(p)} for p in (c.payments or [])],
         "created_at": c.created_at, "updated_at": c.updated_at,
+        "created_by": c.created_by, "category": c.category, "terms": c.terms,
+        "acceptance_status": state,
+        "acceptance": {
+            "typed_name": a.get("typed_name") if state in ("accepted", "changed") else None,
+            "accepted_at": a.get("accepted_at") if state in ("accepted", "changed") else None,
+            "how": a.get("how"),
+            "decline_reason": a.get("decline_reason") if state == "declined" else None,
+            "ip": a.get("ip") if (viewer is not None and _is_owner(viewer)) else None,     # audit detail, admins only
+        },
+        # what the viewer may do, so the screen can show the right buttons
+        "can_edit": bool(viewer and _can_edit(viewer, c)),
+        "can_accept": bool(viewer and viewer.id == c.developer_id and state != "accepted"),
+        "can_delete": bool(viewer and _is_owner(viewer)),
         **calc_contract(c),
     }
 
@@ -200,17 +221,100 @@ def _is_owner(user) -> bool:
     return user.role in OWNER_ROLES
 
 
+def _is_manager(user) -> bool:
+    return user.role in MANAGER_ROLES
+
+
+def _is_creator(user) -> bool:
+    """Admins and managers can set contracts up for contractors and vendors."""
+    return _is_owner(user) or _is_manager(user)
+
+
 async def _get_visible(db: AsyncSession, user: User, contract_id: str) -> Contract:
     c = await find_one(db, Contract, Contract.id == contract_id, Contract.is_active == True)
-    allowed = c and (_is_owner(user) or (user.role == DEVELOPER_ROLE and c.developer_id == user.id))
+    allowed = c and (
+        _is_owner(user)
+        or (_is_manager(user) and c.created_by == user.id)                      # a manager sees what they set up
+        or (user.role in CONTRACTOR_ROLES and c.developer_id == user.id)        # a contractor sees only their own
+    )
     if not allowed:
         raise HTTPException(status_code=404, detail="Contract not found")   # same answer for "not yours"
     return c
 
 
 def _require_staff(user: User) -> None:
-    if not (_is_owner(user) or user.role == DEVELOPER_ROLE):
+    if not (_is_creator(user) or user.role in CONTRACTOR_ROLES):
         raise HTTPException(status_code=403, detail="Not allowed")
+
+
+def _can_edit(user: User, c: Contract) -> bool:
+    """Admins edit anything; a manager only what they created; a contractor only a contract
+    they entered themself (they must not be able to change terms someone else set for them)."""
+    if _is_owner(user):
+        return True
+    if _is_manager(user):
+        return c.created_by == user.id
+    return user.id == c.developer_id and c.created_by == user.id
+
+
+def _require_edit(user: User, c: Contract) -> None:
+    if not _can_edit(user, c):
+        raise HTTPException(status_code=403, detail="Only the person who set this contract up (or an admin) can change it")
+
+
+async def _validate_contractor(db: AsyncSession, user: User, person_id: str) -> User:
+    person = await find_one(db, User, User.id == person_id, User.is_active == True)
+    if not person or person.role not in {*CONTRACTOR_ROLES, *OWNER_ROLES}:
+        raise HTTPException(status_code=422, detail="That person was not found")
+    if _is_manager(user) and not (person.role in CONTRACTOR_ROLES and
+                                  (person.manager == user.id or person.created_by == user.id)):
+        raise HTTPException(status_code=422, detail="You can only create contracts for contractors and vendors you manage")
+    return person
+
+
+def _category(v):
+    if v is None or v == "":
+        return None
+    v = str(v).lower()
+    if v not in CATEGORIES:
+        raise HTTPException(status_code=422, detail=f"category must be one of: {', '.join(CATEGORIES)}")
+    return v
+
+
+# ── acceptance: the contractor agrees to the terms ────────────────────────────
+
+def _terms_hash(c: Contract) -> str:
+    """Fingerprint of everything the contractor agrees to. If any of it changes after they
+    accepted, the fingerprint no longer matches and they must accept again."""
+    payload = {
+        "title": c.title, "terms": c.terms, "kind": c.kind or "project", "currency": c.currency,
+        "total": c.total_amount, "monthly": c.monthly_amount, "day": c.billing_day,
+        "start": c.start_date.date().isoformat() if c.start_date else None,
+        "end": c.end_date.date().isoformat() if c.end_date else None,
+        "contractor": c.developer_id,
+        "instalments": [[i.get("label"), i.get("amount"), i.get("due_date")] for i in (c.instalments or [])],
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _acceptance_record(c: Contract, typed_name: str, how: str = "typed", ip: Optional[str] = None) -> dict:
+    return {"status": "accepted", "typed_name": typed_name, "accepted_at": utcnow().isoformat(),
+            "ip": ip, "how": how, "hash": _terms_hash(c)}
+
+
+def _acceptance_state(c: Contract) -> str:
+    """accepted | pending | changed (accepted earlier, edited since) | declined (changes requested)."""
+    a = c.acceptance
+    if not a:
+        return "pending"
+    if a.get("hash") != _terms_hash(c):
+        return "changed" if a.get("status") == "accepted" else "pending"
+    return a.get("status") or "pending"
+
+
+def _client_ip(request: Request) -> Optional[str]:
+    fwd = request.headers.get("x-forwarded-for")
+    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else None)
 
 
 def _require_developer_of(user: User, c: Contract) -> None:
@@ -235,6 +339,15 @@ class PaymentIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=300)
 
 
+class AcceptIn(BaseModel):
+    model_config = {"populate_by_name": True}
+    typed_name: str = Field(..., min_length=3, max_length=120, alias="typedName")
+
+
+class DeclineIn(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=300)
+
+
 class RejectIn(BaseModel):
     reason: Optional[str] = Field(default=None, max_length=300)
 
@@ -252,6 +365,8 @@ class ContractCreate(BaseModel):
     end_date: Optional[str] = Field(default=None, alias="endDate")
     currency: Optional[str] = None
     developer_id: Optional[str] = Field(default=None, alias="developerId")
+    terms: Optional[str] = Field(default=None, max_length=8000)
+    category: Optional[str] = None
     instalments: list[InstalmentIn] = []
     received: list[PaymentIn] = []          # payments already received before this contract was entered
 
@@ -269,6 +384,8 @@ class ContractUpdate(BaseModel):
     currency: Optional[str] = None
     status: Optional[str] = None
     developer_id: Optional[str] = Field(default=None, alias="developerId")
+    terms: Optional[str] = Field(default=None, max_length=8000)
+    category: Optional[str] = None
     instalments: Optional[list[InstalmentIn]] = None
 
 
@@ -320,21 +437,33 @@ async def _tell_developer_of_pending(db: AsyncSession, c: Contract, payments: li
 
 @router.get("/developers")
 async def list_developers(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    """People who can be named as the developer on a contract."""
-    if not _is_owner(user):
-        raise HTTPException(status_code=403, detail="Admins only")
-    users = await find_all(db, User, User.is_active == True,
-                           User.role.in_([DEVELOPER_ROLE, *OWNER_ROLES]), order_by=User.name, limit=500)
+    """People who can be named on a contract (contractors and vendors; for admins, admins too),
+    with how many contracts each already has. Managers see only the people they manage."""
+    if not _is_creator(user):
+        raise HTTPException(status_code=403, detail="Admins and managers only")
+    if _is_manager(user):
+        conds = [User.is_active == True, User.role.in_(list(CONTRACTOR_ROLES)),
+                 or_(User.manager == user.id, User.created_by == user.id)]
+    else:
+        conds = [User.is_active == True, User.role.in_([*CONTRACTOR_ROLES, *OWNER_ROLES])]
+    users = await find_all(db, User, *conds, order_by=User.name, limit=500)
+    counts: dict[str, int] = {}
+    if users:
+        rows = await find_all(db, Contract, Contract.is_active == True,
+                              Contract.developer_id.in_([u.id for u in users]), limit=5000)
+        for r in rows:
+            counts[r.developer_id] = counts.get(r.developer_id, 0) + 1
     return {"success": True, "data": [
-        {"id": u.id, "name": u.name, "email": u.email, "role": u.role} for u in users]}
+        {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "contract_count": counts.get(u.id, 0)}
+        for u in users]}
 
 
 @router.post("/developers", status_code=201)
 async def onboard_developer(body: DeveloperCreate, db: AsyncSession = Depends(get_db),
                             user: User = Depends(get_current_user)):
-    """Create a login for a developer who can see only the contracts they are owed on."""
-    if not _is_owner(user):
-        raise HTTPException(status_code=403, detail="Admins only")
+    """Create a login for a contractor who can see only the contracts they are paid on."""
+    if not _is_creator(user):
+        raise HTTPException(status_code=403, detail="Admins and managers only")
     email = body.email.strip().lower()
     if "@" not in email:
         raise HTTPException(status_code=422, detail="Enter a valid email address")
@@ -371,11 +500,13 @@ async def onboard_developer(body: DeveloperCreate, db: AsyncSession = Depends(ge
 async def list_contracts(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     _require_staff(user)
     conds = [Contract.is_active == True]
-    if not _is_owner(user):
-        conds.append(Contract.developer_id == user.id)
+    if _is_manager(user):
+        conds.append(Contract.created_by == user.id)          # a manager sees what they set up
+    elif not _is_owner(user):
+        conds.append(Contract.developer_id == user.id)        # a contractor sees only their own
     contracts = await find_all(db, Contract, *conds, order_by=Contract.created_at.desc(), limit=500)
     names = await _names(db, contracts)
-    rows = [_serialize(c, names) for c in contracts]
+    rows = [_serialize(c, names, user) for c in contracts]
 
     # Totals per currency over live contracts (cancelled ones are not owed).
     summary: dict[str, dict] = {}
@@ -401,15 +532,14 @@ async def list_contracts(db: AsyncSession = Depends(get_db), user: User = Depend
 async def create_contract(body: ContractCreate, db: AsyncSession = Depends(get_db),
                           user: User = Depends(get_current_user)):
     _require_staff(user)
-    if _is_owner(user):
+    if _is_creator(user):
         if not body.developer_id:
-            raise HTTPException(status_code=422, detail="Choose the developer this contract belongs to")
-        dev = await find_one(db, User, User.id == body.developer_id, User.is_active == True)
-        if not dev or dev.role not in {DEVELOPER_ROLE, *OWNER_ROLES}:
-            raise HTTPException(status_code=422, detail="That developer was not found")
-        developer_id = dev.id
+            raise HTTPException(status_code=422, detail="Choose who this contract is with")
+        developer_id = (await _validate_contractor(db, user, body.developer_id)).id
+    elif user.role == DEVELOPER_ROLE:
+        developer_id = user.id          # a developer can record their own contract
     else:
-        developer_id = user.id          # a developer can only create contracts for themself
+        raise HTTPException(status_code=403, detail="Vendors cannot create contracts — ask the company to set one up")
 
     kind = (body.kind or "project").lower()
     if kind not in KINDS:
@@ -440,17 +570,25 @@ async def create_contract(body: ContractCreate, db: AsyncSession = Depends(get_d
         id=gen_uuid(), title=body.title.strip(), description=body.description,
         client_name=(body.client_name or "").strip() or None, developer_id=developer_id,
         kind=kind, total_amount=total, currency=_currency(body.currency),
+        terms=(body.terms or "").strip() or None, category=_category(body.category),
         instalments=instalments, payments=received, created_by=user.id, **extra)
     await save(db, c)
+    if user.id == developer_id:
+        c.acceptance = _acceptance_record(c, user.name, how="own contract")      # they made it themself
+        await save(db, c)
+    else:
+        await _notify(db, developer_id, "New contract to review",
+                      f"{user.name} set up \"{c.title}\" for you. Open Contracts & Payments to read the terms and accept them.",
+                      "contract_acceptance_requested")
     await _tell_developer_of_pending(db, c, received, user)
-    return {"success": True, "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "data": _serialize(c, await _names(db, [c]), user)}
 
 
 @router.get("/{contract_id}")
 async def get_contract(contract_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
-    return {"success": True, "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "data": _serialize(c, await _names(db, [c]), user)}
 
 
 @router.put("/{contract_id}")
@@ -458,6 +596,8 @@ async def update_contract(contract_id: str, body: ContractUpdate, db: AsyncSessi
                           user: User = Depends(get_current_user)):
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
+    _require_edit(user, c)
+    state_before = _acceptance_state(c)
     paid = calc_contract(c)["paid"]
 
     if body.title is not None:
@@ -473,12 +613,13 @@ async def update_contract(contract_id: str, body: ContractUpdate, db: AsyncSessi
             raise HTTPException(status_code=422, detail="status must be active, completed or cancelled")
         c.status = body.status
     if body.developer_id is not None:
-        if not _is_owner(user):
-            raise HTTPException(status_code=403, detail="Only an admin can change the developer")
-        dev = await find_one(db, User, User.id == body.developer_id, User.is_active == True)
-        if not dev or dev.role not in {DEVELOPER_ROLE, *OWNER_ROLES}:
-            raise HTTPException(status_code=422, detail="That developer was not found")
-        c.developer_id = dev.id
+        if not _is_creator(user):
+            raise HTTPException(status_code=403, detail="Only an admin or manager can change who the contract is with")
+        c.developer_id = (await _validate_contractor(db, user, body.developer_id)).id
+    if body.terms is not None:
+        c.terms = body.terms.strip() or None
+    if body.category is not None:
+        c.category = _category(body.category)
     if (c.kind or "project") == "retainer":
         if body.monthly_amount is not None:
             c.monthly_amount = round(body.monthly_amount, 2)      # re-prices every month of the arrangement
@@ -503,9 +644,50 @@ async def update_contract(contract_id: str, body: ContractUpdate, db: AsyncSessi
             c.instalments = _make_instalments(body.instalments, c.total_amount)
         elif sum(i.get("amount") or 0 for i in (c.instalments or [])) > c.total_amount + 0.01:
             raise HTTPException(status_code=422, detail="The existing instalments add up to more than the new total — edit them too")
+    if user.id == c.developer_id:
+        c.acceptance = _acceptance_record(c, user.name, how="own contract")      # editing their own contract
+    elif state_before == "accepted" and _acceptance_state(c) == "changed":
+        await _notify(db, c.developer_id, "Contract changed — please review",
+                      f"{user.name} changed \"{c.title}\" after you accepted it. Open Contracts & Payments and accept the new terms.",
+                      "contract_acceptance_requested")
     c.updated_at = utcnow()
     await save(db, c)
-    return {"success": True, "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "data": _serialize(c, await _names(db, [c]), user)}
+
+
+@router.post("/{contract_id}/accept")
+async def accept_contract(contract_id: str, body: AcceptIn, request: Request,
+                          db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """The contractor accepts the contract as it stands now by typing their full name."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    _require_developer_of(user, c)
+    if _acceptance_state(c) == "accepted":
+        raise HTTPException(status_code=409, detail="You have already accepted this contract")
+    c.acceptance = _acceptance_record(c, body.typed_name.strip(), ip=_client_ip(request))
+    c.updated_at = utcnow()
+    await save(db, c)
+    if c.created_by and c.created_by != user.id:
+        await _notify(db, c.created_by, "Contract accepted",
+                      f"{user.name} accepted \"{c.title}\" (signed as {body.typed_name.strip()}).", "contract_accepted")
+    return {"success": True, "message": "Contract accepted", "data": _serialize(c, await _names(db, [c]), user)}
+
+
+@router.post("/{contract_id}/decline")
+async def decline_contract(contract_id: str, body: DeclineIn, db: AsyncSession = Depends(get_db),
+                           user: User = Depends(get_current_user)):
+    """The contractor asks for changes instead of accepting. The person who set it up is told why."""
+    _require_staff(user)
+    c = await _get_visible(db, user, contract_id)
+    _require_developer_of(user, c)
+    c.acceptance = {"status": "declined", "decline_reason": body.reason.strip(), "declined_at": utcnow().isoformat(),
+                    "declined_by_name": user.name, "hash": _terms_hash(c)}
+    c.updated_at = utcnow()
+    await save(db, c)
+    if c.created_by and c.created_by != user.id:
+        await _notify(db, c.created_by, "Changes requested on a contract",
+                      f"{user.name} did not accept \"{c.title}\". Reason: {body.reason.strip()}", "contract_declined")
+    return {"success": True, "message": "Changes requested", "data": _serialize(c, await _names(db, [c]), user)}
 
 
 @router.delete("/{contract_id}")
@@ -552,7 +734,7 @@ async def add_payment(contract_id: str, body: PaymentIn, db: AsyncSession = Depe
     await _tell_developer_of_pending(db, c, new, user)
     return {"success": True,
             "message": "Payment recorded" if new[0]["status"] == "confirmed" else "Payment recorded — waiting for the developer to confirm",
-            "data": _serialize(c, await _names(db, [c]))}
+            "data": _serialize(c, await _names(db, [c]), user)}
 
 
 def _find_payment(c: Contract, payment_id: str) -> dict:
@@ -588,7 +770,7 @@ async def confirm_payment(contract_id: str, payment_id: str, db: AsyncSession = 
     await _notify(db, p.get("recorded_by"), "Payment confirmed",
                   f"{user.name} confirmed receiving {format_money(p['amount'], c.currency)} for \"{c.title}\".",
                   "contract_payment_confirmed")
-    return {"success": True, "message": "Payment confirmed", "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "message": "Payment confirmed", "data": _serialize(c, await _names(db, [c]), user)}
 
 
 @router.post("/{contract_id}/payments/{payment_id}/reject")
@@ -609,7 +791,7 @@ async def reject_payment(contract_id: str, payment_id: str, body: RejectIn, db: 
     await _notify(db, p.get("recorded_by"), "Payment not confirmed",
                   f"{user.name} did not confirm {format_money(p['amount'], c.currency)} for \"{c.title}\".{reason}",
                   "contract_payment_rejected")
-    return {"success": True, "message": "Payment rejected", "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "message": "Payment rejected", "data": _serialize(c, await _names(db, [c]), user)}
 
 
 @router.delete("/{contract_id}/payments/{payment_id}")
@@ -631,7 +813,7 @@ async def delete_payment(contract_id: str, payment_id: str, db: AsyncSession = D
         c.status = "active"
     c.updated_at = utcnow()
     await save(db, c)
-    return {"success": True, "message": "Payment removed", "data": _serialize(c, await _names(db, [c]))}
+    return {"success": True, "message": "Payment removed", "data": _serialize(c, await _names(db, [c]), user)}
 
 
 # ── PDFs ──────────────────────────────────────────────────────────────────────
@@ -653,7 +835,7 @@ async def contract_invoice(contract_id: str, db: AsyncSession = Depends(get_db),
     """An invoice for what is still owed (or a paid-in-full statement)."""
     _require_staff(user)
     c = await _get_visible(db, user, contract_id)
-    data = _serialize(c, await _names(db, [c]))
+    data = _serialize(c, await _names(db, [c]), user)
     pdf = contract_pdf.generate_invoice_pdf(data, await _developer_info(db, c))
     safe = "".join(ch if ch.isalnum() else "-" for ch in c.title).strip("-")[:40] or "contract"
     return _pdf(pdf, f"invoice-{safe}.pdf")
@@ -677,6 +859,6 @@ async def payment_receipt(contract_id: str, payment_id: str, db: AsyncSession = 
         if x.get("id") == payment_id:
             break
     balance_after = None if (c.kind or "project") == "retainer" else round(max((c.total_amount or 0) - running, 0), 2)
-    data = _serialize(c, await _names(db, [c]))
+    data = _serialize(c, await _names(db, [c]), user)
     pdf = contract_pdf.generate_receipt_pdf(data, {**p, "status": "confirmed"}, await _developer_info(db, c), balance_after)
     return _pdf(pdf, f"receipt-{payment_id[:8]}.pdf")

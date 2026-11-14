@@ -254,7 +254,7 @@ async def subscription_spend(
                     continue
                 ledger.append({
                     "payment_id": p.get("id"), "subscription_id": c.id, "name": c.title,
-                    "category": "development", "provider": devs.get(c.developer_id),
+                    "category": c.category or "development", "provider": devs.get(c.developer_id),
                     "paid_on": paid_on, "amount": p.get("amount") or 0, "currency": c.currency or "NGN",
                     "ngn_equivalent": None, "source": "contract",
                     "months": None, "period_start": None, "period_end": None,

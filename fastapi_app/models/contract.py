@@ -20,6 +20,13 @@ class Contract(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")            # active | completed | cancelled
     # project  = a fixed price job (total_amount, instalments)
     # retainer = monthly support with no fixed total: monthly_amount due on billing_day each month
+    # what the work is: development | legal | maintenance | design | marketing | other (for spend reports)
+    category: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # scope and conditions agreed in writing; the contractor must accept the contract (see `acceptance`)
+    terms: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # {status: accepted|declined, typed_name, accepted_at, ip, hash, decline_reason, declined_at}
+    # `hash` fingerprints the terms/amounts at that moment, so a later edit makes it need re-accepting
+    acceptance: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     kind: Mapped[str] = mapped_column(String(20), default="project", server_default="project")
     monthly_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     billing_day: Mapped[int | None] = mapped_column(Integer, nullable=True)     # 1-28
