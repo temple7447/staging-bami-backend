@@ -14,7 +14,6 @@ from core.database import get_db
 from core.db_helpers import find_all, find_one, save, count
 from models.base import gen_uuid
 from utils.time_utils import utcnow
-from utils.withdrawal_notices import DELAY_THRESHOLD_DAYS, PAID_STATES, delay_days, send_delay_apology
 
 router = APIRouter(prefix="/withdrawals", tags=["Withdrawals"])
 
@@ -113,7 +112,6 @@ async def update_status(
         raise HTTPException(status_code=404, detail="Withdrawal not found")
 
     new_status = (body.get("status") or w.status or "").lower()
-    prev_status = (w.status or "").lower()
     to_add = [w]
 
     # Rejecting a held request returns the money. Tie the refund to the actual
@@ -145,22 +143,7 @@ async def update_status(
     db.add_all(to_add)
     await db.commit()
     await db.refresh(w)
-
-    # A payout that took 3 days or more earns the user an apology (notification + email), once.
-    # Set "send_apology": false in the request to skip it.
-    apology = None
-    wants_apology = body.get("send_apology", body.get("sendApology", True)) is not False
-    if (wants_apology and new_status in PAID_STATES and prev_status not in PAID_STATES
-            and w.delay_notice_sent_at is None and w.user):
-        days = delay_days(w.created_at, w.reviewed_at)
-        if days is not None and days >= DELAY_THRESHOLD_DAYS:
-            recipient = await db.get(User, w.user)
-            if recipient:
-                apology = await send_delay_apology(db, w, recipient, new_status, w.reviewed_at, days)
-                if apology["notification"] or apology["email"]:
-                    w.delay_notice_sent_at = utcnow()
-                    await save(db, w)
-    return {"success": True, "data": _w(w), "delay_apology": apology}
+    return {"success": True, "data": _w(w)}
 
 
 def _w(w: Withdrawal) -> dict:
@@ -169,5 +152,4 @@ def _w(w: Withdrawal) -> dict:
         "bank_details": w.bank_details, "status": w.status,
         "notes": w.notes, "reviewed_by": w.reviewed_by,
         "reviewed_at": w.reviewed_at, "created_at": w.created_at,
-        "delay_notice_sent_at": w.delay_notice_sent_at,
     }
