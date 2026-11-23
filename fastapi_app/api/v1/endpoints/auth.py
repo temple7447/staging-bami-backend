@@ -20,7 +20,7 @@ from core.security import (
 )
 from core.database import get_db
 from core.db_helpers import find_one, find_all, save
-from core.contact_unique import ensure_unique_contact
+from core.contact_unique import ensure_unique_contact, is_placeholder_email, is_valid_phone, real_email
 from utils.email_service import send_welcome_email, send_password_reset
 from utils.tenant_helpers import generate_temp_password
 from models.base import gen_uuid
@@ -34,7 +34,7 @@ def _user_dict(user: User) -> dict:
     return {
         "id":               user.id,
         "name":             user.name,
-        "email":            user.email,
+        "email":            real_email(user.email) or "",   # empty for phone-only accounts (their login email is made up)
         "role":             user.role,
         "phone":            user.phone,
         "is_active":        user.is_active,
@@ -187,7 +187,24 @@ async def update_details(
     allowed = {"name", "phone", "position", "bio"}
     new_phone = (body.get("phone") or "").strip()
     if new_phone:
+        if not is_valid_phone(new_phone):
+            raise HTTPException(status_code=400, detail="Enter a valid phone number (at least 10 digits).")
         await ensure_unique_contact(db, phone=new_phone, exclude_user_ids=[current_user.id])
+
+    # Adding an email is optional and can be done any time (people who joined with only a phone number).
+    new_email = (body.get("email") or "").strip().lower()
+    if new_email:
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", new_email) or is_placeholder_email(new_email):
+            raise HTTPException(status_code=400, detail="Enter a valid email address.")
+        if new_email != (current_user.email or "").lower():
+            await ensure_unique_contact(db, email=new_email, exclude_user_ids=[current_user.id])
+            current_user.email = new_email
+            # a tenant's own record keeps a copy of the address: keep it in step so receipts and reminders reach it
+            from models.tenant import Tenant
+            for t in await find_all(db, Tenant, Tenant.user == current_user.id, Tenant.is_active == True):
+                t.tenant_email = new_email
+                await save(db, t)
+
     for key, val in body.items():
         if key in allowed:
             setattr(current_user, key, val)
@@ -316,26 +333,47 @@ async def verify_phone_otp(body: dict, db: AsyncSession = Depends(get_db)):
     return {"success": True, **_session_tokens(user), "user": _phone_user_dict(user)}
 
 
+async def _new_reset_code(db: AsyncSession) -> str:
+    """A 6-digit code that no one else is currently holding."""
+    for _ in range(10):
+        code = str(random.randint(100000, 999999))
+        if not await find_one(db, User, User.password_reset_token == code):
+            return code
+    return str(random.randint(100000, 999999))
+
+
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-    user = await find_one(db, User, User.email == body.email)
-    if not user:
-        return {"success": True, "message": "If that email exists, a reset code has been sent"}
-
-    otp = str(random.randint(100000, 999999))
-    user.password_reset_token = otp
-    from datetime import timedelta
-    user.password_reset_expire = utcnow() + timedelta(hours=1)
-    await save(db, user)
-
-    await send_password_reset(user.email, user.name or "User", otp)
-
-    return {"success": True, "message": "Password reset code sent to your email"}
+    """Send a one-time reset code. `email` may hold an email address (the code is emailed) or a
+    phone number (the code is sent by SMS, for people who have no email). The answer is the same
+    whether or not the account exists."""
+    ident = (body.email or "").strip()
+    by_phone = bool(ident) and "@" not in ident
+    for user in (await _login_candidates(db, ident))[:MAX_LOGIN_CANDIDATES]:
+        if not user.is_active:
+            continue
+        code = await _new_reset_code(db)
+        user.password_reset_token = code
+        user.password_reset_expire = utcnow() + timedelta(hours=1)
+        await save(db, user)
+        if by_phone:
+            if sms_service.is_configured():
+                try:
+                    await sms_service.send_reset_code(ident, user.name or "", code)
+                except Exception:  # noqa: BLE001 - never reveal delivery problems to the caller
+                    pass
+        else:
+            await send_password_reset(user.email, user.name or "User", code)
+    return {"success": True, "message": "If that account exists, a reset code has been sent"}
 
 
 @router.post("/reset-password")
 async def reset_password(body: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-    user = await find_one(db, User, User.password_reset_token == body.otp)
+    """Set a new password using the code that was sent. The code only works for the person it
+    was requested for (the email or phone number given here)."""
+    otp = (body.otp or "").strip()
+    candidates = await _login_candidates(db, body.email)
+    user = next((u for u in candidates if u.password_reset_token and secrets.compare_digest(u.password_reset_token, otp)), None)
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired reset token")
     if user.password_reset_expire and user.password_reset_expire < utcnow():

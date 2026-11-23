@@ -62,6 +62,14 @@ async def send_email(
     if not html and not message:
         raise ValueError("Either html or message must be provided")
 
+    # People who signed up with only a phone number have a made-up login email: never send to it.
+    from core.contact_unique import is_placeholder_email
+    recipients = [email] if isinstance(email, str) else list(email)
+    recipients = [r for r in recipients if r and not is_placeholder_email(r)]
+    if not recipients:
+        return {"success": False, "skipped": True, "error": "no real email address"}
+    email = recipients[0] if isinstance(email, str) else recipients
+
     body_html = (html or f"<p>{message}</p>") + _footer_html()
 
     if not is_configured():

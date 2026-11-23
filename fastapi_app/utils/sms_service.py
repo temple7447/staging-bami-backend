@@ -137,6 +137,24 @@ async def send_reminder(phone: str, name: str, amount: float, due_date: str, est
     return await send_sms(phone, msg)
 
 
+async def send_payment_receipt(phone: str, name: str, amount: float, reference: str = "", payment_type: str = "") -> dict:
+    """A short text receipt, for people who have no email address."""
+    what = f" for {payment_type.replace('_', ' ')}" if payment_type else ""
+    ref = f"\nRef: {reference}" if reference else ""
+    msg = f"BamiHost: Hi {name or 'there'}, we have received your payment of {format_currency(amount)}{what}.{ref}\nThank you."
+    return await send_sms(phone, msg)
+
+
+async def send_reset_code(phone: str, name: str, otp: str) -> dict:
+    """The one-time code for resetting a password, by SMS (for people with no email)."""
+    msg = (
+        f"BamiHost password reset\n\n"
+        f"Hi {name or 'there'}, your reset code is {otp}.\n"
+        f"It expires in 1 hour. If you did not ask for this, please ignore this message."
+    )
+    return await send_sms(phone, msg)
+
+
 async def send_credentials(phone: str, name: str, email: str, password: str, estate: str = "") -> dict:
     """Send login credentials (email + temp password) by SMS — mirrors the welcome email."""
     ready_line = f"Your BamiHost Tenant Portal for {estate} is now ready." if estate \

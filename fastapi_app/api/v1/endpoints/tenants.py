@@ -19,7 +19,8 @@ from core.security import get_current_user, hash_password, require_super_admin
 from core.database import get_db
 from core.authz import require_tenant_access, require_estate_access, accessible_estate_ids
 from core.db_helpers import find_one, find_all, save, count, sum_col
-from core.contact_unique import ensure_unique_contact, find_contact_conflict, phone_key
+from core.contact_unique import (ensure_unique_contact, find_contact_conflict, is_placeholder_email, is_valid_phone,
+                                 phone_key, placeholder_email, real_email)
 from core.config import settings
 from utils.tenant_helpers import parse_flexible_date, generate_temp_password, process_tenant, project_next_due_date, estate_config_for, add_months
 from utils.rent_calculator import get_current_rent, calculate_effective_rent, estate_rent_config, resolve_increase_start, current_lease_year_start
@@ -122,8 +123,13 @@ async def create_tenant(
 
     full_name   = (body.tenant_name or "").strip() or " ".join(filter(None, [body.first_name, body.other_names, body.surname])).strip()
     email_addr  = (body.tenant_email or body.email or "").strip()
-    phone       = body.tenant_phone or body.whatsapp or ""
+    phone       = (body.tenant_phone or body.whatsapp or "").strip()
     tenant_type = body.tenant_type or "new"
+
+    # The phone number is how a tenant signs in and is reached; the email is optional.
+    if not is_valid_phone(phone):
+        raise HTTPException(status_code=400,
+                            detail="The tenant's phone number is required (at least 10 digits). Email is optional.")
 
     if email_addr:
         await _reject_active_email_conflict(db, user, email_addr,
@@ -165,27 +171,29 @@ async def create_tenant(
         raw = parsed_entry or today
         effective_next = datetime(raw.year, raw.month, raw.day)
 
+    # Every tenant gets a login. With no email it is created on a made-up address and the tenant
+    # signs in with their phone number (the address is never shown or emailed).
+    login_email = email_addr or placeholder_email(phone)
     user_id, generated_password = None, None
-    if email_addr:
-        existing_user = await find_one(db, User, User.email == email_addr)
-        if existing_user:
-            if existing_user.role != "tenant":
-                raise HTTPException(status_code=400, detail=f"Email registered as {existing_user.role}")
-            user_id = existing_user.id
-            generated_password = generate_temp_password(6)
-            existing_user.password = hash_password(generated_password)
-            existing_user.is_active = True
-            existing_user.phone = phone or existing_user.phone
-            await save(db, existing_user)
-        else:
-            generated_password = generate_temp_password(6)
-            new_user = User(id=gen_uuid(), name=full_name or "Tenant", email=email_addr,
-                            password=hash_password(generated_password), role="tenant",
-                            phone=phone or None, created_by=user.id, email_verified=True)
-            await save(db, new_user)
-            wallet = Wallet(id=gen_uuid(), user_id=new_user.id, balance=0.0, currency="NGN")
-            await save(db, wallet)
-            user_id = new_user.id
+    existing_user = await find_one(db, User, func.lower(User.email) == login_email.lower())
+    if existing_user:
+        if existing_user.role != "tenant":
+            raise HTTPException(status_code=400, detail=f"Email registered as {existing_user.role}")
+        user_id = existing_user.id
+        generated_password = generate_temp_password(6)
+        existing_user.password = hash_password(generated_password)
+        existing_user.is_active = True
+        existing_user.phone = phone or existing_user.phone
+        await save(db, existing_user)
+    else:
+        generated_password = generate_temp_password(6)
+        new_user = User(id=gen_uuid(), name=full_name or "Tenant", email=login_email,
+                        password=hash_password(generated_password), role="tenant",
+                        phone=phone or None, created_by=user.id, email_verified=True)
+        await save(db, new_user)
+        wallet = Wallet(id=gen_uuid(), user_id=new_user.id, balance=0.0, currency="NGN")
+        await save(db, wallet)
+        user_id = new_user.id
 
     # Displace existing tenants in this unit
     displaced = await find_all(db, Tenant, Tenant.estate == estate_id, Tenant.unit_label == unit.label, Tenant.is_active == True)
@@ -235,14 +243,18 @@ async def create_tenant(
             tenant.electric_meter_number = unit_meter.meter_number
             await save(db, tenant)
 
-    if email_addr and generated_password:
-        await send_welcome_email(email_addr, full_name or "Tenant", generated_password, phone=phone)
+    sms_sent = False
+    if generated_password:
+        if email_addr:
+            await send_welcome_email(email_addr, full_name or "Tenant", generated_password, phone=phone)
         if phone and sms_service.is_configured():
-            await sms_service.send_credentials(phone, full_name or "Tenant", email_addr, generated_password,
-                                               estate=estate.name)
+            sms_result = await sms_service.send_credentials(phone, full_name or "Tenant", email_addr or phone,
+                                                            generated_password, estate=estate.name)
+            sms_sent = bool(sms_result.get("success"))
 
     return {"success": True, "message": "Tenant created successfully",
-            "data": {"id": tenant.id, "temp_password": generated_password}}
+            "data": {"id": tenant.id, "temp_password": generated_password,
+                     "login": "email" if email_addr else "phone", "phone": phone, "sms_sent": sms_sent}}
 
 
 class RenewTenantBody(BaseModel):
@@ -821,8 +833,17 @@ async def update_tenant(
             await ensure_unique_contact(db, email=new_email, exclude_user_ids=[tenant.user],
                                         exclude_tenant_ids=[tenant.id])
         tenant.tenant_email = new_email or tenant.tenant_email
+        # A tenant who joined with only a phone number can add an email later: it replaces the made-up login address.
+        if new_email and tenant.user:
+            account = await db.get(User, tenant.user)
+            if account and is_placeholder_email(account.email) and not await find_one(
+                    db, User, func.lower(User.email) == new_email.lower(), User.id != account.id):
+                account.email = new_email
+                await save(db, account)
     if body.tenant_phone or body.whatsapp:
-        new_phone = body.tenant_phone or body.whatsapp
+        new_phone = (body.tenant_phone or body.whatsapp or "").strip()
+        if not is_valid_phone(new_phone):
+            raise HTTPException(status_code=400, detail="Enter a valid phone number (at least 10 digits).")
         if phone_key(new_phone) != phone_key(tenant.tenant_phone):
             await ensure_unique_contact(db, phone=new_phone, exclude_user_ids=[tenant.user],
                                         exclude_tenant_ids=[tenant.id])
@@ -1028,13 +1049,14 @@ async def resend_tenant_credentials(
     account is created/synced so the emailed credentials always work."""
     tenant = await _get_tenant_or_404(db, tenant_id, user, write=True)  # manager+ per property
 
-    email_addr = (tenant.tenant_email or "").strip()
-    if not email_addr:
+    email_addr = real_email(tenant.tenant_email)          # None for a phone-only tenant
+    phone = (tenant.tenant_phone or "").strip()
+    if not email_addr and not is_valid_phone(phone):
         raise HTTPException(status_code=400,
-                            detail="This tenant has no email address. Add one first, then resend credentials.")
+                            detail="This tenant has no phone number or email address. Add a phone number first, then resend credentials.")
+    login_email = email_addr or placeholder_email(phone)
 
     generated_password = generate_temp_password(6)
-    phone = (tenant.tenant_phone or "").strip()
 
     # Find (or create) the login account for this tenant, keeping its email
     # (and phone) in sync with the tenant's current details so the credentials
@@ -1042,12 +1064,12 @@ async def resend_tenant_credentials(
     account = await db.get(User, tenant.user) if tenant.user else None
     if account is None:
         # Fall back to any existing user on this email before creating a new one.
-        account = await find_one(db, User, func.lower(User.email) == email_addr.lower())
+        account = await find_one(db, User, func.lower(User.email) == login_email.lower())
 
     if account:
         if account.role != "tenant":
             raise HTTPException(status_code=400, detail=f"Email registered as {account.role}")
-        if account.email.lower() != email_addr.lower():
+        if email_addr and account.email.lower() != email_addr.lower():
             clash = await find_one(db, User, func.lower(User.email) == email_addr.lower(), User.id != account.id)
             if clash:
                 raise HTTPException(status_code=409, detail="Another account already uses this email.")
@@ -1064,7 +1086,7 @@ async def resend_tenant_credentials(
     else:
         if phone and await find_contact_conflict(db, phone=phone, exclude_tenant_ids=[tenant.id]):
             phone = ""     # someone else's number — create the account without it
-        account = User(id=gen_uuid(), name=tenant.tenant_name or "Tenant", email=email_addr,
+        account = User(id=gen_uuid(), name=tenant.tenant_name or "Tenant", email=login_email,
                        password=hash_password(generated_password), role="tenant",
                        phone=phone or None, created_by=user.id, email_verified=True)
         await save(db, account)
@@ -1076,27 +1098,33 @@ async def resend_tenant_credentials(
 
     history = tenant.history or []
     history.append({"event": "note", "note": "Login credentials re-sent",
-                    "meta": {"email": email_addr}, "created_by": user.id,
+                    "meta": {"email": email_addr, "phone": phone or None}, "created_by": user.id,
                     "created_at": utcnow().isoformat()})
     tenant.history = history
     tenant.updated_by = user.id
     tenant.updated_at = utcnow()
     await save(db, tenant)
 
-    result = await send_welcome_email(email_addr, tenant.tenant_name or "Tenant", generated_password, phone=phone)
-    if not result.get("success"):
-        raise HTTPException(status_code=502,
-                            detail="Credentials reset but the email could not be sent. Please try again.")
-
-    channels = ["email"]
+    channels = []
+    if email_addr:
+        result = await send_welcome_email(email_addr, tenant.tenant_name or "Tenant", generated_password, phone=phone)
+        if not result.get("success"):
+            raise HTTPException(status_code=502,
+                                detail="Credentials reset but the email could not be sent. Please try again.")
+        channels.append("email")
     if phone and sms_service.is_configured():
         estate = await db.get(Estate, tenant.estate) if tenant.estate else None
-        sms_result = await sms_service.send_credentials(phone, tenant.tenant_name or "Tenant", email_addr, generated_password,
-                                                         estate=estate.name if estate else "")
+        sms_result = await sms_service.send_credentials(phone, tenant.tenant_name or "Tenant", email_addr or phone,
+                                                         generated_password, estate=estate.name if estate else "")
         if sms_result.get("success"):
             channels.append("sms")
 
-    return {"success": True, "message": f"Login credentials sent via {', '.join(channels)}", "channels": channels}
+    out = {"success": True, "channels": channels,
+           "message": f"Login credentials sent via {', '.join(channels)}" if channels
+                      else "Login reset. The text message could not be sent, so give the tenant the temporary password yourself."}
+    if not email_addr:
+        out["temp_password"] = generated_password        # a phone-only tenant has no other way to receive it if the SMS fails
+    return out
 
 
 @router.delete("/{tenant_id}")

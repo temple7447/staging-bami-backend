@@ -28,12 +28,14 @@ async def _check_rent_reminders():
         from models.tenant import Tenant
         from core.db_helpers import find_all
         from utils.email_service import send_rent_reminder
+        from utils import sms_service
+        from core.contact_unique import real_email
 
         now = utcnow()
         async with AsyncSessionLocal() as db:
             tenants = await find_all(db, Tenant, Tenant.is_active == True, Tenant.status == "occupied")
 
-            sent = 0
+            sent = texts = 0
             for t in tenants:
                 if not t.next_due_date:
                     continue
@@ -43,16 +45,24 @@ async def _check_rent_reminders():
 
                 due = str(t.next_due_date.date())
 
-                if t.tenant_email:
+                email = real_email(t.tenant_email)
+                if email:
                     await send_rent_reminder(
-                        recipient_email=t.tenant_email,
+                        recipient_email=email,
                         name=t.tenant_name or "",
                         amount=t.rent_amount or 0,
                         due_date=due,
                     )
                     sent += 1
+                elif t.tenant_phone and sms_service.is_configured():
+                    # no email on file: the phone number is how this tenant is reached
+                    res = await sms_service.send_reminder(
+                        phone=t.tenant_phone, name=t.tenant_name or "",
+                        amount=t.rent_amount or 0, due_date=due)
+                    if res.get("success"):
+                        texts += 1
 
-        logger.info("[SCHEDULER] Rent reminders — email: %d", sent)
+        logger.info("[SCHEDULER] Rent reminders — email: %d, text message: %d", sent, texts)
     except Exception as e:
         logger.error("[SCHEDULER] Rent reminder check failed: %s", e)
 
@@ -492,11 +502,17 @@ async def _run_auto_payments():
                          "outstanding_service_charge", "caution_fee", "legal_fee"],
                         12, t.user, source="auto_pay")
                     paid += 1
-                    if t.tenant_email:
+                    from core.contact_unique import real_email
+                    from utils import sms_service
+                    if real_email(t.tenant_email):
                         await send_payment_confirmation(
-                            to_email=t.tenant_email, tenant_name=t.tenant_name or "Tenant",
+                            to_email=real_email(t.tenant_email), tenant_name=t.tenant_name or "Tenant",
                             amount=result["total_paid"], reference=result["reference"],
                             payment_type="auto_pay")
+                    elif t.tenant_phone and sms_service.is_configured():
+                        await sms_service.send_payment_receipt(
+                            t.tenant_phone, t.tenant_name or "Tenant", result["total_paid"],
+                            reference=result["reference"], payment_type="auto pay")
                 except Exception as pe:
                     # Most commonly: insufficient balance. Leave it for reminders.
                     skipped += 1

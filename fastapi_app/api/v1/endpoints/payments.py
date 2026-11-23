@@ -445,15 +445,31 @@ async def send_receipt(pid: str, db: AsyncSession = Depends(get_db), user: User 
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     await _require_payment_access(db, user, payment, write=True)
+    from utils import sms_service
+    from core.contact_unique import real_email
+
     tenant = await find_one(db, Tenant, Tenant.id == payment.tenant)
-    await send_payment_confirmation(
-        to_email=tenant.tenant_email if tenant else "",
-        tenant_name=tenant.tenant_name if tenant else "Tenant",
-        amount=payment.amount,
-        reference=payment.reference or payment.id,
-        payment_type=payment.payment_type,
-    )
-    return {"success": True, "message": "Receipt sent"}
+    email = real_email(tenant.tenant_email) if tenant else None
+    channels = []
+    if email:
+        await send_payment_confirmation(
+            to_email=email,
+            tenant_name=tenant.tenant_name or "Tenant",
+            amount=payment.amount,
+            reference=payment.reference or payment.id,
+            payment_type=payment.payment_type,
+        )
+        channels.append("email")
+    # tenants with no email (or who also gave a phone number) get a text message receipt
+    if tenant and tenant.tenant_phone and sms_service.is_configured():
+        res = await sms_service.send_payment_receipt(
+            tenant.tenant_phone, tenant.tenant_name or "Tenant", payment.amount,
+            reference=payment.reference or payment.id, payment_type=payment.payment_type or "")
+        if res.get("success"):
+            channels.append("sms")
+    if not channels:
+        raise HTTPException(status_code=400, detail="This tenant has no email address or phone number to send a receipt to")
+    return {"success": True, "message": f"Receipt sent via {', '.join(channels)}", "channels": channels}
 
 
 @router.post("/tenant/{tid}/receipt")

@@ -29,12 +29,13 @@ class TokenResponse(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    # An email address or a phone number: people with no email reset by SMS.
+    email: str
 
 
 class ResetPasswordRequest(BaseModel):
     otp:      str
-    email:    EmailStr
+    email:    str          # the email address or phone number the code was requested for
     password: str
 
     @field_validator("password")

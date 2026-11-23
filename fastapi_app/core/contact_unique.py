@@ -31,6 +31,30 @@ def phone_key(raw: str | None) -> str:
     return digits[-10:] if len(digits) >= 10 else digits
 
 
+# A person who signs up with only a phone number still needs a unique login email (the column is
+# NOT NULL UNIQUE). It is a made-up address on a domain nobody owns, and it is never shown or emailed.
+PLACEHOLDER_EMAIL_DOMAINS = ("@phone.bamihost.internal", "@phone.bamiwash.internal")
+
+
+def placeholder_email(phone: str | None) -> str:
+    return f"{phone_key(phone)}@phone.bamihost.internal"
+
+
+def is_placeholder_email(email: str | None) -> bool:
+    return bool(email) and email.strip().lower().endswith(PLACEHOLDER_EMAIL_DOMAINS)
+
+
+def real_email(email: str | None) -> str | None:
+    """The address if it is a real one, else None (empty or a phone-only placeholder)."""
+    e = (email or "").strip()
+    return None if not e or is_placeholder_email(e) else e
+
+
+def is_valid_phone(raw: str | None) -> bool:
+    """A phone number someone could actually be reached on: at least 10 digits."""
+    return len(re.sub(r"\D", "", raw or "")) >= 10
+
+
 def _norm_email(raw: str | None) -> str:
     return (raw or "").strip().lower()
 
