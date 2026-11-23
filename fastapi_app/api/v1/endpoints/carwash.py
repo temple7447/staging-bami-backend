@@ -30,12 +30,14 @@ from core.authz import (
     STATION_ROLES, station_role, has_station_role, require_station_role,
     require_station_access, accessible_station_ids,
 )
+from core.contact_unique import real_email
 from core.db_helpers import find_one, find_all, save, count, sum_col
 from core.contact_unique import ensure_unique_contact
 from core.config import settings
 from models.base import gen_uuid
 from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
+from utils.onboarding import login_identity, deliver_credentials
 from utils.time_utils import utcnow
 from utils import sms_service
 
@@ -311,7 +313,7 @@ async def get_station_overview(
 
 class StaffAssign(BaseModel):
     name: str
-    email: str
+    email: Optional[str] = None
     role: str = "staff"   # staff | admin
     phone: Optional[str] = None
     sendCredentials: bool = True
@@ -336,13 +338,13 @@ async def list_station_staff(
             continue
         u = await db.get(User, m.get("user_id")) if m.get("user_id") else None
         out.append({
-            "userId": m.get("user_id"), "email": (u.email if u else m.get("email")),
+            "userId": m.get("user_id"), "email": (real_email(u.email if u else m.get("email")) or ""),
             "name": (u.name if u else None), "role": m.get("role"),
             "isActive": (u.is_active if u else None),
         })
     return {
         "success": True,
-        "owner": ({"userId": owner.id, "email": owner.email, "name": owner.name, "role": "admin"} if owner else None),
+        "owner": ({"userId": owner.id, "email": real_email(owner.email) or "", "name": owner.name, "role": "admin"} if owner else None),
         "members": out,
     }
 
@@ -365,21 +367,20 @@ async def add_station_staff(
     role = (body.role or "").strip().lower()
     if role not in STATION_ROLES:
         raise HTTPException(status_code=400, detail=f"role must be one of {', '.join(STATION_ROLES)}")
-    email = (body.email or "").strip().lower()
     name = (body.name or "").strip()
-    if not email or not name:
-        raise HTTPException(status_code=400, detail="Name and email are required")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name and phone number are required")
+    email, real_mail, phone = login_identity(body.email, body.phone)
     if station.owner and (owner := await db.get(User, station.owner)) and owner.email.lower() == email:
-        raise HTTPException(status_code=409, detail="This email is already the station owner (admin)")
+        raise HTTPException(status_code=409, detail="This person is already the station owner (admin)")
 
     user = await find_one(db, User, func.lower(User.email) == email)
-    if (body.phone or "").strip():
-        await ensure_unique_contact(db, phone=body.phone, exclude_user_ids=[user.id if user else None])
+    await ensure_unique_contact(db, phone=phone, exclude_user_ids=[user.id if user else None])
     created = False
     password = None
     if not user:
         password = generate_temp_password(6)
-        user = User(id=gen_uuid(), name=name, email=email, phone=(body.phone or None),
+        user = User(id=gen_uuid(), name=name, email=email, phone=phone,
                     password=hash_password(password), role="wash_staff",
                     created_by=actor.id, email_verified=True)
         await save(db, user)
@@ -400,16 +401,15 @@ async def add_station_staff(
     await save(db, station)
 
     credentials_sent = False
+    cred = {}
     if body.sendCredentials and password:
-        try:
-            await send_welcome_email(email, user.name, password)
-            credentials_sent = True
-        except Exception:
-            pass
+        cred = await deliver_credentials(user.name, real_mail, user.phone or phone, password)
+        credentials_sent = bool(cred.get("channels"))
 
     return {"success": True, "message": "Staff assigned",
-            "data": {"userId": user.id, "email": email, "name": user.name,
-                     "role": role, "accountCreated": created, "credentialsSent": credentials_sent}}
+            "data": {"userId": user.id, "email": real_mail or "", "name": user.name,
+                     "role": role, "accountCreated": created, "credentialsSent": credentials_sent,
+                     "login": cred.get("login"), "tempPassword": cred.get("temp_password")}}
 
 
 @router.put("/stations/{station_id}/staff/{user_id}")

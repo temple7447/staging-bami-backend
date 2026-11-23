@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.contact_unique import ensure_unique_contact
+from core.contact_unique import ensure_unique_contact, real_email
+from utils.onboarding import login_identity, deliver_credentials
 from core.database import get_db
 from core.db_helpers import find_all, find_one, save
 from core.security import get_current_user, hash_password
@@ -391,7 +392,7 @@ class ContractUpdate(BaseModel):
 
 class DeveloperCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=255)
-    email: str = Field(..., min_length=5, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
     phone: Optional[str] = None
 
 
@@ -454,7 +455,7 @@ async def list_developers(db: AsyncSession = Depends(get_db), user: User = Depen
         for r in rows:
             counts[r.developer_id] = counts.get(r.developer_id, 0) + 1
     return {"success": True, "data": [
-        {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "contract_count": counts.get(u.id, 0)}
+        {"id": u.id, "name": u.name, "email": real_email(u.email) or "", "role": u.role, "contract_count": counts.get(u.id, 0)}
         for u in users]}
 
 
@@ -464,34 +465,21 @@ async def onboard_developer(body: DeveloperCreate, db: AsyncSession = Depends(ge
     """Create a login for a contractor who can see only the contracts they are paid on."""
     if not _is_creator(user):
         raise HTTPException(status_code=403, detail="Admins and managers only")
-    email = body.email.strip().lower()
-    if "@" not in email:
+    email, real_mail, phone = login_identity(body.email, body.phone)
+    if real_mail and "@" not in real_mail:
         raise HTTPException(status_code=422, detail="Enter a valid email address")
-    await ensure_unique_contact(db, email=email, phone=body.phone)
+    await ensure_unique_contact(db, email=email, phone=phone)
 
     temp_password = secrets.token_urlsafe(9)
     dev = User(id=gen_uuid(), name=body.name.strip(), email=email, password=hash_password(temp_password),
-               role=DEVELOPER_ROLE, phone=(body.phone or None), created_by=user.id, email_verified=True)
+               role=DEVELOPER_ROLE, phone=phone, created_by=user.id, email_verified=True)
     await save(db, dev)
 
-    email_sent = False
-    try:
-        result = await email_service.send_email(
-            email, "You have been added to Bami Host",
-            html=(f"<p>Hello {dev.name},</p>"
-                  f"<p>You have been added to Bami Host as a developer, so you can track your contracts and payments.</p>"
-                  f"<p>Sign in at <a href='{LOGIN_URL}'>{LOGIN_URL}</a><br>"
-                  f"Email: <b>{email}</b><br>Temporary password: <b>{temp_password}</b></p>"
-                  f"<p>Please change your password after you sign in.</p>"),
-            name=dev.name)
-        email_sent = bool(result.get("success"))
-    except Exception:
-        email_sent = False
-
+    cred = await deliver_credentials(dev.name, real_mail, phone, temp_password)
     return {"success": True, "message": "Developer added", "data": {
-        "id": dev.id, "name": dev.name, "email": dev.email,
-        "temp_password": temp_password,      # shown once so it can be passed on if the email did not arrive
-        "email_sent": email_sent}}
+        "id": dev.id, "name": dev.name, "email": real_mail or "", "login": cred["login"],
+        "temp_password": temp_password,      # shown once so it can be passed on if the message did not arrive
+        "email_sent": "email" in cred["channels"], "sms_sent": "sms" in cred["channels"]}}
 
 
 # ── contracts ─────────────────────────────────────────────────────────────────

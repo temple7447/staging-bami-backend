@@ -22,7 +22,9 @@ from core.authz import require_estate_access, has_property_role, property_role, 
 from models.wallet import Wallet
 from utils.tenant_helpers import generate_temp_password
 from utils.email_service import send_welcome_email
+from utils.onboarding import login_identity, deliver_credentials
 from pydantic import BaseModel, Field, ConfigDict
+from core.contact_unique import real_email
 from core.db_helpers import find_all, find_one, save, count, sum_col
 from core.contact_unique import ensure_unique_contact
 from core.config import settings
@@ -262,7 +264,7 @@ def _serialize_lawyer(u: Optional[User]) -> Optional[dict]:
     if not u:
         return None
     return {
-        "id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "id": u.id, "name": u.name, "email": real_email(u.email) or "", "phone": u.phone,
         "businessAddress": u.business_address, "isActive": u.is_active,
     }
 
@@ -602,13 +604,13 @@ async def assign_estate_lawyer(
         lawyer.is_active = True
     else:
         name = (body.name or "").strip()
-        email = (body.email or "").strip().lower()
-        if not name or not email:
-            raise HTTPException(status_code=400, detail="Provide vendorId, or a name and email to add a new lawyer")
+        if not name:
+            raise HTTPException(status_code=400, detail="Provide vendorId, or a name and phone number to add a new lawyer")
+        email, lawyer_mail, _lawyer_phone = login_identity(body.email, body.phone)
 
         existing = await find_one(db, User, func.lower(User.email) == email)
         if existing and existing.role != "vendor":
-            raise HTTPException(status_code=400, detail=f"{email} is already used by a {existing.role} account — use a different email")
+            raise HTTPException(status_code=400, detail=f"That contact is already used by a {existing.role} account — use a different one")
 
         new_phone = (body.phone or "").strip()
         if new_phone:
@@ -641,10 +643,11 @@ async def assign_estate_lawyer(
 
     await _sync_prepared_by_for_estate(db, estate_id, lawyer)
 
+    data = _serialize_lawyer(lawyer)
     if provisioned_password:
-        await send_welcome_email(lawyer.email, lawyer.name, provisioned_password, phone=lawyer.phone or "")
+        data["credentials"] = await deliver_credentials(lawyer.name, lawyer.email, lawyer.phone, provisioned_password)
 
-    return {"success": True, "data": _serialize_lawyer(lawyer)}
+    return {"success": True, "data": data}
 
 
 @router.delete("/{estate_id}/lawyer")
@@ -906,7 +909,7 @@ async def upload_estate_image(
 
 class MemberAssign(BaseModel):
     name: str
-    email: str
+    email: str | None = None
     role: str                      # admin | manager | viewer
     phone: str | None = None
     sendCredentials: bool = True
@@ -924,7 +927,7 @@ async def _serialize_members(db: AsyncSession, estate: Estate) -> list[dict]:
         u = await db.get(User, m.get("user_id")) if m.get("user_id") else None
         out.append({
             "userId": m.get("user_id"),
-            "email": (u.email if u else m.get("email")),
+            "email": (real_email(u.email if u else m.get("email")) or ""),
             "name": (u.name if u else None),
             "role": m.get("role"),
             "isActive": (u.is_active if u else None),
@@ -946,7 +949,7 @@ async def list_estate_members(
     owner = await db.get(User, estate.owner) if estate.owner else None
     return {
         "success": True,
-        "owner": ({"userId": owner.id, "email": owner.email, "name": owner.name, "role": "admin"} if owner else None),
+        "owner": ({"userId": owner.id, "email": real_email(owner.email) or "", "name": owner.name, "role": "admin"} if owner else None),
         "members": await _serialize_members(db, estate),
     }
 
@@ -966,21 +969,20 @@ async def add_estate_member(
     estate = await find_one(db, Estate, Estate.id == estate_id, Estate.is_active == True)
     if not estate:
         raise HTTPException(status_code=404, detail="Estate not found")
-    email = (body.email or "").strip().lower()
     name = (body.name or "").strip()
-    if not email or not name:
-        raise HTTPException(status_code=400, detail="Name and email are required")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name and phone number are required")
+    email, real_mail, phone = login_identity(body.email, body.phone)
     if estate.owner and (owner := await db.get(User, estate.owner)) and owner.email.lower() == email:
-        raise HTTPException(status_code=409, detail="This email is already the property owner (admin)")
+        raise HTTPException(status_code=409, detail="This person is already the property owner (admin)")
 
     user = await find_one(db, User, func.lower(User.email) == email)
-    if (body.phone or "").strip():
-        await ensure_unique_contact(db, phone=body.phone, exclude_user_ids=[user.id if user else None])
+    await ensure_unique_contact(db, phone=phone, exclude_user_ids=[user.id if user else None])
     created = False
     password = None
     if not user:
         password = generate_temp_password(6)
-        user = User(id=gen_uuid(), name=name, email=email, phone=(body.phone or None),
+        user = User(id=gen_uuid(), name=name, email=email, phone=phone,
                     password=hash_password(password), role="manager",
                     assigned_estates=[estate_id], created_by=actor.id, email_verified=True)
         await save(db, user)
@@ -1012,17 +1014,16 @@ async def add_estate_member(
 
     # Email credentials to everyone (new or existing) whenever we issued a password.
     credentials_sent = False
+    cred = {}
     if body.sendCredentials and password:
-        try:
-            await send_welcome_email(email, user.name, password)
-            credentials_sent = True
-        except Exception:
-            pass
+        cred = await deliver_credentials(user.name, real_mail, user.phone or phone, password, estate.name or "")
+        credentials_sent = bool(cred.get("channels"))
 
     return {"success": True, "message": "Member assigned",
-            "data": {"userId": user.id, "email": email, "name": user.name,
+            "data": {"userId": user.id, "email": real_mail or "", "name": user.name,
                      "role": role, "accountCreated": created,
-                     "credentialsSent": credentials_sent}}
+                     "credentialsSent": credentials_sent,
+                     "login": cred.get("login"), "tempPassword": cred.get("temp_password")}}
 
 
 @router.put("/{estate_id}/members/{user_id}")

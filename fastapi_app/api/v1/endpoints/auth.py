@@ -23,6 +23,7 @@ from core.db_helpers import find_one, find_all, save
 from core.contact_unique import ensure_unique_contact, is_placeholder_email, is_valid_phone, real_email
 from utils.email_service import send_welcome_email, send_password_reset
 from utils.tenant_helpers import generate_temp_password
+from utils.onboarding import login_identity, deliver_credentials
 from models.base import gen_uuid
 from utils.time_utils import utcnow
 from utils.delete_otp import verify_delete_otp
@@ -475,7 +476,7 @@ async def _serialize_business_owner(db: AsyncSession, u: User) -> dict:
         if c:
             creator = {"_id": c.id, "name": c.name, "email": c.email}
     return {
-        "_id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "_id": u.id, "name": u.name, "email": real_email(u.email) or "", "phone": u.phone,
         "role": u.role,
         "assignedEstates": [{"_id": e.id, "name": e.name, "totalUnits": e.total_units} for e in estates],
         "isActive": u.is_active, "emailVerified": u.email_verified,
@@ -518,25 +519,26 @@ async def onboard_business_owner(
     estate_ids = body.get("estateIds") or []
     send_creds = body.get("sendCredentials", True)
 
-    if not name or not email or not phone:
-        raise HTTPException(status_code=400, detail="Name, email and phone are required")
-    if await find_one(db, User, func.lower(User.email) == email):
+    if not name:
+        raise HTTPException(status_code=400, detail="Name and phone number are required")
+    login_email, email, phone = login_identity(email, phone)
+    if await find_one(db, User, func.lower(User.email) == login_email):
         raise HTTPException(status_code=400, detail="Email already registered")
     await ensure_unique_contact(db, phone=phone)
 
     password = generate_temp_password(6)
-    owner = User(id=gen_uuid(), name=name, email=email, phone=phone,
+    owner = User(id=gen_uuid(), name=name, email=login_email, phone=phone,
                  password=hash_password(password), role="business_owner",
                  created_by=actor.id, email_verified=True)
     await save(db, owner)
     await save(db, Wallet(id=gen_uuid(), user_id=owner.id, balance=0, currency="NGN"))
     await _assign_owned_estates(db, owner.id, estate_ids, actor.id)
 
+    data = await _serialize_business_owner(db, owner)
     if send_creds:
-        await send_welcome_email(email, name, password, phone=phone)
+        data["credentials"] = await deliver_credentials(name, email, phone, password)
 
-    return {"success": True, "message": "Business owner onboarded successfully",
-            "data": await _serialize_business_owner(db, owner)}
+    return {"success": True, "message": "Business owner onboarded successfully", "data": data}
 
 
 @router.get("/business-owners")
@@ -645,7 +647,7 @@ async def _serialize_manager(db: AsyncSession, u: User) -> dict:
         if c:
             creator = {"_id": c.id, "name": c.name, "email": c.email}
     return {
-        "_id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "_id": u.id, "name": u.name, "email": real_email(u.email) or "", "phone": u.phone,
         "role": u.role,
         "assignedEstates": [{"_id": e.id, "name": e.name, "totalUnits": e.total_units} for e in estates],
         "isActive": u.is_active, "emailVerified": u.email_verified,
@@ -685,25 +687,26 @@ async def onboard_manager(
     estate_ids = await _valid_estate_ids(db, body.get("estateIds") or [])
     send_creds = body.get("sendCredentials", True)
 
-    if not name or not email:
-        raise HTTPException(status_code=400, detail="Name and email are required")
-    if await find_one(db, User, func.lower(User.email) == email):
+    if not name:
+        raise HTTPException(status_code=400, detail="Name and phone number are required")
+    login_email, email, phone = login_identity(email, phone)
+    if await find_one(db, User, func.lower(User.email) == login_email):
         raise HTTPException(status_code=400, detail="Email already registered")
     await ensure_unique_contact(db, phone=phone)
 
     password = generate_temp_password(6)
-    manager = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
+    manager = User(id=gen_uuid(), name=name, email=login_email, phone=phone or None,
                    position=position, assigned_estates=estate_ids,
                    password=hash_password(password), role="manager",
                    created_by=actor.id, email_verified=True)
     await save(db, manager)
     await save(db, Wallet(id=gen_uuid(), user_id=manager.id, balance=0, currency="NGN"))
 
+    data = await _serialize_manager(db, manager)
     if send_creds:
-        await send_welcome_email(email, name, password, phone=phone)
+        data["credentials"] = await deliver_credentials(name, email, phone, password)
 
-    return {"success": True, "message": "Manager onboarded successfully",
-            "data": await _serialize_manager(db, manager)}
+    return {"success": True, "message": "Manager onboarded successfully", "data": data}
 
 
 @router.get("/managers")
@@ -804,7 +807,7 @@ async def _serialize_vendor(db: AsyncSession, u: User) -> dict:
         if c:
             creator = {"_id": c.id, "name": c.name, "email": c.email}
     return {
-        "_id": u.id, "name": u.name, "email": u.email, "phone": u.phone,
+        "_id": u.id, "name": u.name, "email": real_email(u.email) or "", "phone": u.phone,
         "role": u.role, "position": u.position, "managerId": u.manager,
         "businessTypeId": u.business_type_id, "businessName": u.business_name,
         "specialization": u.specialization, "bio": u.bio,
@@ -837,27 +840,28 @@ async def onboard_vendor(
     business_type_id = body.get("businessTypeId") or None
     send_creds = body.get("sendCredentials", True)
 
-    if not name or not email:
-        raise HTTPException(status_code=400, detail="Name and email are required")
-    if await find_one(db, User, func.lower(User.email) == email):
+    if not name:
+        raise HTTPException(status_code=400, detail="Name and phone number are required")
+    login_email, email, phone = login_identity(email, phone)
+    if await find_one(db, User, func.lower(User.email) == login_email):
         raise HTTPException(status_code=400, detail="Email already registered")
     await ensure_unique_contact(db, phone=phone)
     if manager_id and not await find_one(db, User, User.id == manager_id, User.role == "manager"):
         raise HTTPException(status_code=400, detail="Selected manager was not found")
 
     password = generate_temp_password(6)
-    vendor = User(id=gen_uuid(), name=name, email=email, phone=phone or None,
+    vendor = User(id=gen_uuid(), name=name, email=login_email, phone=phone or None,
                   position=position, manager=manager_id, business_type_id=business_type_id,
                   password=hash_password(password), role="vendor",
                   created_by=actor.id, email_verified=True)
     await save(db, vendor)
     await save(db, Wallet(id=gen_uuid(), user_id=vendor.id, balance=0, currency="NGN"))
 
+    data = await _serialize_vendor(db, vendor)
     if send_creds:
-        await send_welcome_email(email, name, password, phone=phone)
+        data["credentials"] = await deliver_credentials(name, email, phone, password)
 
-    return {"success": True, "message": "Vendor onboarded successfully",
-            "data": await _serialize_vendor(db, vendor)}
+    return {"success": True, "message": "Vendor onboarded successfully", "data": data}
 
 
 @router.get("/vendors")
