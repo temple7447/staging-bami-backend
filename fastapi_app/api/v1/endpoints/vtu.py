@@ -34,11 +34,21 @@ from utils.time_utils import utcnow
 
 router = APIRouter(prefix="/vtu", tags=["Airtime & Electricity"])
 
-AIRTIME, ELECTRICITY = "vtu_airtime", "vtu_electricity"
+AIRTIME, ELECTRICITY, DATA = "vtu_airtime", "vtu_electricity", "vtu_data"
 REFUND = "vtu_refund"
 NETWORKS = {"mtn": "MTN", "airtel": "Airtel", "glo": "Glo", "9mobile": "9mobile"}
 
 _cache: dict = {"at": 0.0, "data": None}
+_plans_cache: dict = {}   # network -> (fetched_at, plans)
+
+
+async def _plans(network: str) -> list[dict]:
+    hit = _plans_cache.get(network)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    plans = await quickpin.data_plans(network)
+    _plans_cache[network] = (time.time(), plans)
+    return plans
 
 
 async def _catalog() -> dict:
@@ -115,7 +125,7 @@ def _meta_with(tx: Transaction, **extra) -> str:
 def _order_dict(tx: Transaction) -> dict:
     m = _meta(tx)
     return {
-        "id": tx.id, "kind": "airtime" if tx.type == AIRTIME else "electricity",
+        "id": tx.id, "kind": {AIRTIME: "airtime", DATA: "data"}.get(tx.type, "electricity"),
         "status": {"completed": "completed", "failed": "failed"}.get(tx.status, "pending"),
         "amount": tx.amount, "description": tx.description, "reference": tx.reference,
         "token": m.get("token"), "meter_number": m.get("meter_number"), "phone": m.get("phone"),
@@ -168,6 +178,12 @@ class AirtimeBody(BaseModel):
     phone: str | None = None
 
 
+class DataBody(BaseModel):
+    network: Literal["mtn", "airtel", "glo", "9mobile"]
+    plan: str = Field(..., min_length=1, max_length=30)
+    phone: str | None = None
+
+
 class MeterBody(BaseModel):
     disco: str = Field(..., min_length=2, max_length=60)
     meter_type: Literal["prepaid", "postpaid"]
@@ -201,9 +217,23 @@ async def get_catalog(user: User = Depends(get_current_user)):
         "available": True,
         "airtime": {"available": bool(air.get("available", True)), "min": air.get("min", 100), "max": air.get("max", 10000),
                     "networks": [{"id": n["id"], "name": n["name"]} for n in cat.get("networks", []) if n.get("id") in NETWORKS]},
+        "data": {"available": bool((cat.get("data") or {}).get("available", True))},
         "electricity": {"available": bool(el.get("discos")), "min": el.get("min", 1000), "max": el.get("max", 200000),
                         "service_fee": el.get("service_fee", 0), "discos": el.get("discos", [])},
     }}
+
+
+@router.get("/data/plans")
+async def data_plans(network: Literal["mtn", "airtel", "glo", "9mobile"], user: User = Depends(get_current_user)):
+    if not quickpin.configured():
+        raise _unavailable()
+    try:
+        plans = await _plans(network)
+    except QuickPinError:
+        raise _unavailable()
+    return {"success": True, "data": [
+        {"code": str(p["code"]), "name": p.get("name"), "amount": p.get("amount"), "type": p.get("type")}
+        for p in plans if p.get("code") is not None and p.get("amount")]}
 
 
 @router.post("/electricity/verify")
@@ -268,6 +298,27 @@ async def buy_airtime(body: AirtimeBody, db: AsyncSession = Depends(get_db), use
     )
 
 
+@router.post("/data")
+async def buy_data(body: DataBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    if not quickpin.configured():
+        raise _unavailable()
+    phone = _phone(body.phone, user)
+    try:
+        plans = await _plans(body.network)
+    except QuickPinError:
+        raise _unavailable()
+    # The price always comes from QuickPin's own list, never from the app.
+    plan = next((p for p in plans if str(p.get("code")) == body.plan), None)
+    if not plan or not plan.get("amount"):
+        raise HTTPException(status_code=400, detail="That data plan is no longer available. Please pick another.")
+    return await _place(
+        db, user, kind=DATA, total=float(plan["amount"]),
+        description=f"{NETWORKS[body.network]} {plan.get('name')} for {phone}",
+        meta={"network": body.network, "plan": body.plan, "phone": phone, "units": plan["amount"]},
+        call=lambda ref: quickpin.buy_data(body.network, body.plan, phone, ref),
+    )
+
+
 @router.post("/electricity")
 async def buy_electricity(body: ElectricityBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     if not quickpin.configured():
@@ -301,7 +352,7 @@ async def buy_electricity(body: ElectricityBody, db: AsyncSession = Depends(get_
 
 @router.get("/orders")
 async def my_orders(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = await find_all(db, Transaction, Transaction.user == user.id, Transaction.type.in_([AIRTIME, ELECTRICITY]),
+    rows = await find_all(db, Transaction, Transaction.user == user.id, Transaction.type.in_([AIRTIME, DATA, ELECTRICITY]),
                           order_by=Transaction.created_at.desc(), limit=50)
     for tx in [t for t in rows if t.status == "pending"][:5]:
         await _settle(db, tx)

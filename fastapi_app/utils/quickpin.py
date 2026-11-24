@@ -84,3 +84,12 @@ async def buy_electricity(disco: str, meter_type: str, meter_number: str, amount
 async def order_status(ref: str) -> tuple[int, dict]:
     """200 = delivered, 202 = still processing. A failed order raises QuickPinError(status=422)."""
     return await _call("GET", f"/transactions/{ref}", timeout=20)
+
+
+async def data_plans(network: str) -> list[dict]:
+    return (await _call("GET", f"/data/plans?network={network}", timeout=20))[1].get("plans") or []
+
+
+async def buy_data(network: str, plan: str, phone: str, ref: str) -> tuple[int, dict]:
+    return await _call("POST", "/data", json={
+        "network": network, "plan": plan, "phone": phone, "client_reference": ref})
