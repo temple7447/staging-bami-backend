@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     DEFAULT_COUNTRY_CODE: str = "234"           # Nigeria — for phone normalization
     REMINDER_CHANNEL: str = "whatsapp"          # whatsapp | sms | both
 
+    # QuickPin Nigeria (airtime / electricity resale) — server-side only, never in the app
+    QUICKPIN_API_KEY: str = ""
+    QUICKPIN_BASE_URL: str = "https://www.quickpinnigeria.com/api/v1"
+
     # Tuya IoT (smart meters)
     TUYA_CLIENT_ID: str = ""
     TUYA_CLIENT_SECRET: str = ""
